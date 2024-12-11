@@ -24,33 +24,32 @@ import Select from 'react-select';
 
 interface IPDFormInput {
   name: string;
-  gender: { label: string; value: string } | null;
-  dateOfBirth: Date | null;
+  gender: { label: string; value: string };
+  dateOfBirth: Date;
   age: number;
-  bloodGroup: { label: string; value: string } | null;
-  date: Date | null;
+  bloodGroup: { label: string; value: string };
+  date: Date;
   time: string;
   mobileNumber: string;
   emergencyMobileNumber?: string;
-  membershipType: { label: string; value: string } | null;
-  roomType: { label: string; value: string } | null;
-  bed: { label: string; value: string } | null;
-  doctor: { label: string; value: string } | null;
+  membershipType: { label: string; value: string };
+  roomType: { label: string; value: string };
+  bed: { label: string; value: string };
+  doctor: { label: string; value: string };
   referralDoctor?: string;
-  admissionType: { label: string; value: string } | null;
+  admissionType: { label: string; value: string };
   amount: number;
-  paymentType: { label: string; value: string } | null;
-  paymentMode: { label: string; value: string } | null;
+  paymentType: { label: string; value: string };
+  paymentMode: { label: string; value: string };
 }
 
-// Updated Yup schema without using SchemaOf
 const schema = yup.object({
   name: yup.string().required('Full Name is required'),
   gender: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Gender is required'),
-  dateOfBirth: yup.date().nullable().required('Date of Birth is required'),
+  }).required('Gender is required'),
+  dateOfBirth: yup.date().required('Date of Birth is required'),
   age: yup.number()
     .typeError('Age must be a number')
     .positive('Age must be positive')
@@ -59,37 +58,36 @@ const schema = yup.object({
   bloodGroup: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Blood Group is required'),
-  date: yup.date().nullable().required('Date is required'),
+  }).required('Blood Group is required'),
+  date: yup.date().required('Date is required'),
   time: yup.string().required('Time is required'),
   mobileNumber: yup.string()
     .matches(/^[0-9]{10}$/, 'Mobile number must be 10 digits')
     .required('Mobile Number is required'),
   emergencyMobileNumber: yup.string()
     .matches(/^[0-9]{10}$/, 'Emergency Mobile number must be 10 digits')
-    .notRequired()
-    .nullable(),
+    .notRequired(),
   membershipType: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Membership Type is required'),
+  }).required('Membership Type is required'),
   roomType: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Room Type is required'),
+  }).required('Room Type is required'),
   bed: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Bed selection is required'),
+  }).required('Bed selection is required'),
   doctor: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Doctor selection is required'),
+  }).required('Doctor selection is required'),
   referralDoctor: yup.string().notRequired(),
   admissionType: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Admission Type is required'),
+  }).required('Admission Type is required'),
   amount: yup.number()
     .typeError('Amount must be a number')
     .positive('Amount must be positive')
@@ -97,11 +95,11 @@ const schema = yup.object({
   paymentType: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Payment Type is required'),
+  }).required('Payment Type is required'),
   paymentMode: yup.object({
     label: yup.string().required(),
     value: yup.string().required(),
-  }).nullable().required('Payment Mode is required'),
+  }).required('Payment Mode is required'),
 }).required();
 
 const AdmissionTypes = [
@@ -152,6 +150,16 @@ const PaymentModeOptions = [
   { value: 'online', label: 'Online' },
 ];
 
+function formatAMPM(date: Date): string {
+  let hours = date.getHours();
+  let minutes: string | number = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; 
+  minutes = minutes < 10 ? '0' + minutes : minutes;
+  return `${hours}:${minutes} ${ampm}`;
+}
+
 const IPDBookingPage: React.FC = () => {
   const {
     register,
@@ -166,18 +174,20 @@ const IPDBookingPage: React.FC = () => {
     defaultValues: {
       date: new Date(),
       time: formatAMPM(new Date()),
-      gender: null,
-      bloodGroup: null,
+      gender: { label: 'Male', value: 'male' },
+      bloodGroup: { label: 'A+', value: 'A+' },
       membershipType: { label: 'Regular', value: 'regular' },
-      roomType: null,
-      bed: null,
-      doctor: null,
+      roomType: { label: 'Female Ward (5 Rooms)', value: 'female_ward' },
+      bed: { label: 'Bed 1', value: 'bed_1' },
+      doctor: { label: 'Select Doctor', value: '' },
       admissionType: { label: 'General', value: 'general' },
       age: 0,
-      dateOfBirth: null,
+      dateOfBirth: new Date(),
       amount: 0,
       paymentType: { label: 'Deposit', value: 'deposit' },
       paymentMode: { label: 'Cash', value: 'cash' },
+      mobileNumber: '',
+      referralDoctor: '',
     },
   });
 
@@ -187,7 +197,6 @@ const IPDBookingPage: React.FC = () => {
   const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
   const [selectedRoomType, setSelectedRoomType] = useState<{ label: string; value: string } | null>(null);
 
-  // Fetch doctors
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
@@ -206,7 +215,6 @@ const IPDBookingPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch beds based on room type
   useEffect(() => {
     if (selectedRoomType) {
       const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
@@ -219,29 +227,24 @@ const IPDBookingPage: React.FC = () => {
               label: `Bed ${data[key].bedNumber}`,
               value: key,
             }));
-
           setBeds(bedsList);
-
-          // Auto-select first available bed
           if (bedsList.length > 0) {
             setValue('bed', bedsList[0]);
           } else {
-            setValue('bed', null);
+            setValue('bed', { label: 'No Bed', value: '' });
           }
         } else {
           setBeds([]);
-          setValue('bed', null);
+          setValue('bed', { label: 'No Bed', value: '' });
         }
       });
-
       return () => unsubscribe();
     } else {
       setBeds([]);
-      setValue('bed', null);
+      setValue('bed', { label: 'No Bed', value: '' });
     }
   }, [selectedRoomType, setValue]);
 
-  // Calculate age from dateOfBirth
   const dateOfBirth = watch('dateOfBirth');
 
   useEffect(() => {
@@ -260,32 +263,31 @@ const IPDBookingPage: React.FC = () => {
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true);
     try {
-      // Mark bed as occupied
       if (data.bed && data.bed.value) {
-        const bedRef = ref(db, `beds/${data.roomType?.value}/${data.bed.value}`);
+        const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
         await update(bedRef, { status: "Occupied" });
       }
 
       const admissionData = {
         name: data.name,
-        gender: data.gender?.value || '',
-        dateOfBirth: data.dateOfBirth ? data.dateOfBirth.toISOString() : '',
+        gender: data.gender.value,
+        dateOfBirth: data.dateOfBirth.toISOString(),
         age: data.age,
-        bloodGroup: data.bloodGroup?.value || '',
-        date: data.date ? data.date.toISOString() : '',
+        bloodGroup: data.bloodGroup.value,
+        date: data.date.toISOString(),
         time: data.time,
         mobileNumber: data.mobileNumber,
         emergencyMobileNumber: data.emergencyMobileNumber || '',
-        membershipType: data.membershipType?.value || '',
-        roomType: data.roomType?.value || '',
-        bed: data.bed?.value || '',
-        doctor: data.doctor?.value || '',
+        membershipType: data.membershipType.value,
+        roomType: data.roomType.value,
+        bed: data.bed.value,
+        doctor: data.doctor.value,
         referralDoctor: data.referralDoctor || '',
-        admissionType: data.admissionType?.value || '',
+        admissionType: data.admissionType.value,
         amount: data.amount,
-        paymentType: data.paymentType?.value || 'deposit', // Default to 'deposit'
-        paymentMode: data.paymentMode?.value || 'cash', // Default to 'cash'
-        totalPaid: data.paymentType?.value === 'deposit' ? data.amount : 0,
+        paymentType: data.paymentType.value,
+        paymentMode: data.paymentMode.value,
+        totalPaid: data.paymentType.value === 'deposit' ? data.amount : 0,
         serviceAmount: 0,
         dischargeDate: '',
         createdAt: new Date().toISOString(),
@@ -303,18 +305,20 @@ const IPDBookingPage: React.FC = () => {
       reset({
         date: new Date(),
         time: formatAMPM(new Date()),
-        gender: null,
-        bloodGroup: null,
+        gender: { label: 'Male', value: 'male' },
+        bloodGroup: { label: 'A+', value: 'A+' },
         membershipType: { label: 'Regular', value: 'regular' },
-        roomType: null,
-        bed: null,
-        doctor: null,
+        roomType: { label: 'Female Ward (5 Rooms)', value: 'female_ward' },
+        bed: { label: 'Bed 1', value: 'bed_1' },
+        doctor: { label: 'Select Doctor', value: '' },
         admissionType: { label: 'General', value: 'general' },
         age: 0,
-        dateOfBirth: null,
+        dateOfBirth: new Date(),
         amount: 0,
-        paymentType: { label: 'Deposit', value: 'deposit' }, // Reset to 'deposit'
-        paymentMode: { label: 'Cash', value: 'cash' }, // Reset to 'cash'
+        paymentType: { label: 'Deposit', value: 'deposit' },
+        paymentMode: { label: 'Cash', value: 'cash' },
+        mobileNumber: '',
+        referralDoctor: '',
       });
       setPreviewData(null);
     } catch (error) {
@@ -327,16 +331,6 @@ const IPDBookingPage: React.FC = () => {
       setLoading(false);
     }
   };
-
-  function formatAMPM(date: Date): string {
-    let hours = date.getHours();
-    let minutes: string | number = date.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; 
-    minutes = minutes < 10 ? '0' + minutes : minutes;
-    return `${hours}:${minutes} ${ampm}`;
-  }
 
   const handlePreview = () => {
     setPreviewData(watch());
@@ -356,7 +350,6 @@ const IPDBookingPage: React.FC = () => {
         <div className="w-full max-w-5xl bg-white rounded-3xl shadow-xl p-10">
           <h2 className="text-3xl font-bold text-center text-pink-600 mb-8">IPD Admission Form</h2>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Full Name Field */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -370,7 +363,6 @@ const IPDBookingPage: React.FC = () => {
               {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
             </div>
 
-            {/* Gender Field */}
             <div>
               <label className="block text-gray-700 mb-2">Gender</label>
               <Controller
@@ -384,13 +376,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.gender ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.gender && <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>}
             </div>
 
-            {/* Date of Birth and Age */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="relative">
                 <AiOutlineCalendar className="absolute top-3 left-3 text-gray-400" />
@@ -400,7 +392,9 @@ const IPDBookingPage: React.FC = () => {
                   render={({ field }) => (
                     <DatePicker
                       selected={field.value}
-                      onChange={(date: Date | null) => date && field.onChange(date)}
+                      onChange={(date: Date | null) => {
+                        if (date) field.onChange(date);
+                      }}
                       dateFormat="dd/MM/yyyy"
                       placeholderText="Select Date of Birth"
                       className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
@@ -431,7 +425,6 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Blood Group Field */}
             <div>
               <label className="block text-gray-700 mb-2">Blood Group</label>
               <Controller
@@ -445,13 +438,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.bloodGroup ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.bloodGroup && <p className="text-red-500 text-sm mt-1">{errors.bloodGroup.message}</p>}
             </div>
 
-            {/* Date and Time */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="relative">
                 <AiOutlineCalendar className="absolute top-3 left-3 text-gray-400" />
@@ -461,7 +454,9 @@ const IPDBookingPage: React.FC = () => {
                   render={({ field }) => (
                     <DatePicker
                       selected={field.value}
-                      onChange={(date: Date | null) => date && field.onChange(date)}
+                      onChange={(date: Date | null) => {
+                        if (date) field.onChange(date);
+                      }}
                       dateFormat="dd/MM/yyyy"
                       placeholderText="Select Date"
                       className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
@@ -489,7 +484,6 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Mobile Number Field */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -503,7 +497,6 @@ const IPDBookingPage: React.FC = () => {
               {errors.mobileNumber && <p className="text-red-500 text-sm mt-1">{errors.mobileNumber.message}</p>}
             </div>
 
-            {/* Emergency Mobile Number Field */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -517,7 +510,6 @@ const IPDBookingPage: React.FC = () => {
               {errors.emergencyMobileNumber && <p className="text-red-500 text-sm mt-1">{errors.emergencyMobileNumber.message}</p>}
             </div>
 
-            {/* Membership Type Field */}
             <div>
               <label className="block text-gray-700 mb-2">Membership Type</label>
               <Controller
@@ -531,13 +523,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.membershipType ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.membershipType && <p className="text-red-500 text-sm mt-1">{errors.membershipType.message}</p>}
             </div>
 
-            {/* Room Type and Bed Selection */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-gray-700 mb-2">Room Type</label>
@@ -554,8 +546,8 @@ const IPDBookingPage: React.FC = () => {
                       onChange={(value) => {
                         field.onChange(value);
                         setSelectedRoomType(value);
-                        setValue('bed', null); 
                       }}
+                      value={field.value}
                     />
                   )}
                 />
@@ -576,6 +568,7 @@ const IPDBookingPage: React.FC = () => {
                       className={`${errors.bed ? 'border-red-500' : 'border-gray-300'}`}
                       isDisabled={!selectedRoomType || beds.length === 0}
                       onChange={(value) => field.onChange(value)}
+                      value={field.value}
                     />
                   )}
                 />
@@ -583,7 +576,6 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Doctor Selection Field */}
             <div>
               <label className="block text-gray-700 mb-2">Under Care of Doctor</label>
               <Controller
@@ -597,13 +589,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.doctor && <p className="text-red-500 text-sm mt-1">{errors.doctor.message}</p>}
             </div>
 
-            {/* Referral Doctor Field */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -617,7 +609,6 @@ const IPDBookingPage: React.FC = () => {
               {errors.referralDoctor && <p className="text-red-500 text-sm mt-1">{errors.referralDoctor.message}</p>}
             </div>
 
-            {/* Admission Type Field */}
             <div>
               <label className="block text-gray-700 mb-2">Admission Type</label>
               <Controller
@@ -631,13 +622,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.admissionType ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.admissionType && <p className="text-red-500 text-sm mt-1">{errors.admissionType.message}</p>}
             </div>
 
-            {/* Amount Field */}
             <div className="relative">
               <AiOutlineInfoCircle className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -651,7 +642,6 @@ const IPDBookingPage: React.FC = () => {
               {errors.amount && <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>}
             </div>
 
-            {/* Payment Type Field */}
             <div>
               <label className="block text-gray-700 mb-2">Payment Type</label>
               <Controller
@@ -665,13 +655,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.paymentType ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.paymentType && <p className="text-red-500 text-sm mt-1">{errors.paymentType.message}</p>}
             </div>
 
-            {/* Payment Mode Field */}
             <div>
               <label className="block text-gray-700 mb-2">Payment Mode</label>
               <Controller
@@ -685,13 +675,13 @@ const IPDBookingPage: React.FC = () => {
                     classNamePrefix="react-select"
                     className={`${errors.paymentMode ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value}
                   />
                 )}
               />
               {errors.paymentMode && <p className="text-red-500 text-sm mt-1">{errors.paymentMode.message}</p>}
             </div>
 
-            {/* Preview Button */}
             <button
               type="button"
               onClick={handlePreview}
@@ -700,30 +690,29 @@ const IPDBookingPage: React.FC = () => {
               Preview
             </button>
 
-            {/* Preview Modal */}
             {previewData && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
                   <h3 className="text-2xl font-semibold mb-4">Preview IPD Admission</h3>
                   <div className="space-y-2">
                     <p><strong>Full Name:</strong> {previewData.name}</p>
-                    <p><strong>Gender:</strong> {previewData.gender?.label}</p>
-                    <p><strong>Date of Birth:</strong> {previewData.dateOfBirth?.toLocaleDateString()}</p>
+                    <p><strong>Gender:</strong> {previewData.gender.label}</p>
+                    <p><strong>Date of Birth:</strong> {previewData.dateOfBirth.toLocaleDateString()}</p>
                     <p><strong>Age:</strong> {previewData.age}</p>
-                    <p><strong>Blood Group:</strong> {previewData.bloodGroup?.label}</p>
-                    <p><strong>Date:</strong> {previewData.date?.toLocaleDateString()}</p>
+                    <p><strong>Blood Group:</strong> {previewData.bloodGroup.label}</p>
+                    <p><strong>Date:</strong> {previewData.date.toLocaleDateString()}</p>
                     <p><strong>Time:</strong> {previewData.time}</p>
                     <p><strong>Mobile Number:</strong> {previewData.mobileNumber}</p>
                     {previewData.emergencyMobileNumber && <p><strong>Emergency Mobile Number:</strong> {previewData.emergencyMobileNumber}</p>}
-                    <p><strong>Membership Type:</strong> {previewData.membershipType?.label}</p>
-                    <p><strong>Room Type:</strong> {previewData.roomType?.label}</p>
-                    <p><strong>Bed:</strong> {previewData.bed?.label}</p>
-                    <p><strong>Under Care of Doctor:</strong> {previewData.doctor?.label}</p>
+                    <p><strong>Membership Type:</strong> {previewData.membershipType.label}</p>
+                    <p><strong>Room Type:</strong> {previewData.roomType.label}</p>
+                    <p><strong>Bed:</strong> {previewData.bed.label}</p>
+                    <p><strong>Under Care of Doctor:</strong> {previewData.doctor.label}</p>
                     {previewData.referralDoctor && <p><strong>Referral Doctor:</strong> {previewData.referralDoctor}</p>}
-                    <p><strong>Admission Type:</strong> {previewData.admissionType?.label}</p>
+                    <p><strong>Admission Type:</strong> {previewData.admissionType.label}</p>
                     <p><strong>Amount (Services):</strong> Rs. {previewData.amount}</p>
-                    <p><strong>Payment Type:</strong> {previewData.paymentType?.label}</p>
-                    <p><strong>Payment Mode:</strong> {previewData.paymentMode?.label}</p>
+                    <p><strong>Payment Type:</strong> {previewData.paymentType.label}</p>
+                    <p><strong>Payment Mode:</strong> {previewData.paymentMode.label}</p>
                   </div>
                   <div className="mt-6 flex justify-end space-x-4">
                     <button
@@ -747,7 +736,6 @@ const IPDBookingPage: React.FC = () => {
               </div>
             )}
 
-            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}

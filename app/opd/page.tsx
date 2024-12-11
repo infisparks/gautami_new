@@ -3,7 +3,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useForm, SubmitHandler, Controller, FieldValues } from 'react-hook-form';
+import { useForm, SubmitHandler, Controller} from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import { db } from '../../lib/firebase';
@@ -17,8 +17,7 @@ import {
   AiOutlineClockCircle, 
   AiOutlineMessage, 
   AiOutlineDollarCircle, 
-  AiOutlineInfoCircle,
-  AiOutlineSearch 
+  AiOutlineInfoCircle
 } from 'react-icons/ai';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -75,7 +74,7 @@ const OPDBookingPage: React.FC = () => {
     watch,
     setValue,
   } = useForm<IFormInput>({
-    resolver: yupResolver(schema),
+    // resolver: yupResolver(schema),
     defaultValues: {
       date: new Date(),
       time: formatAMPM(new Date()),
@@ -91,7 +90,7 @@ const OPDBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  const [amountFetched, setAmountFetched] = useState<number>(0);
+  // const [amountFetched, setAmountFetched] = useState<number>(0);
 
   // Fetch doctors from Firebase
   useEffect(() => {
@@ -121,13 +120,13 @@ const OPDBookingPage: React.FC = () => {
     if (selectedDoctor) {
       if (selectedDoctor.value === 'no_doctor') {
         setValue('amount', 0);
-        setAmountFetched(0);
+        // setAmountFetched(0);
       } else {
         fetchDoctorAmount(selectedDoctor.value);
       }
     } else {
       setValue('amount', 0);
-      setAmountFetched(0);
+      // setAmountFetched(0);
     }
   }, [selectedDoctor, setValue]);
 
@@ -137,15 +136,15 @@ const OPDBookingPage: React.FC = () => {
       const snapshot = await get(doctorRef);
       if (snapshot.exists()) {
         const data = snapshot.val();
-        setAmountFetched(data.amount);
+        // setAmountFetched(data.amount);
         setValue('amount', data.amount);
       } else {
-        setAmountFetched(0);
+        // setAmountFetched(0);
         setValue('amount', 0);
       }
     } catch (error) {
       console.error('Error fetching doctor amount:', error);
-      setAmountFetched(0);
+      // setAmountFetched(0);
       setValue('amount', 0);
     }
   };
