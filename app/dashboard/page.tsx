@@ -17,9 +17,7 @@ import {
 } from 'chart.js';
 import {
   AiOutlineUser,
- 
   AiOutlineCalendar,
-
   AiOutlineFileText,
   AiOutlineSearch,
 } from 'react-icons/ai';
@@ -27,28 +25,55 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import debounce from 'lodash/debounce';
 import ProtectedRoute from './../../components/ProtectedRoute';
+import { Dialog } from '@headlessui/react';
 
 // Register Chart.js components
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
-interface Appointment {
+interface OPDAppointment {
   id: string;
   name: string;
-  email: string;
   phone: string;
   date: string; // ISO string
   time: string;
   doctor: string;
-  symptoms: string;
-  age: number;
-  gender: string;
-  address: string;
-  preferredLanguage: string;
-  appointmentType: string;
-  insurance: string;
-  priority: string;
-  attachments: string[]; // File names
+  appointmentType: 'OPD';
+  amount: number;
 }
+
+interface IPDService {
+  amount: number;
+  createdAt: string;
+  serviceName: string;
+  status: string;
+}
+
+interface IPDAppointment {
+  id: string;
+  name: string;
+  phone: string;
+  date: string; // ISO string
+  time: string;
+  doctor: string;
+  appointmentType: 'IPD';
+  admissionType: string;
+  age: number;
+  bloodGroup: string;
+  dateOfBirth: string;
+  dischargeDate: string;
+  emergencyMobileNumber: string;
+  gender: string;
+  membershipType: string;
+  mobileNumber: string;
+  paymentMode: string;
+  paymentType: string;
+  referralDoctor: string;
+  roomType: string;
+  serviceAmount: number;
+  services: IPDService[];
+}
+
+type Appointment = OPDAppointment | IPDAppointment;
 
 const DashboardPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -56,88 +81,152 @@ const DashboardPage: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isTodayFilter, setIsTodayFilter] = useState<boolean>(false);
-  const [monthsData, setMonthsData] = useState<{ [key: string]: number }>({});
+  const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
+  const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
+  const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
+  const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [selectedIPDAppointment, setSelectedIPDAppointment] = useState<IPDAppointment | null>(null);
 
   useEffect(() => {
-    const appointmentsRef = ref(db, 'bookings');
-    onValue(appointmentsRef, (snapshot) => {
+    const bookingsRef = ref(db, 'bookings');
+    const ipdBookingsRef = ref(db, 'ipd_bookings');
+
+    const handleBookings = (snapshot: any) => {
       const data = snapshot.val();
-
-      if (data) {
-        // Explicitly define the expected type for Firebase data
-        const dataTyped = data as Record<string, Omit<Appointment, 'id'>>;
-
-        const appointmentsArray: Appointment[] = Object.entries(dataTyped).map(
-          ([id, value]) => ({
+      const opdAppointments: OPDAppointment[] = data
+        ? Object.entries(data).map(([id, value]: [string, any]) => ({
             id,
             name: value.name,
-            email: value.email,
             phone: value.phone,
             date: value.date,
             time: value.time,
             doctor: value.doctor,
-            symptoms: value.symptoms,
-            age: value.age,
-            gender: value.gender,
-            address: value.address,
-            preferredLanguage: value.preferredLanguage,
-            appointmentType: value.appointmentType,
-            insurance: value.insurance,
-            priority: value.priority,
-            attachments: value.attachments || [],
-          })
-        );
+            appointmentType: 'OPD',
+            amount: value.amount || 0,
+          }))
+        : [];
+      return opdAppointments;
+    };
 
-        setAppointments(appointmentsArray);
-        setFilteredAppointments(appointmentsArray);
-        generateMonthsData(appointmentsArray);
-      } else {
-        setAppointments([]);
-        setFilteredAppointments([]);
-        setMonthsData({});
-      }
+    const handleIPDBookings = (snapshot: any) => {
+      const data = snapshot.val();
+      const ipdAppointments: IPDAppointment[] = data
+        ? Object.entries(data).map(([id, value]: [string, any]) => ({
+            id,
+            name: value.name,
+            phone: value.mobileNumber || value.emergencyMobileNumber || '',
+            date: value.date,
+            time: value.time,
+            doctor: value.doctor,
+            appointmentType: 'IPD',
+            admissionType: value.admissionType,
+            age: value.age,
+            bloodGroup: value.bloodGroup,
+            dateOfBirth: value.dateOfBirth,
+            dischargeDate: value.dischargeDate,
+            emergencyMobileNumber: value.emergencyMobileNumber,
+            gender: value.gender,
+            membershipType: value.membershipType,
+            mobileNumber: value.mobileNumber,
+            paymentMode: value.paymentMode,
+            paymentType: value.paymentType,
+            referralDoctor: value.referralDoctor,
+            roomType: value.roomType,
+            serviceAmount: value.serviceAmount || 0,
+            services: Array.isArray(value.services) ? value.services : [],
+          }))
+        : [];
+      return ipdAppointments;
+    };
+
+    const unsubscribeBookings = onValue(bookingsRef, (snapshot) => {
+      const opdAppointments = handleBookings(snapshot);
+      onValue(ipdBookingsRef, (ipdSnapshot) => {
+        const ipdAppointments = handleIPDBookings(ipdSnapshot);
+        const allAppointments: Appointment[] = [...opdAppointments, ...ipdAppointments];
+        setAppointments(allAppointments);
+        setFilteredAppointments(allAppointments);
+        generateMonthsData(allAppointments);
+        calculateTotalAmount(allAppointments);
+      });
     });
+
+    return () => {
+      unsubscribeBookings();
+    };
   }, []);
 
   const generateMonthsData = (appointments: Appointment[]) => {
-    const data: { [key: string]: number } = {};
+    const dataOPD: { [key: string]: number } = {};
+    const dataIPD: { [key: string]: number } = {};
+
     appointments.forEach((appointment) => {
       const month = format(parseISO(appointment.date), 'MMMM');
-      if (data[month]) {
-        data[month] += 1;
-      } else {
-        data[month] = 1;
+      if (appointment.appointmentType === 'OPD') {
+        dataOPD[month] = (dataOPD[month] || 0) + 1;
+      } else if (appointment.appointmentType === 'IPD') {
+        dataIPD[month] = (dataIPD[month] || 0) + 1;
       }
     });
-    setMonthsData(data);
+
+    setMonthsDataOPD(dataOPD);
+    setMonthsDataIPD(dataIPD);
+  };
+
+  const calculateTotalAmount = (appointments: Appointment[]) => {
+    let totalOPD = 0;
+    let totalIPD = 0;
+
+    appointments.forEach((appointment) => {
+      if (appointment.appointmentType === 'OPD') {
+        totalOPD += appointment.amount;
+      } else if (appointment.appointmentType === 'IPD') {
+        const ipdApp = appointment as IPDAppointment;
+        totalIPD += ipdApp.serviceAmount + ipdApp.services.reduce((acc, service) => acc + service.amount, 0);
+      }
+    });
+
+    setTotalAmountOPD(totalOPD);
+    setTotalAmountIPD(totalIPD);
   };
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = e.target.value;
     setSelectedMonth(month);
-    setIsTodayFilter(false); // Reset today filter when changing month
-    applyFilters(searchQuery, month, false);
+    setIsTodayFilter(false);
+    setSelectedDate('');
+    applyFilters(searchQuery, month, false, '');
   };
 
   const handleTodayFilter = () => {
     setIsTodayFilter(true);
-    setSelectedMonth('All'); // Reset month filter when applying today filter
-    applyFilters(searchQuery, 'All', true);
+    setSelectedMonth('All');
+    setSelectedDate('');
+    applyFilters(searchQuery, 'All', true, '');
+  };
+
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const date = e.target.value;
+    setSelectedDate(date);
+    setIsTodayFilter(false);
+    setSelectedMonth('All');
+    applyFilters(searchQuery, 'All', false, date);
   };
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
-    applyFilters(query, selectedMonth, isTodayFilter);
+    applyFilters(query, selectedMonth, isTodayFilter, selectedDate);
   };
 
-  // Debounce the search input to optimize performance
   const debouncedSearch = useMemo(
     () => debounce(handleSearchChange, 300),
-    [selectedMonth, isTodayFilter]
+    [selectedMonth, isTodayFilter, selectedDate]
   );
 
-  const applyFilters = (query: string, month: string, today: boolean) => {
+  const applyFilters = (query: string, month: string, today: boolean, date: string) => {
     let tempAppointments = [...appointments];
 
     // Apply search filter
@@ -146,7 +235,6 @@ const DashboardPage: React.FC = () => {
       tempAppointments = tempAppointments.filter(
         (appointment) =>
           appointment.name.toLowerCase().includes(lowerQuery) ||
-          appointment.email.toLowerCase().includes(lowerQuery) ||
           appointment.phone.includes(query)
       );
     }
@@ -166,21 +254,28 @@ const DashboardPage: React.FC = () => {
       );
     }
 
+    // Apply specific date filter
+    if (date) {
+      tempAppointments = tempAppointments.filter(
+        (appointment) => format(parseISO(appointment.date), 'yyyy-MM-dd') === date
+      );
+    }
+
     setFilteredAppointments(tempAppointments);
     generateMonthsData(tempAppointments);
+    calculateTotalAmount(tempAppointments);
   };
 
   const todayAppointments = appointments.filter((appointment) =>
     isToday(parseISO(appointment.date))
   );
 
-  // Prepare data for the bar chart
-  const chartData = {
-    labels: Object.keys(monthsData),
+  const chartDataOPD = {
+    labels: Object.keys(monthsDataOPD),
     datasets: [
       {
-        label: 'Number of Appointments',
-        data: Object.values(monthsData),
+        label: 'Number of OPD Appointments',
+        data: Object.values(monthsDataOPD),
         backgroundColor: 'rgba(79, 70, 229, 0.6)',
         borderColor: 'rgba(79, 70, 229, 1)',
         borderWidth: 1,
@@ -188,18 +283,41 @@ const DashboardPage: React.FC = () => {
     ],
   };
 
+  const chartDataIPD = {
+    labels: Object.keys(monthsDataIPD),
+    datasets: [
+      {
+        label: 'Number of IPD Appointments',
+        data: Object.values(monthsDataIPD),
+        backgroundColor: 'rgba(229, 115, 115, 0.6)',
+        borderColor: 'rgba(229, 115, 115, 1)',
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const openModal = (appointment: IPDAppointment) => {
+    setSelectedIPDAppointment(appointment);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setSelectedIPDAppointment(null);
+    setIsModalOpen(false);
+  };
+
   return (
     <>
       <Head>
-        <title>Dashboard - Hospital OPD Booking</title>
-        <meta name="description" content="View and manage all OPD appointments" />
+        <title>Dashboard - Hospital Appointments</title>
+        <meta name="description" content="View and manage all OPD and IPD appointments" />
       </Head>
 
       <ToastContainer />
 
       <main className="min-h-screen bg-gray-100 p-6">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold text-indigo-600 mb-6 text-center">OPD Appointments Dashboard</h1>
+          <h1 className="text-4xl font-bold text-indigo-600 mb-6 text-center">Appointments Dashboard</h1>
 
           {/* Search and Filter Section */}
           <div className="flex flex-col md:flex-row justify-between items-center mb-6 space-y-4 md:space-y-0">
@@ -208,7 +326,7 @@ const DashboardPage: React.FC = () => {
               <AiOutlineSearch className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search by Name, Email, or Phone"
+                placeholder="Search by Name or Phone"
                 onChange={debouncedSearch}
                 className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200"
               />
@@ -220,12 +338,14 @@ const DashboardPage: React.FC = () => {
                 onClick={() => {
                   setIsTodayFilter(false);
                   setSelectedMonth('All');
+                  setSelectedDate('');
                   setSearchQuery('');
                   setFilteredAppointments(appointments);
                   generateMonthsData(appointments);
+                  calculateTotalAmount(appointments);
                 }}
                 className={`px-4 py-2 rounded-lg border ${
-                  !isTodayFilter && selectedMonth === 'All'
+                  !isTodayFilter && selectedMonth === 'All' && !selectedDate
                     ? 'bg-indigo-600 text-white'
                     : 'bg-white text-indigo-600'
                 } focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200`}
@@ -240,6 +360,22 @@ const DashboardPage: React.FC = () => {
               >
                 Today’s Appointments
               </button>
+            </div>
+          </div>
+
+          {/* Date Picker */}
+          <div className="flex justify-end mb-6">
+            <div className="w-1/3">
+              <label htmlFor="date" className="block text-gray-700 font-semibold mb-2">
+                Filter by Date
+              </label>
+              <input
+                type="date"
+                id="date"
+                value={selectedDate}
+                onChange={handleDateChange}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
           </div>
 
@@ -266,8 +402,7 @@ const DashboardPage: React.FC = () => {
           </div>
 
           {/* Appointments Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-            {/* All Appointments */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineUser className="text-indigo-600 text-2xl" />
@@ -277,19 +412,15 @@ const DashboardPage: React.FC = () => {
                 <p className="text-2xl font-bold text-indigo-600">{appointments.length}</p>
               </div>
             </div>
-
-            {/* Today's Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today Appointments</p>
+                <p className="text-gray-600">Today's Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>
-
-            {/* Filtered Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineFileText className="text-indigo-600 text-2xl" />
@@ -297,6 +428,15 @@ const DashboardPage: React.FC = () => {
               <div>
                 <p className="text-gray-600">Filtered Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{filteredAppointments.length}</p>
+              </div>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6 flex items-center">
+              <div className="p-3 bg-indigo-100 rounded-full mr-4">
+                <AiOutlineFileText className="text-indigo-600 text-2xl" />
+              </div>
+              <div>
+                <p className="text-gray-600">Total IPD Amount</p>
+                <p className="text-2xl font-bold text-indigo-600">rs{totalAmountIPD}</p>
               </div>
             </div>
           </div>
@@ -307,12 +447,12 @@ const DashboardPage: React.FC = () => {
               <thead className="bg-indigo-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Symptoms</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -320,7 +460,6 @@ const DashboardPage: React.FC = () => {
                   filteredAppointments.map((appointment) => (
                     <tr key={appointment.id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.email}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.phone}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {format(parseISO(appointment.date), 'dd MMM yyyy')}
@@ -329,7 +468,17 @@ const DashboardPage: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {appointment.doctor.replace(/_/g, ' ').toUpperCase()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.symptoms}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.appointmentType}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {appointment.appointmentType === 'IPD' && (
+                          <button
+                            onClick={() => openModal(appointment as IPDAppointment)}
+                            className="text-indigo-600 hover:text-indigo-900 underline"
+                          >
+                            View Details
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))
                 ) : (
@@ -343,12 +492,12 @@ const DashboardPage: React.FC = () => {
             </table>
           </div>
 
-          {/* Appointments Chart */}
-          <div className="bg-white shadow rounded-lg p-6">
-            <h2 className="text-xl font-semibold text-gray-700 mb-4">Appointments by Month</h2>
-            {Object.keys(monthsData).length > 0 ? (
+          {/* OPD Appointments Chart */}
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-700 mb-4">OPD Appointments by Month</h2>
+            {Object.keys(monthsDataOPD).length > 0 ? (
               <Bar
-                data={chartData}
+                data={chartDataOPD}
                 options={{
                   responsive: true,
                   plugins: {
@@ -357,22 +506,92 @@ const DashboardPage: React.FC = () => {
                     },
                     title: {
                       display: false,
-                      text: 'Appointments by Month',
                     },
                   },
                 }}
               />
             ) : (
-              <p className="text-gray-500">No data available to display the chart.</p>
+              <p className="text-gray-500">No OPD data available to display the chart.</p>
             )}
           </div>
+
+          {/* IPD Appointments Chart */}
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold text-gray-700 mb-4">IPD Appointments by Month</h2>
+            {Object.keys(monthsDataIPD).length > 0 ? (
+              <Bar
+                data={chartDataIPD}
+                options={{
+                  responsive: true,
+                  plugins: {
+                    legend: {
+                      position: 'top' as const,
+                    },
+                    title: {
+                      display: false,
+                    },
+                  },
+                }}
+              />
+            ) : (
+              <p className="text-gray-500">No IPD data available to display the chart.</p>
+            )}
+          </div>
+
+          {/* IPD Appointment Details Modal */}
+          <Dialog open={isModalOpen} onClose={closeModal} className="fixed z-10 inset-0 overflow-y-auto">
+            {isModalOpen && selectedIPDAppointment && (
+              <div className="flex items-center justify-center min-h-screen px-4">
+                <div className="fixed inset-0 bg-black bg-opacity-40 transition-opacity" aria-hidden="true"></div>
+                <Dialog.Panel className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 transform transition-all">
+                  <button onClick={closeModal} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                    ✕
+                  </button>
+                  <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">IPD Appointment Details</Dialog.Title>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <p><strong>Name:</strong> {selectedIPDAppointment.name}</p>
+                      <p><strong>Phone:</strong> {selectedIPDAppointment.phone}</p>
+                      <p><strong>Date:</strong> {format(parseISO(selectedIPDAppointment.date), 'dd MMM yyyy')}</p>
+                      <p><strong>Time:</strong> {selectedIPDAppointment.time}</p>
+                      <p><strong>Doctor:</strong> {selectedIPDAppointment.doctor.replace(/_/g, ' ').toUpperCase()}</p>
+                      <p><strong>Admission Type:</strong> {selectedIPDAppointment.admissionType}</p>
+                      <p><strong>Age:</strong> {selectedIPDAppointment.age}</p>
+                      <p><strong>Blood Group:</strong> {selectedIPDAppointment.bloodGroup}</p>
+                    </div>
+                    <div className="space-y-2">
+                      <p><strong>Date of Birth:</strong> {selectedIPDAppointment.dateOfBirth ? format(parseISO(selectedIPDAppointment.dateOfBirth), 'dd MMM yyyy') : '-'}</p>
+                      <p><strong>Discharge Date:</strong> {selectedIPDAppointment.dischargeDate ? format(parseISO(selectedIPDAppointment.dischargeDate), 'dd MMM yyyy') : '-'}</p>
+                      <p><strong>Emergency Number:</strong> {selectedIPDAppointment.emergencyMobileNumber}</p>
+                      <p><strong>Gender:</strong> {selectedIPDAppointment.gender}</p>
+                      <p><strong>Membership Type:</strong> {selectedIPDAppointment.membershipType}</p>
+                      <p><strong>Payment Mode:</strong> {selectedIPDAppointment.paymentMode}</p>
+                      <p><strong>Payment Type:</strong> {selectedIPDAppointment.paymentType}</p>
+                      <p><strong>Referral Doctor:</strong> {selectedIPDAppointment.referralDoctor || '-'}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <p><strong>Room Type:</strong> {selectedIPDAppointment.roomType}</p>
+                    <p><strong>Service Amount:</strong> rs{selectedIPDAppointment.serviceAmount}</p>
+                    <strong>Services:</strong>
+                    <ul className="list-disc list-inside space-y-1">
+                      {selectedIPDAppointment.services.map((service, index) => (
+                        <li key={index} className="text-gray-700">
+                          {service.serviceName} - rs{service.amount} - {service.status}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </Dialog.Panel>
+              </div>
+            )}
+          </Dialog>
         </div>
       </main>
     </>
   );
 };
 
-// Wrap the DashboardPage with ProtectedRoute
 const DashboardPageWithProtection: React.FC = () => (
   <ProtectedRoute>
     <DashboardPage />
