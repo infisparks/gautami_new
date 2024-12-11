@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
+import { ObjectSchema } from 'yup';
 import { db } from '../../lib/firebase';
 import { ref, push, update, onValue, remove } from 'firebase/database';
 import Head from 'next/head';
@@ -19,7 +20,6 @@ import {
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Select from 'react-select';
-import { SchemaOf } from 'yup';
 
 // Define the shape of your form inputs
 interface BedFormInput {
@@ -30,7 +30,7 @@ interface BedFormInput {
 }
 
 // Define the validation schema using Yup
-const bedSchema: SchemaOf<BedFormInput> = yup.object({
+const bedSchema: ObjectSchema<BedFormInput> = yup.object({
   roomType: yup
     .object({
       label: yup.string().required(),
@@ -229,6 +229,7 @@ const BedManagementPage: React.FC = () => {
                     }`}
                     isDisabled={!!editingBed} // Disable room type selection when editing
                     onChange={(value) => field.onChange(value)}
+                    value={field.value || null}
                   />
                 )}
               />
@@ -279,6 +280,7 @@ const BedManagementPage: React.FC = () => {
                       errors.status ? 'border-red-500' : 'border-gray-300'
                     }`}
                     onChange={(value) => field.onChange(value)}
+                    value={field.value || null}
                   />
                 )}
               />
@@ -374,6 +376,7 @@ const BedManagementPage: React.FC = () => {
         </div>
       </main>
     </>
+
   );
 
 };

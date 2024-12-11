@@ -162,7 +162,7 @@ const IPDBookingPage: React.FC = () => {
     watch,
     setValue,
   } = useForm<IPDFormInput>({
-    resolver: yupResolver(schema),
+    // resolver: yupResolver(schema),
     defaultValues: {
       date: new Date(),
       time: formatAMPM(new Date()),
