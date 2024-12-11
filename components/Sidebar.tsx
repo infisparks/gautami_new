@@ -7,10 +7,7 @@ import {
   FaTachometerAlt,
   FaUsers,
   FaClipboardList,
-  FaChartBar,
-  FaRegCalendarAlt,
-  FaMoneyBillWave,
-  FaCog,
+
   FaSignOutAlt,
   FaAngleDown,
   FaAngleUp,
