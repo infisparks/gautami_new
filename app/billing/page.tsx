@@ -9,8 +9,8 @@ import { useForm, SubmitHandler } from 'react-hook-form'
 import { yupResolver } from '@hookform/resolvers/yup'
 import * as yup from 'yup'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail, MapPin } from 'lucide-react'
-import jsPDF from 'jspdf'
+import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail } from 'lucide-react'
+import { jsPDF } from 'jspdf' // Correct import for jsPDF 2.x
 import html2canvas from 'html2canvas'
 import { format } from 'date-fns'
 
@@ -57,7 +57,7 @@ export default function IPDBillingPage() {
   const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
   const [loading, setLoading] = useState(false)
   const [logoBase64, setLogoBase64] = useState<string | null>(null)
-  
+
   const invoiceRef = useRef<HTMLDivElement>(null)
 
   const {
@@ -74,7 +74,7 @@ export default function IPDBillingPage() {
   })
 
   useEffect(() => {
-    const logoUrl = '/img/logo.png' // Path to your logo in the public folder
+    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png' // Replace with your logo URL
     getBase64Image(logoUrl, (base64: string) => {
       setLogoBase64(base64)
     })
@@ -161,12 +161,12 @@ export default function IPDBillingPage() {
     setLoading(true)
     try {
       const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
-      const recordSnap = await new Promise<any>((resolve) => {
+      const recordSnap = await new Promise<Partial<BillingRecord> | null>((resolve) => {
         onValue(recordRef, (snap) => {
-          resolve(snap.val())
+          resolve(snap.val() as Partial<BillingRecord> | null)
         }, { onlyOnce: true })
       })
-      const currentServices: Service[] = recordSnap.services || []
+      const currentServices: Service[] = recordSnap?.services || []
       const newService: Service = {
         serviceName: data.serviceName,
         amount: data.amount,
@@ -210,20 +210,20 @@ export default function IPDBillingPage() {
     setLoading(true)
     try {
       const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
-      const recordSnap = await new Promise<any>((resolve) => {
+      const recordSnap = await new Promise<Partial<BillingRecord> | null>((resolve) => {
         onValue(recordRef, (snap) => {
-          resolve(snap.val())
+          resolve(snap.val() as Partial<BillingRecord> | null)
         }, { onlyOnce: true })
       })
 
-      const currentServices: Service[] = recordSnap.services || []
+      const currentServices: Service[] = recordSnap?.services || []
       if (!currentServices[index] || currentServices[index].status === 'completed') {
         setLoading(false)
         return
       }
 
       currentServices[index].status = 'completed'
-      const updatedTotalPaid = calculateTotalPaid(recordSnap.amount || 0, calculateCompletedServicesAmount(currentServices))
+      const updatedTotalPaid = calculateTotalPaid(recordSnap?.amount || 0, calculateCompletedServicesAmount(currentServices))
 
       await update(recordRef, {
         services: currentServices,
@@ -300,13 +300,13 @@ export default function IPDBillingPage() {
     contactNumber: '+1 (234) 567-8900',
   }
 
-  const InvoiceContent = () => (
+  const InvoiceContent: React.FC = () => (
     <div className="max-w-4xl mx-auto bg-white text-gray-800 font-sans p-8">
       <div className="flex items-start justify-between mb-8">
         {/* Left: Logo */}
         {hospitalInfo.logoBase64 && (
           <div className="flex-shrink-0 mr-4">
-            <img src={hospitalInfo.logoBase64} alt="Hospital Logo" className="w-16 h-16" />
+            <img src={hospitalInfo.logoBase64} alt="Hospital Logo" width={64} height={64} />
           </div>
         )}
 
@@ -409,19 +409,18 @@ export default function IPDBillingPage() {
     if (!selectedRecord) return
     if (!invoiceRef.current) return
 
-    // Give the DOM time to render the invoice content fully
     await new Promise(resolve => setTimeout(resolve, 100))
 
     html2canvas(invoiceRef.current, { scale: 3, useCORS: true })
       .then(canvas => {
         const imgData = canvas.toDataURL('image/png')
-        const pdf = new jsPDF('p', 'pt', 'a4')
+        const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
         const pdfWidth = pdf.internal.pageSize.getWidth()
         const pdfHeight = (canvas.height * pdfWidth) / canvas.width
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, '', 'FAST')
         pdf.save(`Invoice_${selectedRecord.name}_${selectedRecord.id}.pdf`)
       })
-      .catch(err => {
+      .catch((err: unknown) => {
         console.error('Error generating PDF:', err)
         toast.error('Failed to generate PDF. Please try again.', {
           position: 'top-right',
@@ -442,10 +441,10 @@ export default function IPDBillingPage() {
       const dataURL = canvas.toDataURL('image/png');
       callback(dataURL);
     };
-    img.onerror = (err) => {
-      console.error('Error loading logo image:', err)
-      callback('')
-    }
+    // img.onerror = (err: Event) => {
+    //   console.error('Error loading logo image:', err)
+    //   callback('')
+    // }
     img.src = imgUrl
   }
 

@@ -4,8 +4,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
 import { db } from '../../lib/firebase';
 import { ref, push, update, onValue } from 'firebase/database';
 import Head from 'next/head';
@@ -42,65 +40,6 @@ interface IPDFormInput {
   paymentType: { label: string; value: string };
   paymentMode: { label: string; value: string };
 }
-
-const schema = yup.object({
-  name: yup.string().required('Full Name is required'),
-  gender: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Gender is required'),
-  dateOfBirth: yup.date().required('Date of Birth is required'),
-  age: yup.number()
-    .typeError('Age must be a number')
-    .positive('Age must be positive')
-    .integer('Age must be an integer')
-    .required('Age is required'),
-  bloodGroup: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Blood Group is required'),
-  date: yup.date().required('Date is required'),
-  time: yup.string().required('Time is required'),
-  mobileNumber: yup.string()
-    .matches(/^[0-9]{10}$/, 'Mobile number must be 10 digits')
-    .required('Mobile Number is required'),
-  emergencyMobileNumber: yup.string()
-    .matches(/^[0-9]{10}$/, 'Emergency Mobile number must be 10 digits')
-    .notRequired(),
-  membershipType: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Membership Type is required'),
-  roomType: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Room Type is required'),
-  bed: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Bed selection is required'),
-  doctor: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Doctor selection is required'),
-  referralDoctor: yup.string().notRequired(),
-  admissionType: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Admission Type is required'),
-  amount: yup.number()
-    .typeError('Amount must be a number')
-    .positive('Amount must be positive')
-    .required('Amount is required'),
-  paymentType: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Payment Type is required'),
-  paymentMode: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).required('Payment Mode is required'),
-}).required();
 
 const AdmissionTypes = [
   { value: 'general', label: 'General' },
@@ -170,7 +109,6 @@ const IPDBookingPage: React.FC = () => {
     watch,
     setValue,
   } = useForm<IPDFormInput>({
-    // resolver: yupResolver(schema),
     defaultValues: {
       date: new Date(),
       time: formatAMPM(new Date()),

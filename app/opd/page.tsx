@@ -1,11 +1,7 @@
-// app/opd/page.tsx
-
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { useForm, SubmitHandler, Controller} from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { db } from '../../lib/firebase';
 import { ref, push, update, get, onValue } from 'firebase/database';
 import Head from 'next/head';
@@ -25,7 +21,8 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
 
-// Define the shape of your form inputs
+// Remove unused Yup imports and schema
+
 interface IFormInput {
   name: string;
   email?: string;
@@ -39,30 +36,21 @@ interface IFormInput {
   doctor: { label: string; value: string } | null;
 }
 
-// Define the validation schema using Yup
-const schema = yup.object({
-  name: yup.string().required('Name is required'),
-  email: yup.string().email('Invalid email').notRequired(),
-  phone: yup.string().matches(/^[0-9]{10}$/, 'Phone number must be 10 digits').required('Phone number is required'),
-  date: yup.date().required('Date is required'),
-  time: yup.string().required('Time is required'),
-  message: yup.string().notRequired(),
-  paymentMethod: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).nullable().required('Payment method is required'),
-  amount: yup.number().typeError('Amount must be a number').positive('Amount must be positive').required('Amount is required'),
-  serviceName: yup.string().required('Service name is required'),
-  doctor: yup.object({
-    label: yup.string().required(),
-    value: yup.string().required(),
-  }).nullable().required('Doctor selection is required'),
-}).required();
-
 const PaymentOptions = [
   { value: 'cash', label: 'Cash' },
   { value: 'online', label: 'Online' },
 ];
+
+// Function to format time to 12-hour format with AM/PM
+function formatAMPM(date: Date): string {
+  let hours = date.getHours();
+  let minutes: string | number = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  minutes = minutes < 10 ? '0' + minutes : minutes;
+  return `${hours}:${minutes} ${ampm}`;
+}
 
 const OPDBookingPage: React.FC = () => {
   const {
@@ -74,7 +62,6 @@ const OPDBookingPage: React.FC = () => {
     watch,
     setValue,
   } = useForm<IFormInput>({
-    // resolver: yupResolver(schema),
     defaultValues: {
       date: new Date(),
       time: formatAMPM(new Date()),
@@ -90,7 +77,6 @@ const OPDBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  // const [amountFetched, setAmountFetched] = useState<number>(0);
 
   // Fetch doctors from Firebase
   useEffect(() => {
@@ -116,38 +102,33 @@ const OPDBookingPage: React.FC = () => {
   // Watch doctor field to auto-fetch amount
   const selectedDoctor = watch('doctor');
 
-  useEffect(() => {
-    if (selectedDoctor) {
-      if (selectedDoctor.value === 'no_doctor') {
-        setValue('amount', 0);
-        // setAmountFetched(0);
-      } else {
-        fetchDoctorAmount(selectedDoctor.value);
-      }
-    } else {
-      setValue('amount', 0);
-      // setAmountFetched(0);
-    }
-  }, [selectedDoctor, setValue]);
-
-  const fetchDoctorAmount = async (doctorId: string) => {
+  const fetchDoctorAmount = useCallback(async (doctorId: string) => {
     try {
       const doctorRef = ref(db, `doctors/${doctorId}`);
       const snapshot = await get(doctorRef);
       if (snapshot.exists()) {
         const data = snapshot.val();
-        // setAmountFetched(data.amount);
         setValue('amount', data.amount);
       } else {
-        // setAmountFetched(0);
         setValue('amount', 0);
       }
     } catch (error) {
       console.error('Error fetching doctor amount:', error);
-      // setAmountFetched(0);
       setValue('amount', 0);
     }
-  };
+  }, [setValue]);
+
+  useEffect(() => {
+    if (selectedDoctor) {
+      if (selectedDoctor.value === 'no_doctor') {
+        setValue('amount', 0);
+      } else {
+        fetchDoctorAmount(selectedDoctor.value);
+      }
+    } else {
+      setValue('amount', 0);
+    }
+  }, [selectedDoctor, setValue, fetchDoctorAmount]);
 
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
@@ -197,17 +178,6 @@ const OPDBookingPage: React.FC = () => {
     }
   };
 
-  // Function to format time to 12-hour format with AM/PM
-  function formatAMPM(date: Date): string {
-    let hours = date.getHours();
-    let minutes: string | number = date.getMinutes();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    hours = hours ? hours : 12; // the hour '0' should be '12'
-    minutes = minutes < 10 ? '0' + minutes : minutes;
-    return `${hours}:${minutes} ${ampm}`;
-  }
-
   // Handle form preview
   const handlePreview = () => {
     setPreviewData(watch());
@@ -227,12 +197,12 @@ const OPDBookingPage: React.FC = () => {
         <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl p-10">
           <h2 className="text-3xl font-bold text-center text-teal-600 mb-8">Book an Appointment</h2>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* User Name Field */}
+            {/* Name Field */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('name')}
+                {...register('name', { required: 'Name is required' })}
                 placeholder="Name"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.name ? 'border-red-500' : 'border-gray-300'
@@ -246,7 +216,7 @@ const OPDBookingPage: React.FC = () => {
               <AiOutlineMail className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="email"
-                {...register('email')}
+                {...register('email', { pattern: { value: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, message: 'Invalid email' } })}
                 placeholder="Email (Optional)"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.email ? 'border-red-500' : 'border-gray-300'
@@ -255,12 +225,15 @@ const OPDBookingPage: React.FC = () => {
               {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
             </div>
 
-            {/* Phone Number Field */}
+            {/* Phone Field */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="tel"
-                {...register('phone')}
+                {...register('phone', {
+                  required: 'Phone number is required',
+                  pattern: { value: /^[0-9]{10}$/, message: 'Phone number must be 10 digits' }
+                })}
                 placeholder="Phone Number"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.phone ? 'border-red-500' : 'border-gray-300'
@@ -275,6 +248,7 @@ const OPDBookingPage: React.FC = () => {
               <Controller
                 control={control}
                 name="date"
+                rules={{ required: 'Date is required' }}
                 render={({ field }) => (
                   <DatePicker
                     selected={field.value}
@@ -295,7 +269,7 @@ const OPDBookingPage: React.FC = () => {
               <AiOutlineClockCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('time')}
+                {...register('time', { required: 'Time is required' })}
                 placeholder="Time"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.time ? 'border-red-500' : 'border-gray-300'
@@ -325,15 +299,14 @@ const OPDBookingPage: React.FC = () => {
               <Controller
                 control={control}
                 name="paymentMethod"
+                rules={{ required: 'Payment method is required' }}
                 render={({ field }) => (
                   <Select
                     {...field}
                     options={PaymentOptions}
                     placeholder="Select Payment Method"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.paymentMethod ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                    className={`${errors.paymentMethod ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
                   />
                 )}
@@ -346,7 +319,10 @@ const OPDBookingPage: React.FC = () => {
               <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
-                {...register('amount')}
+                {...register('amount', { 
+                  required: 'Amount is required',
+                  min: { value: 0, message: 'Amount must be positive' } 
+                })}
                 placeholder="Amount (Rs)"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.amount ? 'border-red-500' : 'border-gray-300'
@@ -361,7 +337,7 @@ const OPDBookingPage: React.FC = () => {
               <AiOutlineInfoCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('serviceName')}
+                {...register('serviceName', { required: 'Service name is required' })}
                 placeholder="Service Name"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.serviceName ? 'border-red-500' : 'border-gray-300'
@@ -376,15 +352,14 @@ const OPDBookingPage: React.FC = () => {
               <Controller
                 control={control}
                 name="doctor"
+                rules={{ required: 'Doctor selection is required' }}
                 render={({ field }) => (
                   <Select
                     {...field}
                     options={doctors}
                     placeholder="Select Doctor or No Doctor"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.doctor ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                    className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
                     isClearable
                     onChange={(value) => field.onChange(value)}
                   />
