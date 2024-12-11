@@ -113,7 +113,7 @@ const DashboardPage: React.FC = () => {
   const [isTodayFilter, setIsTodayFilter] = useState<boolean>(false);
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
-  const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
+  // const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
   const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -218,7 +218,7 @@ const DashboardPage: React.FC = () => {
       }
     });
 
-    setTotalAmountOPD(totalOPD);
+    // setTotalAmountOPD(totalOPD);
     setTotalAmountIPD(totalIPD);
   };
 
