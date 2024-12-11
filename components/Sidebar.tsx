@@ -1,28 +1,16 @@
-// components/Sidebar.tsx
 "use client";
 
 import React, { useState } from "react";
-import {
-  FaUserMd,
-  FaTachometerAlt,
-  FaUsers,
-  FaClipboardList,
-
-  FaSignOutAlt,
-  FaAngleDown,
-  FaAngleUp,
-  FaBars,
-  FaTimes,
-} from "react-icons/fa";
+import { LayoutDashboard, Users, ClipboardList, UserPlus, BedDouble, LogOut, ChevronDown, ChevronUp, Menu, X } from 'lucide-react';
 import { auth } from "../lib/firebase"; // Adjust the import path as necessary
 import { signOut } from "firebase/auth";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { toast } from "react-toastify"; // Import toast for error handling
+import { toast } from "react-toastify";
 
 interface NavItemProps {
   title: string;
-  icon: React.ReactElement;
+  icon: React.ReactNode;
   href?: string;
   submenu?: NavItemProps[];
 }
@@ -30,27 +18,26 @@ interface NavItemProps {
 const navItems: NavItemProps[] = [
   {
     title: "Dashboard",
-    icon: <FaTachometerAlt />,
+    icon: <LayoutDashboard size={20} />,
     href: "/dashboard",
   },
   {
     title: "OPD",
-    icon: <FaUsers />,
+    icon: <Users size={20} />,
     submenu: [
-      { title: "Appointment", icon: <FaClipboardList />, href: "/opd" },
-      { title: "Add Doctor", icon: <FaUserMd />, href: "/addDoctor" },
+      { title: "Appointment", icon: <ClipboardList size={20} />, href: "/opd" },
+      { title: "Add Doctor", icon: <UserPlus size={20} />, href: "/addDoctor" },
     ],
   },
   {
-    title: "iPD",
-    icon: <FaUsers />,
+    title: "IPD",
+    icon: <Users size={20} />,
     submenu: [
-      { title: "IPD Appointment", icon: <FaClipboardList />, href: "/ipd" },
-      { title: "IPD Billing ", icon: <FaUserMd />, href: "/billing" },
-      { title: "Bed Management", icon: <FaClipboardList />, href: "/bed-management" },
+      { title: "IPD Appointment", icon: <ClipboardList size={20} />, href: "/ipd" },
+      { title: "IPD Billing", icon: <ClipboardList size={20} />, href: "/billing" },
+      { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
     ],
   },
-  
 ];
 
 const Sidebar: React.FC = () => {
@@ -66,7 +53,7 @@ const Sidebar: React.FC = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.push("/login"); // Redirect to login after logout
+      router.push("/login");
     } catch (error) {
       console.error("Error signing out: ", error);
       toast.error("Failed to logout. Please try again.", {
@@ -94,29 +81,31 @@ const Sidebar: React.FC = () => {
       const isSubmenuOpen = openSubmenus[item.title];
 
       return (
-        <div key={item.title}>
+        <div key={item.title} className="mb-2">
           {hasSubmenu ? (
             <>
               <button
-                className={`flex items-center w-full p-4 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors ${
+                className={`flex items-center w-full p-3 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors ${
                   isActive ? "bg-gray-700 text-white" : ""
                 }`}
                 onClick={() => toggleSubmenu(item.title)}
                 aria-expanded={isSubmenuOpen ? "true" : "false"}
                 aria-controls={`${item.title}-submenu`}
               >
-                <span className="text-lg">{item.icon}</span>
-                <span className="ml-3 flex-1 text-left">{item.title}</span>
+                <span className="inline-flex items-center justify-center w-8 h-8 mr-3 rounded-lg bg-gray-800 text-gray-300">
+                  {item.icon}
+                </span>
+                <span className="flex-1 text-left font-medium">{item.title}</span>
                 {isSubmenuOpen ? (
-                  <FaAngleUp className="text-sm" />
+                  <ChevronUp size={16} />
                 ) : (
-                  <FaAngleDown className="text-sm" />
+                  <ChevronDown size={16} />
                 )}
               </button>
               {isSubmenuOpen && (
                 <div
                   id={`${item.title}-submenu`}
-                  className="ml-12 mt-2 space-y-2"
+                  className="ml-11 mt-2 space-y-2"
                   role="menu"
                   aria-label={`${item.title} submenu`}
                 >
@@ -130,8 +119,8 @@ const Sidebar: React.FC = () => {
                           }`}
                           role="menuitem"
                         >
-                          <span className="text-lg">{subItem.icon}</span>
-                          <span className="ml-2">{subItem.title}</span>
+                          <span className="w-2 h-2 mr-3 rounded-full bg-gray-600"></span>
+                          <span>{subItem.title}</span>
                         </span>
                       </Link>
                     );
@@ -142,13 +131,15 @@ const Sidebar: React.FC = () => {
           ) : (
             <Link href={item.href || "#"}>
               <span
-                className={`flex items-center p-4 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors cursor-pointer ${
+                className={`flex items-center p-3 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors cursor-pointer ${
                   isActive ? "bg-gray-700 text-white" : ""
                 }`}
                 role="menuitem"
               >
-                <span className="text-lg">{item.icon}</span>
-                <span className="ml-3">{item.title}</span>
+                <span className="inline-flex items-center justify-center w-8 h-8 mr-3 rounded-lg bg-gray-800 text-gray-300">
+                  {item.icon}
+                </span>
+                <span className="font-medium">{item.title}</span>
               </span>
             </Link>
           )}
@@ -159,53 +150,51 @@ const Sidebar: React.FC = () => {
 
   return (
     <div className="flex">
-      {/* Toggle Button for Mobile */}
       <button
-        className="md:hidden text-white bg-indigo-600 p-2 rounded-full fixed top-4 left-4 z-50"
+        className="md:hidden fixed top-4 left-4 z-50 p-2 bg-indigo-600 text-white rounded-full shadow-lg"
         onClick={toggleSidebar}
         aria-label="Toggle Sidebar"
       >
-        {isOpen ? <FaTimes size={20} /> : <FaBars size={20} />}
+        {isOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
 
-      {/* Sidebar */}
       <aside
-        className={`bg-gray-800 text-white w-64 h-screen fixed top-0 left-0 z-40 transform transition-transform duration-300 ${
+        className={`bg-gray-900 text-white w-64 h-screen fixed top-0 left-0 z-40 transform transition-all duration-300 ease-in-out ${
           isOpen ? "translate-x-0" : "-translate-x-full"
         } md:translate-x-0`}
         aria-label="Sidebar"
       >
-        <div className="flex items-center justify-center py-6 bg-gray-900">
-          <FaUserMd size={30} className="text-indigo-500" />
-          <span className="ml-3 text-2xl font-bold text-indigo-500">Hospital</span>
+        <div className="flex items-center justify-center h-16 bg-gray-800 border-b border-gray-700">
+          <LayoutDashboard size={24} className="text-indigo-500" />
+          <span className="ml-3 text-xl font-bold text-white">Hospital Admin</span>
         </div>
 
-        <nav className="mt-6 px-2" role="menu">
-          <ul className="space-y-2">{renderNavItems(navItems)}</ul>
+        <nav className="mt-6 px-4" role="menu">
+          <div className="space-y-1">{renderNavItems(navItems)}</div>
         </nav>
 
-        <div className="absolute bottom-0 w-full mb-4 px-2">
+        <div className="absolute bottom-0 w-full p-4 border-t border-gray-800">
           <button
             onClick={handleLogout}
-            className="flex items-center w-full p-4 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors"
+            className="flex items-center w-full p-3 text-gray-300 hover:bg-gray-700 hover:text-white rounded-lg transition-colors"
             aria-label="Logout"
           >
-            <FaSignOutAlt className="text-lg" />
-            <span className="ml-3">Logout</span>
+            <span className="inline-flex items-center justify-center w-8 h-8 mr-3 rounded-lg bg-gray-800 text-gray-300">
+              <LogOut size={20} />
+            </span>
+            <span className="font-medium">Logout</span>
           </button>
         </div>
       </aside>
 
-      {/* Overlay for Mobile when Sidebar is Open */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black opacity-50 z-30 md:hidden"
+          className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden"
           onClick={toggleSidebar}
           aria-hidden="true"
         ></div>
       )}
 
-      {/* Main Content */}
       <div className="flex-1 ml-0 md:ml-64">
         {/* The rest of your page content goes here */}
       </div>
