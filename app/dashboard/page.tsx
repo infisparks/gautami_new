@@ -113,7 +113,6 @@ const DashboardPage: React.FC = () => {
   const [isTodayFilter, setIsTodayFilter] = useState<boolean>(false);
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
-  // const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
   const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -206,19 +205,15 @@ const DashboardPage: React.FC = () => {
   };
 
   const calculateTotalAmount = (appointments: Appointment[]) => {
-    // let totalOPD = 0;
     let totalIPD = 0;
 
     appointments.forEach((appointment) => {
-      if (appointment.appointmentType === 'OPD') {
-        // totalOPD += appointment.amount;
-      } else if (appointment.appointmentType === 'IPD') {
+      if (appointment.appointmentType === 'IPD') {
         const ipdApp = appointment as IPDAppointment;
         totalIPD += ipdApp.serviceAmount + ipdApp.services.reduce((acc, service) => acc + service.amount, 0);
       }
     });
 
-    // setTotalAmountOPD(totalOPD);
     setTotalAmountIPD(totalIPD);
   };
 
