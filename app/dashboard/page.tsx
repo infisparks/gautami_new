@@ -206,12 +206,12 @@ const DashboardPage: React.FC = () => {
   };
 
   const calculateTotalAmount = (appointments: Appointment[]) => {
-    let totalOPD = 0;
+    // let totalOPD = 0;
     let totalIPD = 0;
 
     appointments.forEach((appointment) => {
       if (appointment.appointmentType === 'OPD') {
-        totalOPD += appointment.amount;
+        // totalOPD += appointment.amount;
       } else if (appointment.appointmentType === 'IPD') {
         const ipdApp = appointment as IPDAppointment;
         totalIPD += ipdApp.serviceAmount + ipdApp.services.reduce((acc, service) => acc + service.amount, 0);
