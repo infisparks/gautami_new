@@ -11,7 +11,6 @@ import {
   AiOutlineUser, 
   AiOutlinePhone, 
   AiOutlineCalendar, 
-  AiOutlineClockCircle, 
   AiOutlineInfoCircle 
 } from 'react-icons/ai';
 import { ToastContainer, toast } from 'react-toastify';
