@@ -21,6 +21,16 @@ const navItems: NavItemProps[] = [
     icon: <LayoutDashboard size={20} />,
     href: "/dashboard",
   },
+   {
+    title: "Manage Admin",
+    icon: <Users size={20} />,
+    submenu: [
+      // { title: "IPD Admin", icon: <ClipboardList size={20} />, href: "/ipd" },
+      { title: "OPD Admin", icon: <ClipboardList size={20} />, href: "/opdadmin" },
+      { title: "Patient Admin", icon: <BedDouble size={20} />, href: "/patientadmin" },
+      { title: "Pathology Admin", icon: <BedDouble size={20} />, href: "/bloodadmin" },
+    ],
+  },
   {
     title: "OPD",
     icon: <Users size={20} />,
@@ -38,6 +48,7 @@ const navItems: NavItemProps[] = [
       { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
     ],
   },
+ 
   {
     title: "Pathology",
     icon: <LayoutDashboard size={20} />,
