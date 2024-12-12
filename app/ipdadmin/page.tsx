@@ -1,6 +1,7 @@
+// pages/adminipd.tsx
 'use client'
 
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, Fragment } from 'react'
 import { db } from '@/lib/firebase'
 import { ref, onValue, update, push } from 'firebase/database'
 import { ToastContainer, toast } from 'react-toastify'
@@ -9,7 +10,7 @@ import { useForm, SubmitHandler } from 'react-hook-form'
 import { yupResolver } from '@hookform/resolvers/yup'
 import * as yup from 'yup'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail, History } from 'lucide-react'
+import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail, History, X } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 import { format } from 'date-fns'
@@ -32,13 +33,13 @@ interface BillingRecord {
   id: string
   name: string
   mobileNumber: string
-  amount: number // Deposit amount (ensure numeric)
-  totalPaid: number // Completed services amount
+  amount: number
+  totalPaid: number
   paymentType: string
   roomType?: string
   bed?: string
   services: Service[]
-  payments: Payment[] // Array of payments
+  payments: Payment[]
   dischargeDate?: string
 }
 
@@ -76,7 +77,7 @@ const currencyFormatter = new Intl.NumberFormat('en-IN', {
   minimumFractionDigits: 2
 })
 
-export default function IPDBillingPage() {
+const AdminIPDPage: React.FC = () => {
   const [allRecords, setAllRecords] = useState<BillingRecord[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([])
@@ -175,9 +176,9 @@ export default function IPDBillingPage() {
       return
     }
     const results = allRecords.filter(rec =>
-      rec.id.toLowerCase().includes(term) ||
       rec.name.toLowerCase().includes(term) ||
-      rec.mobileNumber.toLowerCase().includes(term)
+      rec.mobileNumber.includes(term) ||
+      rec.id.toLowerCase().includes(term)
     )
     setFilteredRecords(results)
     setSelectedRecord(null)
@@ -202,10 +203,11 @@ export default function IPDBillingPage() {
   }
 
   const totalServicesAmount = selectedRecord ? calculateTotalServicesAmount(selectedRecord.services) : 0
-  // const completedServicesAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
+  const completedServicesAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
   const totalPaid = selectedRecord ? selectedRecord.totalPaid : 0
   const pendingServicesAmount = selectedRecord ? calculatePendingServicesAmount(selectedRecord.services) : 0
   const completedServicesTotalAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
+  const outstandingAmount = selectedRecord ? selectedRecord.amount + totalServicesAmount - totalPaid : 0
 
   const onSubmitAdditionalService: SubmitHandler<AdditionalServiceForm> = async (data) => {
     if (!selectedRecord) return
@@ -217,7 +219,7 @@ export default function IPDBillingPage() {
           resolve(snap.val() as Partial<BillingRecord> | null)
         }, { onlyOnce: true })
       })
-      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s:any) => ({
+      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s: any) => ({
         ...s,
         amount: Number(s.amount)
       })) : []
@@ -281,10 +283,12 @@ export default function IPDBillingPage() {
       await update(recordRef, {
         payments: updatedPayments.reduce((acc, payment) => {
           const key = push(ref(db)).key
-          acc[key!] = {
-            amount: payment.amount,
-            paymentType: payment.paymentType,
-            date: payment.date,
+          if (key) {
+            acc[key] = {
+              amount: payment.amount,
+              paymentType: payment.paymentType,
+              date: payment.date,
+            }
           }
           return acc
         }, {} as Record<string, { amount: number; paymentType: string; date: string }>),
@@ -329,7 +333,7 @@ export default function IPDBillingPage() {
         }, { onlyOnce: true })
       })
 
-      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s:any) => ({
+      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s: any) => ({
         ...s,
         amount: Number(s.amount)
       })) : []
@@ -413,114 +417,27 @@ export default function IPDBillingPage() {
     }
   }
 
-  const hospitalInfo = {
-    logoBase64: logoBase64 || '',
-    name: 'Your Hospital Name',
-    address: '1234 Health St, Wellness City, Country',
-    email: 'info@yourhospital.com',
-    contactNumber: '+1 (234) 567-8900',
+  const handleFilterByDate = (date: string) => {
+    const filtered = allRecords.filter(rec => {
+      const admissionDate = rec.services[0]?.createdAt
+        ? format(new Date(rec.services[0].createdAt), 'yyyy-MM-dd')
+        : ''
+      return admissionDate === date
+    })
+    setFilteredRecords(filtered)
+    setSelectedRecord(null)
   }
 
-  const InvoiceContent: React.FC = () => (
-    <div className="max-w-4xl mx-auto bg-white text-gray-800 font-sans p-8">
-      <div className="flex items-start justify-between mb-8">
-        {/* Left: Logo */}
-        {hospitalInfo.logoBase64 && (
-          <div className="flex-shrink-0 mr-4">
-            <img src={hospitalInfo.logoBase64} alt="Hospital Logo" width={64} height={64} />
-          </div>
-        )}
+  const handleFilterDischarged = () => {
+    const discharged = allRecords.filter(rec => rec.dischargeDate)
+    setFilteredRecords(discharged)
+    setSelectedRecord(null)
+  }
 
-        {/* Right: Hospital Details */}
-        <div className="text-right">
-          <h1 className="text-2xl font-bold">{hospitalInfo.name}</h1>
-          <p className="text-sm">{hospitalInfo.address}</p>
-          <div className="flex items-center justify-end text-sm mt-1">
-            <Phone size={14} className="mr-2" />
-            <span>{hospitalInfo.contactNumber}</span>
-          </div>
-          <div className="flex items-center justify-end text-sm mt-1">
-            <Mail size={14} className="mr-2" />
-            <span>{hospitalInfo.email}</span>
-          </div>
-        </div>
-      </div>
-
-      {selectedRecord && (
-        <>
-          <div className="mb-6">
-            <h2 className="text-xl font-semibold uppercase tracking-wide border-b pb-2 mb-4">Patient Invoice</h2>
-            <div className="flex justify-between">
-              <div>
-                <p className="text-sm"><strong>Patient Name:</strong> {selectedRecord.name}</p>
-                <p className="text-sm"><strong>Patient ID:</strong> {selectedRecord.id}</p>
-                <p className="text-sm"><strong>Mobile:</strong> {selectedRecord.mobileNumber}</p>
-                <p className="text-sm">
-                  <strong>Admission Date:</strong>{' '}
-                  {selectedRecord.services[0]?.createdAt
-                    ? format(new Date(selectedRecord.services[0].createdAt), 'dd MMM yyyy')
-                    : 'N/A'}
-                </p>
-                {selectedRecord.dischargeDate && (
-                  <p className="text-sm">
-                    <strong>Discharge Date:</strong>{' '}
-                    {format(new Date(selectedRecord.dischargeDate), 'dd MMM yyyy')}
-                  </p>
-                )}
-              </div>
-              <div className="text-right">
-                <p className="text-sm"><strong>Invoice #:</strong> {selectedRecord.id}</p>
-                <p className="text-sm"><strong>Generated On:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
-                <p className="text-sm"><strong>Payment Type:</strong> {selectedRecord.paymentType.charAt(0).toUpperCase() + selectedRecord.paymentType.slice(1)}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-3">Itemized Charges</h3>
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="py-2 font-medium">Service</th>
-                  <th className="py-2 font-medium">Date</th>
-                  <th className="py-2 font-medium text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedRecord.services.map((service, index) => (
-                  <tr key={index} className="border-b last:border-none">
-                    <td className="py-2">{service.serviceName}</td>
-                    <td className="py-2">{service.createdAt ? format(new Date(service.createdAt), 'dd MMM yyyy') : 'N/A'}</td>
-                    <td className="py-2 text-right">{currencyFormatter.format(service.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="mb-6">
-            <div className="flex justify-between text-sm mb-1">
-              <span>Total Charges:</span>
-              <span className="font-semibold">{currencyFormatter.format(totalServicesAmount)}</span>
-            </div>
-            <div className="flex justify-between text-sm mb-1">
-              <span>Deposit Amount:</span>
-              <span className="font-semibold">{currencyFormatter.format(selectedRecord.amount)}</span>
-            </div>
-            <div className="flex justify-between text-sm mb-1">
-              <span>Total Paid (Completed Services):</span>
-              <span className="font-semibold text-red-600">{currencyFormatter.format(totalPaid)}</span>
-            </div>
-          </div>
-
-          <div className="text-sm text-gray-600">
-            <p>This is a computer-generated invoice and does not require a signature.</p>
-            <p>Thank you for choosing {hospitalInfo.name}. We wish you a speedy recovery and continued good health.</p>
-          </div>
-        </>
-      )}
-    </div>
-  )
+  const handleFilterAll = () => {
+    setFilteredRecords(allRecords)
+    setSelectedRecord(null)
+  }
 
   const handleDownloadInvoice = async () => {
     if (!selectedRecord) return
@@ -578,21 +495,37 @@ export default function IPDBillingPage() {
 
   const sortedFilteredRecords = [...filteredRecords].sort((a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime())
 
+  const admissionDates = Array.from(new Set(allRecords.map(rec => {
+    const admissionDate = rec.services[0]?.createdAt
+      ? format(new Date(rec.services[0].createdAt), 'yyyy-MM-dd')
+      : ''
+    return admissionDate
+  }).filter(date => date)))
+
+  const hospitalInfo = {
+    logoBase64: logoBase64 || '',
+    name: 'Your Hospital Name',
+    address: '1234 Health St, Wellness City, Country',
+    email: 'info@yourhospital.com',
+    contactNumber: '+1 (234) 567-8900',
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <ToastContainer />
       <div className="max-w-7xl mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden">
         <div className="p-8">
-          <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">IPD Billing Management</h1>
+          <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">Admin IPD Management Panel</h1>
 
-          {/* Search Section */}
-          <div className="mb-8">
-            <div className="flex items-center bg-gray-100 rounded-full p-2">
+          {/* Search and Filter Section */}
+          <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0">
+            {/* Search Bar */}
+            <div className="flex items-center bg-gray-100 rounded-full p-2 w-full md:w-1/2">
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by Name, Admission ID, or Mobile"
+                placeholder="Search by Name, Admission ID, or Mobile Number"
                 className="flex-grow bg-transparent px-4 py-2 focus:outline-none"
               />
               <button
@@ -602,12 +535,39 @@ export default function IPDBillingPage() {
                 <Search size={24} />
               </button>
             </div>
+
+            {/* Filter Buttons */}
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={handleFilterAll}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition duration-300"
+              >
+                All Patients
+              </button>
+              <button
+                onClick={handleFilterDischarged}
+                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition duration-300"
+              >
+                Discharged Patients
+              </button>
+              <select
+                onChange={(e) => handleFilterByDate(e.target.value)}
+                defaultValue=""
+                className="px-4 py-2 rounded bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Filter by Admission Date</option>
+                {admissionDates.map((date, index) => (
+                  <option key={index} value={date}>{format(new Date(date), 'dd MMM yyyy')}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
+          {/* Patient Records Table */}
           <AnimatePresence mode="wait">
             {!selectedRecord ? (
               <motion.div
-                key="search-results"
+                key="patient-table"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -624,7 +584,7 @@ export default function IPDBillingPage() {
                           <th className="px-4 py-2 text-left">Mobile Number</th>
                           <th className="px-4 py-2 text-left">Total Paid (Rs)</th>
                           <th className="px-4 py-2 text-left">Payment Type</th>
-                          <th className="px-4 py-2 text-left">Discharge Date</th>
+                          <th className="px-4 py-2 text-left">Discharge Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -637,14 +597,14 @@ export default function IPDBillingPage() {
                           >
                             <td className="border-t px-4 py-2">{rec.name}</td>
                             <td className="border-t px-4 py-2">{rec.mobileNumber}</td>
-                            <td className="border-t px-4 py-2">{rec.totalPaid.toLocaleString()}</td>
+                            <td className="border-t px-4 py-2">{currencyFormatter.format(rec.totalPaid)}</td>
                             <td className="border-t px-4 py-2 capitalize">{rec.paymentType}</td>
                             <td className="border-t px-4 py-2">
-                              {rec.dischargeDate 
-                                ? new Date(rec.dischargeDate).toLocaleDateString()
-                                : (rec.services[0]?.createdAt 
-                                    ? new Date(rec.services[0].createdAt).toLocaleDateString()
-                                    : 'N/A')}
+                              {rec.dischargeDate ? (
+                                <span className="text-green-600 font-semibold">Discharged</span>
+                              ) : (
+                                <span className="text-yellow-600 font-semibold">Admitted</span>
+                              )}
                             </td>
                           </motion.tr>
                         ))}
@@ -655,7 +615,7 @@ export default function IPDBillingPage() {
               </motion.div>
             ) : (
               <motion.div
-                key="billing-details"
+                key="patient-details"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
@@ -666,11 +626,11 @@ export default function IPDBillingPage() {
                   className="mb-6 flex items-center text-indigo-600 hover:text-indigo-800 transition duration-300"
                 >
                   <ArrowLeft size={20} className="mr-2" />
-                  Back to Results
+                  Back to Records
                 </button>
 
                 <div className="bg-indigo-50 rounded-xl p-6 mb-8">
-                  <h2 className="text-2xl font-semibold text-indigo-800 mb-4">Billing Details for {selectedRecord.name}</h2>
+                  <h2 className="text-2xl font-semibold text-indigo-800 mb-4">Patient Details for {selectedRecord.name}</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                       <p><strong>Name:</strong> {selectedRecord.name}</p>
@@ -678,10 +638,10 @@ export default function IPDBillingPage() {
                       <p><strong>Payment Type at Admission:</strong> {selectedRecord.paymentType.charAt(0).toUpperCase() + selectedRecord.paymentType.slice(1)}</p>
                     </div>
                     <div>
-                      <p><strong>Deposit Amount:</strong> Rs. {selectedRecord.amount.toLocaleString()}</p>
-                      {/* <p><strong>Completed Services Amount:</strong> Rs. {completedServicesAmount.toLocaleString()}</p> */}
-                      {/* <p><strong>Total Paid (Completed Services):</strong> Rs. {totalPaid.toLocaleString()}</p> */}
-                      <p><strong>Total Services Amount:</strong> Rs. {totalServicesAmount.toLocaleString()}</p>
+                      <p><strong>Deposit Amount:</strong> {currencyFormatter.format(selectedRecord.amount)}</p>
+                      <p><strong>Completed Services Amount:</strong> {currencyFormatter.format(completedServicesAmount)}</p>
+                      <p><strong>Total Paid (Completed Services):</strong> {currencyFormatter.format(totalPaid)}</p>
+                      <p><strong>Total Services Amount:</strong> {currencyFormatter.format(totalServicesAmount)}</p>
                       <p><strong>Discharge Date:</strong> {selectedRecord.dischargeDate ? new Date(selectedRecord.dischargeDate).toLocaleDateString() : 'N/A'}</p>
                     </div>
                   </div>
@@ -689,10 +649,10 @@ export default function IPDBillingPage() {
 
                 <div className="flex justify-between mb-6">
                   <div className="bg-green-100 rounded-lg p-4">
-                    <p className="text-green-800"><strong>Pending Services Amount:</strong> Rs. {pendingServicesAmount.toLocaleString()}</p>
+                    <p className="text-green-800"><strong>Pending Services Amount:</strong> {currencyFormatter.format(pendingServicesAmount)}</p>
                   </div>
                   <div className="bg-blue-100 rounded-lg p-4">
-                    <p className="text-blue-800"><strong>Completed Services Amount:</strong> Rs. {completedServicesTotalAmount.toLocaleString()}</p>
+                    <p className="text-blue-800"><strong>Completed Services Amount:</strong> {currencyFormatter.format(completedServicesTotalAmount)}</p>
                   </div>
                 </div>
 
@@ -877,15 +837,157 @@ export default function IPDBillingPage() {
       {/* Hidden Invoice for PDF Generation */}
       {selectedRecord && (
         <div ref={invoiceRef} style={{ position: 'absolute', left: '-9999px', top: 0 }}>
-          <InvoiceContent />
+          <div className="max-w-4xl mx-auto bg-white text-gray-800 font-sans p-8">
+            <div className="flex items-start justify-between mb-8">
+              {/* Left: Logo */}
+              {hospitalInfo.logoBase64 && (
+                <div className="flex-shrink-0 mr-4">
+                  <img src={hospitalInfo.logoBase64} alt="Hospital Logo" width={64} height={64} />
+                </div>
+              )}
+
+              {/* Right: Hospital Details */}
+              <div className="text-right">
+                <h1 className="text-2xl font-bold">{hospitalInfo.name}</h1>
+                <p className="text-sm">{hospitalInfo.address}</p>
+                <div className="flex items-center justify-end text-sm mt-1">
+                  <Phone size={14} className="mr-2" />
+                  <span>{hospitalInfo.contactNumber}</span>
+                </div>
+                <div className="flex items-center justify-end text-sm mt-1">
+                  <Mail size={14} className="mr-2" />
+                  <span>{hospitalInfo.email}</span>
+                </div>
+              </div>
+            </div>
+
+            {selectedRecord && (
+              <>
+                <div className="mb-6">
+                  <h2 className="text-xl font-semibold uppercase tracking-wide border-b pb-2 mb-4">Patient Invoice</h2>
+                  <div className="flex justify-between">
+                    <div>
+                      <p className="text-sm"><strong>Patient Name:</strong> {selectedRecord.name}</p>
+                      <p className="text-sm"><strong>Patient ID:</strong> {selectedRecord.id}</p>
+                      <p className="text-sm"><strong>Mobile:</strong> {selectedRecord.mobileNumber}</p>
+                      <p className="text-sm">
+                        <strong>Admission Date:</strong>{' '}
+                        {selectedRecord.services[0]?.createdAt
+                          ? format(new Date(selectedRecord.services[0].createdAt), 'dd MMM yyyy')
+                          : 'N/A'}
+                      </p>
+                      {selectedRecord.dischargeDate && (
+                        <p className="text-sm">
+                          <strong>Discharge Date:</strong>{' '}
+                          {format(new Date(selectedRecord.dischargeDate), 'dd MMM yyyy')}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm"><strong>Invoice #:</strong> {selectedRecord.id}</p>
+                      <p className="text-sm"><strong>Generated On:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
+                      <p className="text-sm"><strong>Payment Type:</strong> {selectedRecord.paymentType.charAt(0).toUpperCase() + selectedRecord.paymentType.slice(1)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3">Payment History</h3>
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b text-left">
+                        <th className="py-2 font-medium">Payment Type</th>
+                        <th className="py-2 font-medium">Date</th>
+                        <th className="py-2 font-medium text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Deposit as the first entry */}
+                      <tr className="border-b">
+                        <td className="py-2"><strong>Deposit</strong></td>
+                        <td className="py-2">N/A</td>
+                        <td className="py-2 text-right">{currencyFormatter.format(selectedRecord.amount)}</td>
+                      </tr>
+                      {/* Payments */}
+                      {selectedRecord.payments.map((payment, index) => (
+                        <tr key={index} className="border-b">
+                          <td className="py-2">{payment.paymentType.charAt(0).toUpperCase() + payment.paymentType.slice(1)}</td>
+                          <td className="py-2">{format(new Date(payment.date), 'dd MMM yyyy')}</td>
+                          <td className="py-2 text-right">{currencyFormatter.format(payment.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3">Services Rendered</h3>
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b text-left">
+                        <th className="py-2 font-medium">Service</th>
+                        <th className="py-2 font-medium">Date</th>
+                        <th className="py-2 font-medium text-right">Amount</th>
+                        <th className="py-2 font-medium">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRecord.services.map((service, index) => (
+                        <tr key={index} className="border-b">
+                          <td className="py-2">{service.serviceName}</td>
+                          <td className="py-2">{service.createdAt ? format(new Date(service.createdAt), 'dd MMM yyyy') : 'N/A'}</td>
+                          <td className="py-2 text-right">{currencyFormatter.format(service.amount)}</td>
+                          <td className="py-2 capitalize">
+                            {service.status === 'completed' ? (
+                              <span className="text-green-600 font-semibold">Completed</span>
+                            ) : (
+                              <span className="text-yellow-600 font-semibold">Pending</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary Section */}
+                <div className="mb-6">
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Total Services Amount:</span>
+                    <span className="font-semibold">{currencyFormatter.format(totalServicesAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Total Deposit:</span>
+                    <span className="font-semibold">{currencyFormatter.format(selectedRecord.amount)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span>Total Payments:</span>
+                    <span className="font-semibold text-red-600">{currencyFormatter.format(totalPaid)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Outstanding Amount:</span>
+                    <span className="font-semibold text-red-600">
+                      {currencyFormatter.format(outstandingAmount)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Notes Section */}
+                <div className="text-sm text-gray-600">
+                  <p>This is a computer-generated invoice and does not require a signature.</p>
+                  <p>Thank you for choosing {hospitalInfo.name}. We wish you a speedy recovery and continued good health.</p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
       {/* Payment History Modal */}
-      <Transition appear show={isPaymentHistoryOpen} as={React.Fragment}>
+      <Transition appear show={isPaymentHistoryOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsPaymentHistoryOpen(false)}>
           <Transition.Child
-            as={React.Fragment}
+            as={Fragment}
             enter="ease-out duration-200"
             enterFrom="opacity-0"
             enterTo="opacity-100"
@@ -898,7 +1000,7 @@ export default function IPDBillingPage() {
 
           <div className="fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
             <Transition.Child
-              as={React.Fragment}
+              as={Fragment}
               enter="ease-out duration-200"
               enterFrom="opacity-0 scale-95"
               enterTo="opacity-100 scale-100"
@@ -907,25 +1009,38 @@ export default function IPDBillingPage() {
               leaveTo="opacity-0 scale-95"
             >
               <Dialog.Panel className="bg-white rounded-xl shadow-lg p-6 max-w-lg w-full">
-                <Dialog.Title className="text-xl font-bold mb-4 text-gray-800">Payment History</Dialog.Title>
+                <div className="flex justify-between items-center mb-4">
+                  <Dialog.Title className="text-xl font-bold text-gray-800">Payment History</Dialog.Title>
+                  <button onClick={() => setIsPaymentHistoryOpen(false)} className="text-gray-500 hover:text-gray-700">
+                    <X size={20} />
+                  </button>
+                </div>
                 {selectedRecord && selectedRecord.payments.length > 0 ? (
-                  <div className="overflow-x-auto max-h-60">
+                  <div className="overflow-x-auto max-h-80">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-100">
                         <tr>
                           <th className="px-4 py-2 text-left">#</th>
-                          <th className="px-4 py-2 text-left">Amount (Rs)</th>
                           <th className="px-4 py-2 text-left">Payment Type</th>
                           <th className="px-4 py-2 text-left">Date</th>
+                          <th className="px-4 py-2 text-left">Amount (Rs)</th>
                         </tr>
                       </thead>
                       <tbody>
+                        {/* Deposit as the first entry */}
+                        <tr className="border-t">
+                          <td className="px-4 py-2">1</td>
+                          <td className="px-4 py-2">Deposit</td>
+                          <td className="px-4 py-2">N/A</td>
+                          <td className="px-4 py-2">{currencyFormatter.format(selectedRecord.amount)}</td>
+                        </tr>
+                        {/* Payments */}
                         {selectedRecord.payments.map((payment, index) => (
-                          <tr key={index} className="border-t">
-                            <td className="px-4 py-2">{index + 1}</td>
-                            <td className="px-4 py-2">Rs. {payment.amount.toLocaleString()}</td>
+                          <tr key={index + 2} className="border-t">
+                            <td className="px-4 py-2">{index + 2}</td>
                             <td className="px-4 py-2 capitalize">{payment.paymentType}</td>
                             <td className="px-4 py-2">{new Date(payment.date).toLocaleString()}</td>
+                            <td className="px-4 py-2">{currencyFormatter.format(payment.amount)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -950,3 +1065,5 @@ export default function IPDBillingPage() {
     </div>
   )
 }
+
+export default AdminIPDPage

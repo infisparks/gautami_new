@@ -73,7 +73,7 @@ interface OPDAppointment {
   phone: string;
   date: string;
   time: string;
-  doctor: string;
+  doctor: string; // Updated to doctor name
   appointmentType: 'OPD';
   amount: number;
 }
@@ -84,7 +84,7 @@ interface IPDAppointment {
   phone: string;
   date: string;
   time: string;
-  doctor: string;
+  doctor: string; // Updated to doctor name
   appointmentType: 'IPD';
   admissionType: string;
   age: number;
@@ -105,6 +105,13 @@ interface IPDAppointment {
 
 type Appointment = OPDAppointment | IPDAppointment;
 
+interface Doctor {
+  name: string;
+  amount?: number;
+  department?: string;
+  specialist?: string;
+}
+
 const DashboardPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [filteredAppointments, setFilteredAppointments] = useState<Appointment[]>([]);
@@ -117,8 +124,47 @@ const DashboardPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [selectedIPDAppointment, setSelectedIPDAppointment] = useState<IPDAppointment | null>(null);
+  
+  // State to store doctors data
+  const [doctors, setDoctors] = useState<{ [key: string]: Doctor }>({});
 
+  // Helper function to safely retrieve doctor names
+  const getDoctorName = (doctorId?: string): string => {
+    if (!doctorId) return 'Unknown';
+    return doctors[doctorId]?.name || 'Unknown';
+  };
+
+  // Fetch doctors data from Firebase
   useEffect(() => {
+    const doctorsRef = ref(db, 'doctors');
+
+    const handleDoctors = (snapshot: DataSnapshot) => {
+      const data = snapshot.val() as Record<string, Doctor | undefined>;
+      const doctorsData: { [key: string]: Doctor } = data
+        ? Object.entries(data).reduce((acc, [id, value]) => {
+            if (value) {
+              acc[id] = value;
+            }
+            return acc;
+          }, {} as { [key: string]: Doctor })
+        : {};
+      setDoctors(doctorsData);
+    };
+
+    const unsubscribeDoctors = onValue(doctorsRef, handleDoctors);
+
+    return () => {
+      unsubscribeDoctors();
+    };
+  }, []);
+
+  // Fetch appointments data from Firebase
+  useEffect(() => {
+    // Ensure doctors data is loaded before fetching appointments
+    if (Object.keys(doctors).length === 0) {
+      return;
+    }
+
     const bookingsRef = ref(db, 'bookings');
     const ipdBookingsRef = ref(db, 'ipd_bookings');
 
@@ -131,7 +177,7 @@ const DashboardPage: React.FC = () => {
             phone: value?.phone ?? '',
             date: value?.date ?? '',
             time: value?.time ?? '',
-            doctor: value?.doctor ?? '',
+            doctor: getDoctorName(value?.doctor),
             appointmentType: 'OPD',
             amount: value?.amount || 0,
           }))
@@ -148,7 +194,7 @@ const DashboardPage: React.FC = () => {
             phone: value?.mobileNumber || value?.emergencyMobileNumber || '',
             date: value?.date ?? '',
             time: value?.time ?? '',
-            doctor: value?.doctor ?? '',
+            doctor: getDoctorName(value?.doctor),
             appointmentType: 'IPD',
             admissionType: value?.admissionType ?? '',
             age: value?.age ?? 0,
@@ -164,7 +210,7 @@ const DashboardPage: React.FC = () => {
             referralDoctor: value?.referralDoctor ?? '',
             roomType: value?.roomType ?? '',
             serviceAmount: value?.serviceAmount || 0,
-            services: Array.isArray(value?.services) ? value!.services : [],
+            services: Array.isArray(value?.services) ? value.services : [],
           }))
         : [];
       return ipdAppointments;
@@ -185,8 +231,9 @@ const DashboardPage: React.FC = () => {
     return () => {
       unsubscribeBookings();
     };
-  }, []);
+  }, [doctors]); // Dependency on doctors
 
+  // Generate monthly data for charts
   const generateMonthsData = (appointments: Appointment[]) => {
     const dataOPD: { [key: string]: number } = {};
     const dataIPD: { [key: string]: number } = {};
@@ -204,6 +251,7 @@ const DashboardPage: React.FC = () => {
     setMonthsDataIPD(dataIPD);
   };
 
+  // Calculate total IPD amount
   const calculateTotalAmount = (appointments: Appointment[]) => {
     let totalIPD = 0;
 
@@ -217,6 +265,7 @@ const DashboardPage: React.FC = () => {
     setTotalAmountIPD(totalIPD);
   };
 
+  // Apply all filters
   const applyFilters = useCallback((query: string, month: string, today: boolean, date: string) => {
     let tempAppointments = [...appointments];
 
@@ -253,6 +302,7 @@ const DashboardPage: React.FC = () => {
     calculateTotalAmount(tempAppointments);
   }, [appointments]);
 
+  // Handle search input changes with debouncing
   const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const query = e.target.value;
     setSearchQuery(query);
@@ -264,6 +314,7 @@ const DashboardPage: React.FC = () => {
     [handleSearchChange]
   );
 
+  // Handle month filter changes
   const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = e.target.value;
     setSelectedMonth(month);
@@ -272,6 +323,7 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, month, false, '');
   };
 
+  // Handle "Today's Appointments" filter
   const handleTodayFilter = () => {
     setIsTodayFilter(true);
     setSelectedMonth('All');
@@ -279,6 +331,7 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, 'All', true, '');
   };
 
+  // Handle date picker changes
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const date = e.target.value;
     setSelectedDate(date);
@@ -287,10 +340,12 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, 'All', false, date);
   };
 
+  // Filter appointments for today
   const todayAppointments = appointments.filter((appointment) =>
     isToday(parseISO(appointment.date))
   );
 
+  // Prepare OPD chart data
   const chartDataOPD = {
     labels: Object.keys(monthsDataOPD),
     datasets: [
@@ -304,6 +359,7 @@ const DashboardPage: React.FC = () => {
     ],
   };
 
+  // Prepare IPD chart data
   const chartDataIPD = {
     labels: Object.keys(monthsDataIPD),
     datasets: [
@@ -317,11 +373,13 @@ const DashboardPage: React.FC = () => {
     ],
   };
 
+  // Open modal with IPD appointment details
   const openModal = (appointment: IPDAppointment) => {
     setSelectedIPDAppointment(appointment);
     setIsModalOpen(true);
   };
 
+  // Close modal
   const closeModal = () => {
     setSelectedIPDAppointment(null);
     setIsModalOpen(false);
@@ -340,7 +398,9 @@ const DashboardPage: React.FC = () => {
         <div className="max-w-7xl mx-auto">
           <h1 className="text-4xl font-bold text-indigo-600 mb-6 text-center">Appointments Dashboard</h1>
 
+          {/* Search and Filter Controls */}
           <div className="flex flex-col md:flex-row justify-between items-center mb-6 space-y-4 md:space-y-0">
+            {/* Search Bar */}
             <div className="relative w-full md:w-1/3">
               <AiOutlineSearch className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -351,6 +411,7 @@ const DashboardPage: React.FC = () => {
               />
             </div>
 
+            {/* Filter Buttons */}
             <div className="flex space-x-4">
               <button
                 onClick={() => {
@@ -381,6 +442,7 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Date Picker */}
           <div className="flex justify-end mb-6">
             <div className="w-1/3">
               <label htmlFor="date" className="block text-gray-700 font-semibold mb-2">
@@ -396,6 +458,7 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Month Selector */}
           <div className="flex justify-end mb-6">
             <div className="w-1/3">
               <label htmlFor="month" className="block text-gray-700 font-semibold mb-2">
@@ -417,7 +480,9 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Dashboard Statistics */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            {/* All Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineUser className="text-indigo-600 text-2xl" />
@@ -427,6 +492,8 @@ const DashboardPage: React.FC = () => {
                 <p className="text-2xl font-bold text-indigo-600">{appointments.length}</p>
               </div>
             </div>
+
+            {/* Today's Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
@@ -436,6 +503,8 @@ const DashboardPage: React.FC = () => {
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>
+
+            {/* Filtered Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineFileText className="text-indigo-600 text-2xl" />
@@ -445,6 +514,8 @@ const DashboardPage: React.FC = () => {
                 <p className="text-2xl font-bold text-indigo-600">{filteredAppointments.length}</p>
               </div>
             </div>
+
+            {/* Total IPD Amount */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineFileText className="text-indigo-600 text-2xl" />
@@ -456,6 +527,7 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
+          {/* Appointments Table */}
           <div className="bg-white shadow rounded-lg overflow-x-auto mb-6">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-indigo-50">
@@ -506,6 +578,7 @@ const DashboardPage: React.FC = () => {
             </table>
           </div>
 
+          {/* OPD Appointments Chart */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
             <h2 className="text-xl font-semibold text-gray-700 mb-4">OPD Appointments by Month</h2>
             {Object.keys(monthsDataOPD).length > 0 ? (
@@ -528,6 +601,7 @@ const DashboardPage: React.FC = () => {
             )}
           </div>
 
+          {/* IPD Appointments Chart */}
           <div className="bg-white shadow rounded-lg p-6 mb-6">
             <h2 className="text-xl font-semibold text-gray-700 mb-4">IPD Appointments by Month</h2>
             {Object.keys(monthsDataIPD).length > 0 ? (
@@ -550,6 +624,7 @@ const DashboardPage: React.FC = () => {
             )}
           </div>
 
+          {/* IPD Appointment Details Modal */}
           <Dialog open={isModalOpen} onClose={closeModal} className="fixed z-10 inset-0 overflow-y-auto">
             {isModalOpen && selectedIPDAppointment && (
               <div className="flex items-center justify-center min-h-screen px-4">
@@ -603,6 +678,7 @@ const DashboardPage: React.FC = () => {
   );
 };
 
+// Wrap the DashboardPage with ProtectedRoute for authentication
 const DashboardPageWithProtection: React.FC = () => (
   <ProtectedRoute>
     <DashboardPage />
