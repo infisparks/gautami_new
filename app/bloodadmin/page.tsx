@@ -145,7 +145,7 @@ const BloodTestsAdmin: React.FC = () => {
   // Export to PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
-    const tableColumn = ["Patient Name", "Phone Number", "Blood Test Name", "Amount", "Date", "Doctor"];
+    // const tableColumn = ["Patient Name", "Phone Number", "Blood Test Name", "Amount", "Date", "Doctor"];
     const tableRows: string[][] = [];
 
     filteredBloodTests.forEach((bt) => {
