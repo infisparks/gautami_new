@@ -38,6 +38,11 @@ const navItems: NavItemProps[] = [
       { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
     ],
   },
+  {
+    title: "Pathology",
+    icon: <LayoutDashboard size={20} />,
+    href: "/bloodtest",
+  },
 ];
 
 const Sidebar: React.FC = () => {

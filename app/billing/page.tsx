@@ -26,7 +26,7 @@ interface BillingRecord {
   name: string
   mobileNumber: string
   amount: number // Deposit amount
-  totalPaid: number // Deposit amount minus completed services
+  totalPaid: number // Completed services amount
   paymentType: string
   roomType?: string
   bed?: string
@@ -95,7 +95,7 @@ export default function IPDBillingPage() {
             name: rec.name,
             mobileNumber: rec.mobileNumber || '',
             amount: rec.amount || 0, 
-            totalPaid: rec.amount ? rec.amount - completedServicesAmount : 0,
+            totalPaid: completedServicesAmount, // Updated to represent completed services
             paymentType: rec.paymentType || 'deposit',
             roomType: rec.roomType,
             bed: rec.bed,
@@ -143,15 +143,12 @@ export default function IPDBillingPage() {
     return services.filter(s => s.status === 'completed').reduce((sum, s) => sum + s.amount, 0)
   }
 
-  const calculateTotalPaid = (deposit: number, completedServicesAmount: number) => {
-    return Math.max(deposit - completedServicesAmount, 0)
-  }
+  // Removed calculateTotalPaid as totalPaid now directly represents completed services
 
   const totalServicesAmount = selectedRecord ? calculateTotalServicesAmount(selectedRecord.services) : 0
   const completedServicesAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
-  const totalPaid = selectedRecord ? calculateTotalPaid(selectedRecord.amount, completedServicesAmount) : 0
-  const totalBill = totalServicesAmount
-  const outstanding = totalBill - totalPaid
+  const totalPaid = completedServicesAmount // Updated to represent completed services
+  // const outstanding = totalBill - totalPaid // Removed
 
   const pendingServicesAmount = selectedRecord ? selectedRecord.services.filter(s => s.status === 'pending').reduce((sum, s) => sum + s.amount, 0) : 0
   const completedServicesTotalAmount = selectedRecord ? selectedRecord.services.filter(s => s.status === 'completed').reduce((sum, s) => sum + s.amount, 0) : 0
@@ -173,11 +170,11 @@ export default function IPDBillingPage() {
         status: 'pending',
         createdAt: new Date().toISOString(),
       }
-      const updatedServices = [...currentServices, newService]
+      const updatedServices = [newService, ...currentServices] // Add new service at the beginning for recent order
 
       await update(recordRef, {
         services: updatedServices,
-        totalPaid: selectedRecord.amount - calculateCompletedServicesAmount(updatedServices),
+        totalPaid: calculateCompletedServicesAmount(updatedServices), // Update totalPaid based on completed services
       })
 
       toast.success('Additional service added successfully!', {
@@ -188,7 +185,7 @@ export default function IPDBillingPage() {
       const updatedRecord: BillingRecord = {
         ...selectedRecord,
         services: updatedServices,
-        totalPaid: calculateTotalPaid(selectedRecord.amount, calculateCompletedServicesAmount(updatedServices)),
+        totalPaid: calculateCompletedServicesAmount(updatedServices),
       }
       setSelectedRecord(updatedRecord)
 
@@ -223,7 +220,7 @@ export default function IPDBillingPage() {
       }
 
       currentServices[index].status = 'completed'
-      const updatedTotalPaid = calculateTotalPaid(recordSnap?.amount || 0, calculateCompletedServicesAmount(currentServices))
+      const updatedTotalPaid = calculateCompletedServicesAmount(currentServices) // Updated
 
       await update(recordRef, {
         services: currentServices,
@@ -388,12 +385,10 @@ export default function IPDBillingPage() {
             </div>
             <div className="flex justify-between text-sm mb-1">
               <span>Total Paid:</span>
-              <span className="font-semibold">{currencyFormatter.format(totalPaid)}</span>
+              {/* Apply red color to the "Total Paid" amount */}
+              <span className="font-semibold text-red-600">{currencyFormatter.format(totalPaid)}</span>
             </div>
-            <div className="flex justify-between text-lg font-bold mt-4">
-              <span>Outstanding Amount:</span>
-              <span className="text-red-600">{currencyFormatter.format(outstanding)}</span>
-            </div>
+            {/* Removed Outstanding Amount */}
           </div>
 
           <div className="text-sm text-gray-600">
@@ -441,12 +436,26 @@ export default function IPDBillingPage() {
       const dataURL = canvas.toDataURL('image/png');
       callback(dataURL);
     };
-    // img.onerror = (err: Event) => {
+    // img.onerror = (err: Event) => { // Ensure error handling is active
     //   console.error('Error loading logo image:', err)
     //   callback('')
     // }
     img.src = imgUrl
   }
+
+  // Helper function to get the most recent date of a record
+  const getRecordDate = (record: BillingRecord): Date => {
+    if (record.dischargeDate) {
+      return new Date(record.dischargeDate)
+    } else if (record.services.length > 0 && record.services[0].createdAt) {
+      return new Date(record.services[0].createdAt)
+    } else {
+      return new Date(0) // Earliest possible date if no date is available
+    }
+  }
+
+  // Sort the filteredRecords by recent date descending
+  const sortedFilteredRecords = [...filteredRecords].sort((a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime())
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -483,7 +492,7 @@ export default function IPDBillingPage() {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
-                {filteredRecords.length === 0 ? (
+                {sortedFilteredRecords.length === 0 ? (
                   <p className="text-gray-500 text-center">No records found.</p>
                 ) : (
                   <div className="overflow-x-auto">
@@ -498,7 +507,7 @@ export default function IPDBillingPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredRecords.map(rec => (
+                        {sortedFilteredRecords.map(rec => (
                           <motion.tr
                             key={rec.id}
                             className="hover:bg-indigo-50 cursor-pointer transition duration-150"
@@ -509,7 +518,13 @@ export default function IPDBillingPage() {
                             <td className="border-t px-4 py-2">{rec.mobileNumber}</td>
                             <td className="border-t px-4 py-2">{rec.totalPaid.toLocaleString()}</td>
                             <td className="border-t px-4 py-2 capitalize">{rec.paymentType}</td>
-                            <td className="border-t px-4 py-2">{rec.dischargeDate ? new Date(rec.dischargeDate).toLocaleDateString() : 'N/A'}</td>
+                            <td className="border-t px-4 py-2">
+                              {rec.dischargeDate 
+                                ? new Date(rec.dischargeDate).toLocaleDateString()
+                                : (rec.services[0]?.createdAt 
+                                    ? new Date(rec.services[0].createdAt).toLocaleDateString()
+                                    : 'N/A')}
+                            </td>
                           </motion.tr>
                         ))}
                       </tbody>
@@ -544,9 +559,9 @@ export default function IPDBillingPage() {
                     <div>
                       <p><strong>Deposit Amount:</strong> Rs. {selectedRecord.amount.toLocaleString()}</p>
                       <p><strong>Completed Services Amount:</strong> Rs. {completedServicesAmount.toLocaleString()}</p>
-                      <p><strong>Total Paid (Deposit - Completed Services):</strong> Rs. {totalPaid.toLocaleString()}</p>
+                      <p><strong>Total Paid (Completed Services):</strong> Rs. {totalPaid.toLocaleString()}</p>
                       <p><strong>Total Services Amount:</strong> Rs. {totalServicesAmount.toLocaleString()}</p>
-                      <p><strong>Outstanding:</strong> Rs. {outstanding > 0 ? outstanding.toLocaleString() : '0'}</p>
+                      {/* Removed Outstanding */}
                       <p><strong>Discharge Date:</strong> {selectedRecord.dischargeDate ? new Date(selectedRecord.dischargeDate).toLocaleDateString() : 'N/A'}</p>
                     </div>
                   </div>
@@ -680,3 +695,6 @@ export default function IPDBillingPage() {
     </div>
   )
 }
+
+// Remove the incorrect export statement below
+// export default IPDBookingPage;
