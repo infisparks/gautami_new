@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { ref, onValue } from 'firebase/database';
-import { ToastContainer, toast } from 'react-toastify';
+import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { Search } from 'lucide-react';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';

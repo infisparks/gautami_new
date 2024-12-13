@@ -66,7 +66,7 @@ const PatientPaymentDetails: React.FC = () => {
   const [totalPayments, setTotalPayments] = useState<number>(0);
   const [mostSellDay, setMostSellDay] = useState<string>('');
 
-  const router = useRouter();
+ 
   const url = typeof window !== 'undefined' ? window.location.pathname : '';
   const id = url.split('/').pop() || '';
 

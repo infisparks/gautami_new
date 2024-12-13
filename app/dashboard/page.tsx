@@ -550,7 +550,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today's Appointments</p>
+                <p className="text-gray-600">Today Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>
@@ -573,7 +573,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineFileText className="text-green-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today's IPD Amount</p>
+                <p className="text-gray-600">Today IPD Amount</p>
                 <p className="text-2xl font-bold text-green-600">{formatCurrency(todayAmountIPD)}</p>
               </div>
             </div>
@@ -585,7 +585,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineFileText className="text-blue-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today's OPD Amount</p>
+                <p className="text-gray-600">Today OPD Amount</p>
                 <p className="text-2xl font-bold text-blue-600">{formatCurrency(todayAmountOPD)}</p>
               </div>
             </div>
@@ -597,7 +597,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineFileText className="text-yellow-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today's Pathology Amount</p>
+                <p className="text-gray-600">Today Pathology Amount</p>
                 <p className="text-2xl font-bold text-yellow-600">{formatCurrency(todayAmountPathology)}</p>
               </div>
             </div>
