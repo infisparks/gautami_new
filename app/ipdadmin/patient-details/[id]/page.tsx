@@ -11,7 +11,7 @@ import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Toolti
 import { Bar } from 'react-chartjs-2';
 import { format, subDays, isSameDay } from 'date-fns';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
