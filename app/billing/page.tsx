@@ -12,7 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail, History } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 import { Dialog, Transition } from '@headlessui/react'
 
 interface Service {
@@ -32,13 +32,13 @@ interface BillingRecord {
   id: string
   name: string
   mobileNumber: string
-  amount: number // Deposit amount (ensure numeric)
-  totalPaid: number // Completed services amount
+  amount: number
+  totalPaid: number
   paymentType: string
   roomType?: string
   bed?: string
   services: Service[]
-  payments: Payment[] // Array of payments
+  payments: Payment[]
   dischargeDate?: string
 }
 
@@ -114,7 +114,7 @@ export default function IPDBillingPage() {
   })
 
   useEffect(() => {
-    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png' // Replace with actual logo URL
+    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png'
     getBase64Image(logoUrl, (base64: string) => {
       setLogoBase64(base64)
     })
@@ -202,7 +202,6 @@ export default function IPDBillingPage() {
   }
 
   const totalServicesAmount = selectedRecord ? calculateTotalServicesAmount(selectedRecord.services) : 0
-  // const completedServicesAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
   const totalPaid = selectedRecord ? selectedRecord.totalPaid : 0
   const pendingServicesAmount = selectedRecord ? calculatePendingServicesAmount(selectedRecord.services) : 0
   const completedServicesTotalAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
@@ -211,25 +210,16 @@ export default function IPDBillingPage() {
     if (!selectedRecord) return
     setLoading(true)
     try {
-      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
-      const recordSnap = await new Promise<Partial<BillingRecord> | null>((resolve) => {
-        onValue(recordRef, (snap) => {
-          resolve(snap.val() as Partial<BillingRecord> | null)
-        }, { onlyOnce: true })
-      })
-      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s:any) => ({
-        ...s,
-        amount: Number(s.amount)
-      })) : []
-
+      const currentServices: Service[] = selectedRecord.services || []
       const newService: Service = {
         serviceName: data.serviceName,
         amount: Number(data.amount),
         status: 'pending',
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toLocaleString(),
       }
       const updatedServices = [newService, ...currentServices]
 
+      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
       await update(recordRef, {
         services: updatedServices,
         totalPaid: calculateCompletedServicesAmount(updatedServices),
@@ -322,17 +312,7 @@ export default function IPDBillingPage() {
     if (!selectedRecord) return
     setLoading(true)
     try {
-      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
-      const recordSnap = await new Promise<Partial<BillingRecord> | null>((resolve) => {
-        onValue(recordRef, (snap) => {
-          resolve(snap.val() as Partial<BillingRecord> | null)
-        }, { onlyOnce: true })
-      })
-
-      const currentServices: Service[] = recordSnap?.services ? recordSnap.services.map((s:any) => ({
-        ...s,
-        amount: Number(s.amount)
-      })) : []
+      const currentServices: Service[] = [...selectedRecord.services]
 
       if (!currentServices[index] || currentServices[index].status === 'completed') {
         setLoading(false)
@@ -342,6 +322,7 @@ export default function IPDBillingPage() {
       currentServices[index].status = 'completed'
       const updatedTotalPaid = calculateCompletedServicesAmount(currentServices)
 
+      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
       await update(recordRef, {
         services: currentServices,
         totalPaid: updatedTotalPaid,
@@ -424,14 +405,12 @@ export default function IPDBillingPage() {
   const InvoiceContent: React.FC = () => (
     <div className="max-w-4xl mx-auto bg-white text-gray-800 font-sans p-8">
       <div className="flex items-start justify-between mb-8">
-        {/* Left: Logo */}
         {hospitalInfo.logoBase64 && (
           <div className="flex-shrink-0 mr-4">
             <img src={hospitalInfo.logoBase64} alt="Hospital Logo" width={64} height={64} />
           </div>
         )}
 
-        {/* Right: Hospital Details */}
         <div className="text-right">
           <h1 className="text-2xl font-bold">{hospitalInfo.name}</h1>
           <p className="text-sm">{hospitalInfo.address}</p>
@@ -585,7 +564,6 @@ export default function IPDBillingPage() {
         <div className="p-8">
           <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">IPD Billing Management</h1>
 
-          {/* Search Section */}
           <div className="mb-8">
             <div className="flex items-center bg-gray-100 rounded-full p-2">
               <input
@@ -641,10 +619,8 @@ export default function IPDBillingPage() {
                             <td className="border-t px-4 py-2 capitalize">{rec.paymentType}</td>
                             <td className="border-t px-4 py-2">
                               {rec.dischargeDate 
-                                ? new Date(rec.dischargeDate).toLocaleDateString()
-                                : (rec.services[0]?.createdAt 
-                                    ? new Date(rec.services[0].createdAt).toLocaleDateString()
-                                    : 'N/A')}
+                                ? format(parseISO(rec.dischargeDate), 'dd MMM yyyy')
+                                : 'Not discharged'}
                             </td>
                           </motion.tr>
                         ))}
@@ -679,10 +655,8 @@ export default function IPDBillingPage() {
                     </div>
                     <div>
                       <p><strong>Deposit Amount:</strong> Rs. {selectedRecord.amount.toLocaleString()}</p>
-                      {/* <p><strong>Completed Services Amount:</strong> Rs. {completedServicesAmount.toLocaleString()}</p> */}
-                      {/* <p><strong>Total Paid (Completed Services):</strong> Rs. {totalPaid.toLocaleString()}</p> */}
                       <p><strong>Total Services Amount:</strong> Rs. {totalServicesAmount.toLocaleString()}</p>
-                      <p><strong>Discharge Date:</strong> {selectedRecord.dischargeDate ? new Date(selectedRecord.dischargeDate).toLocaleDateString() : 'N/A'}</p>
+                      <p><strong>Discharge Date:</strong> {selectedRecord.dischargeDate ? format(parseISO(selectedRecord.dischargeDate), 'dd MMM yyyy') : 'Not discharged'}</p>
                     </div>
                   </div>
                 </div>
@@ -696,7 +670,6 @@ export default function IPDBillingPage() {
                   </div>
                 </div>
 
-                {/* Payment History Button */}
                 <div className="flex items-center justify-end mb-4">
                   <button
                     onClick={() => setIsPaymentHistoryOpen(true)}
@@ -707,7 +680,6 @@ export default function IPDBillingPage() {
                   </button>
                 </div>
 
-                {/* Payment Form */}
                 {!selectedRecord.dischargeDate && (
                   <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                     <h3 className="text-xl font-semibold text-indigo-800 mb-4">Record Additional Payment</h3>
@@ -752,7 +724,6 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
-                {/* Services Table */}
                 <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                   <h3 className="text-xl font-semibold text-indigo-800 mb-4">Additional Services</h3>
                   {selectedRecord.services.length === 0 ? (
@@ -801,7 +772,6 @@ export default function IPDBillingPage() {
                   )}
                 </div>
 
-                {/* Add Additional Service Section */}
                 {!selectedRecord.dischargeDate && (
                   <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                     <h3 className="text-xl font-semibold text-indigo-800 mb-4">Add Additional Service</h3>
@@ -843,7 +813,6 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
-                {/* Discharge Button */}
                 {!selectedRecord.dischargeDate && (
                   <div className="flex justify-center mb-8">
                     <button
@@ -858,7 +827,6 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
-                {/* Download Invoice Button */}
                 <div className="flex justify-center mb-8">
                   <button
                     onClick={handleDownloadInvoice}
@@ -874,14 +842,12 @@ export default function IPDBillingPage() {
         </div>
       </div>
 
-      {/* Hidden Invoice for PDF Generation */}
       {selectedRecord && (
         <div ref={invoiceRef} style={{ position: 'absolute', left: '-9999px', top: 0 }}>
           <InvoiceContent />
         </div>
       )}
 
-      {/* Payment History Modal */}
       <Transition appear show={isPaymentHistoryOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsPaymentHistoryOpen(false)}>
           <Transition.Child
@@ -950,3 +916,4 @@ export default function IPDBillingPage() {
     </div>
   )
 }
+

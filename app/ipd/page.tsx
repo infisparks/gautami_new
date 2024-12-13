@@ -12,7 +12,8 @@ import {
   AiOutlinePhone, 
   AiOutlineCalendar, 
   AiOutlineClockCircle, 
-  AiOutlineInfoCircle 
+  AiOutlineInfoCircle, 
+  AiOutlineMail 
 } from 'react-icons/ai';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -22,6 +23,7 @@ import Select, { SingleValue } from 'react-select';
 
 interface IPDFormInput {
   name: string;
+  email?: string;
   gender: { label: string; value: string };
   dateOfBirth: Date;
   age: number;
@@ -36,9 +38,6 @@ interface IPDFormInput {
   doctor: { label: string; value: string };
   referralDoctor?: string;
   admissionType: { label: string; value: string };
-  amount: number;
-  paymentType: { label: string; value: string };
-  paymentMode: { label: string; value: string };
 }
 
 const AdmissionTypes = [
@@ -79,16 +78,6 @@ const RoomTypeOptions = [
   { value: 'nicu', label: 'NICU (1 Bed)' },
 ];
 
-const PaymentTypeOptions = [
-  { value: 'deposit', label: 'Deposit' },
-  { value: 'settlement', label: 'Settlement' },
-];
-
-const PaymentModeOptions = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'online', label: 'Online' },
-];
-
 function formatAMPM(date: Date): string {
   let hours = date.getHours();
   let minutes: string | number = date.getMinutes();
@@ -121,11 +110,9 @@ const IPDBookingPage: React.FC = () => {
       admissionType: { label: 'General', value: 'general' },
       age: 0,
       dateOfBirth: new Date(),
-      amount: 0,
-      paymentType: { label: 'Deposit', value: 'deposit' },
-      paymentMode: { label: 'Cash', value: 'cash' },
       mobileNumber: '',
       referralDoctor: '',
+      email: '',
     },
   });
 
@@ -213,6 +200,7 @@ const IPDBookingPage: React.FC = () => {
 
       const admissionData = {
         name: data.name,
+        email: data.email || '',
         gender: data.gender.value,
         dateOfBirth: data.dateOfBirth.toISOString(),
         age: data.age,
@@ -227,11 +215,6 @@ const IPDBookingPage: React.FC = () => {
         doctor: data.doctor.value,
         referralDoctor: data.referralDoctor || '',
         admissionType: data.admissionType.value,
-        amount: data.amount,
-        paymentType: data.paymentType.value,
-        paymentMode: data.paymentMode.value,
-        totalPaid: data.paymentType.value === 'deposit' ? data.amount : 0,
-        serviceAmount: 0,
         dischargeDate: '',
         createdAt: new Date().toISOString(),
       };
@@ -257,11 +240,9 @@ const IPDBookingPage: React.FC = () => {
         admissionType: { label: 'General', value: 'general' },
         age: 0,
         dateOfBirth: new Date(),
-        amount: 0,
-        paymentType: { label: 'Deposit', value: 'deposit' },
-        paymentMode: { label: 'Cash', value: 'cash' },
         mobileNumber: '',
         referralDoctor: '',
+        email: '',
       });
       setPreviewData(null);
     } catch (error) {
@@ -278,6 +259,9 @@ const IPDBookingPage: React.FC = () => {
   const handlePreview = () => {
     setPreviewData(watch());
   };
+
+  // Determine if beds are available
+  const bedsAvailable = beds.length > 0;
 
   return (
     <>
@@ -304,6 +288,24 @@ const IPDBookingPage: React.FC = () => {
                 } transition duration-200`}
               />
               {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
+            </div>
+
+            <div className="relative">
+              <AiOutlineMail className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="email"
+                {...register('email', {
+                  pattern: {
+                    value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                    message: 'Enter a valid email address',
+                  },
+                })}
+                placeholder="Email (Optional)"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+                  errors.email ? 'border-red-500' : 'border-gray-300'
+                } transition duration-200`}
+              />
+              {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
             </div>
 
             <div>
@@ -592,75 +594,24 @@ const IPDBookingPage: React.FC = () => {
               {errors.admissionType && <p className="text-red-500 text-sm mt-1">{errors.admissionType.message}</p>}
             </div>
 
-            <div className="relative">
-              <AiOutlineInfoCircle className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="number"
-                {...register('amount', { required: 'Amount is required' })}
-                placeholder="Amount (Services)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                  errors.amount ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-              />
-              {errors.amount && <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>}
-            </div>
-
-            <div>
-              <label className="block text-gray-700 mb-2">Payment Type</label>
-              <Controller
-                control={control}
-                name="paymentType"
-                rules={{ required: 'Payment Type is required' }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={PaymentTypeOptions}
-                    placeholder="Select Payment Type"
-                    classNamePrefix="react-select"
-                    className={`${errors.paymentType ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
-                  />
-                )}
-              />
-              {errors.paymentType && <p className="text-red-500 text-sm mt-1">{errors.paymentType.message}</p>}
-            </div>
-
-            <div>
-              <label className="block text-gray-700 mb-2">Payment Mode</label>
-              <Controller
-                control={control}
-                name="paymentMode"
-                rules={{ required: 'Payment Mode is required' }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={PaymentModeOptions}
-                    placeholder="Select Payment Mode"
-                    classNamePrefix="react-select"
-                    className={`${errors.paymentMode ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
-                  />
-                )}
-              />
-              {errors.paymentMode && <p className="text-red-500 text-sm mt-1">{errors.paymentMode.message}</p>}
-            </div>
-
+            {/* Preview Button */}
             <button
               type="button"
               onClick={handlePreview}
               className="w-full py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
+              disabled={!bedsAvailable}
             >
               Preview
             </button>
 
+            {/* Preview Modal */}
             {previewData && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
                   <h3 className="text-2xl font-semibold mb-4">Preview IPD Admission</h3>
                   <div className="space-y-2">
                     <p><strong>Full Name:</strong> {previewData.name}</p>
+                    {previewData.email && <p><strong>Email:</strong> {previewData.email}</p>}
                     <p><strong>Gender:</strong> {previewData.gender.label}</p>
                     <p><strong>Date of Birth:</strong> {previewData.dateOfBirth.toLocaleDateString()}</p>
                     <p><strong>Age:</strong> {previewData.age}</p>
@@ -675,9 +626,6 @@ const IPDBookingPage: React.FC = () => {
                     <p><strong>Under Care of Doctor:</strong> {previewData.doctor.label}</p>
                     {previewData.referralDoctor && <p><strong>Referral Doctor:</strong> {previewData.referralDoctor}</p>}
                     <p><strong>Admission Type:</strong> {previewData.admissionType.label}</p>
-                    <p><strong>Amount (Services):</strong> Rs. {previewData.amount}</p>
-                    <p><strong>Payment Type:</strong> {previewData.paymentType.label}</p>
-                    <p><strong>Payment Mode:</strong> {previewData.paymentMode.label}</p>
                   </div>
                   <div className="mt-6 flex justify-end space-x-4">
                     <button
@@ -701,15 +649,23 @@ const IPDBookingPage: React.FC = () => {
               </div>
             )}
 
+            {/* Submit Button */}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !bedsAvailable}
               className={`w-full py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                loading ? 'opacity-50 cursor-not-allowed' : ''
+                loading || !bedsAvailable ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
               {loading ? 'Submitting...' : 'Submit Admission'}
             </button>
+
+            {/* No Beds Available Message */}
+            {!bedsAvailable && (
+              <p className="text-red-500 text-center mt-4">
+                No beds are available for the selected room type. Please choose a different room type.
+              </p>
+            )}
           </form>
         </div>
       </main>

@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
@@ -29,15 +28,26 @@ import { Dialog } from '@headlessui/react';
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
+// Doctor Interface
+interface Doctor {
+  name: string;
+  amount?: number;
+  department?: string;
+  specialist?: string;
+}
+
+// OPD Data Structure
 interface OPDData {
   name: string;
   phone: string;
   date: string;
   time: string;
-  doctor: string;
+  doctor: string; // doctor ID
   amount?: number;
+  serviceName?: string;
 }
 
+// IPD Service Structure
 interface IPDService {
   amount: number;
   createdAt: string;
@@ -45,13 +55,14 @@ interface IPDService {
   status: string;
 }
 
+// IPD Data Structure
 interface IPDData {
   name: string;
   mobileNumber?: string;
   emergencyMobileNumber?: string;
   date: string;
   time: string;
-  doctor: string;
+  doctor: string; // doctor ID
   admissionType: string;
   age: number;
   bloodGroup: string;
@@ -63,28 +74,38 @@ interface IPDData {
   paymentType: string;
   referralDoctor?: string;
   roomType: string;
-  serviceAmount?: number;
+  amount: number; // Assuming this includes services
   services?: IPDService[];
 }
 
-interface OPDAppointment {
-  id: string;
+// Pathology (Blood Test) Data Structure
+interface PathologyData {
   name: string;
   phone: string;
-  date: string;
-  time: string;
-  doctor: string; // Updated to doctor name
-  appointmentType: 'OPD';
+  bloodTestName: string;
   amount: number;
+  timestamp: number;
+  age: number;
 }
 
-interface IPDAppointment {
+// Unified Appointment Types
+interface BaseAppointment {
   id: string;
   name: string;
   phone: string;
   date: string;
   time: string;
-  doctor: string; // Updated to doctor name
+  doctor: string; // Resolved to Doctor name
+  appointmentType: 'OPD' | 'IPD' | 'Pathology';
+}
+
+interface OPDAppointment extends BaseAppointment {
+  appointmentType: 'OPD';
+  amount: number;
+  serviceName?: string;
+}
+
+interface IPDAppointment extends BaseAppointment {
   appointmentType: 'IPD';
   admissionType: string;
   age: number;
@@ -94,23 +115,31 @@ interface IPDAppointment {
   emergencyMobileNumber: string;
   gender: string;
   membershipType: string;
-  mobileNumber: string;
   paymentMode: string;
   paymentType: string;
   referralDoctor: string;
   roomType: string;
-  serviceAmount: number;
+  amount: number; // Assuming this includes services
   services: IPDService[];
 }
 
-type Appointment = OPDAppointment | IPDAppointment;
-
-interface Doctor {
-  name: string;
-  amount?: number;
-  department?: string;
-  specialist?: string;
+interface PathologyAppointment extends BaseAppointment {
+  appointmentType: 'Pathology';
+  bloodTestName: string;
+  amount: number;
+  age: number;
 }
+
+type Appointment = OPDAppointment | IPDAppointment | PathologyAppointment;
+
+// Helper function for currency formatting
+const formatCurrency = (amount: number): string => {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2,
+  }).format(amount);
+};
 
 const DashboardPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -120,25 +149,28 @@ const DashboardPage: React.FC = () => {
   const [isTodayFilter, setIsTodayFilter] = useState<boolean>(false);
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
-  const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
+  const [todayAmountIPD, setTodayAmountIPD] = useState<number>(0);
+  const [todayAmountOPD, setTodayAmountOPD] = useState<number>(0);
+  const [todayAmountPathology, setTodayAmountPathology] = useState<number>(0);
   const [selectedDate, setSelectedDate] = useState<string>('');
+
+  // Modal state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [selectedIPDAppointment, setSelectedIPDAppointment] = useState<IPDAppointment | null>(null);
-  
-  // State to store doctors data
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+
+  // Doctors data
   const [doctors, setDoctors] = useState<{ [key: string]: Doctor }>({});
 
-  // Helper function to safely retrieve doctor names
+  // Helper function to get Doctor name from ID
   const getDoctorName = (doctorId?: string): string => {
     if (!doctorId) return 'Unknown';
     return doctors[doctorId]?.name || 'Unknown';
   };
 
-  // Fetch doctors data from Firebase
+  // Fetch doctors
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
-
-    const handleDoctors = (snapshot: DataSnapshot) => {
+    const unsubscribeDoctors = onValue(doctorsRef, (snapshot: DataSnapshot) => {
       const data = snapshot.val() as Record<string, Doctor | undefined>;
       const doctorsData: { [key: string]: Doctor } = data
         ? Object.entries(data).reduce((acc, [id, value]) => {
@@ -149,89 +181,93 @@ const DashboardPage: React.FC = () => {
           }, {} as { [key: string]: Doctor })
         : {};
       setDoctors(doctorsData);
-    };
-
-    const unsubscribeDoctors = onValue(doctorsRef, handleDoctors);
+    });
 
     return () => {
       unsubscribeDoctors();
     };
   }, []);
 
-  // Fetch appointments data from Firebase
+  // Fetch all appointments once doctors are loaded
   useEffect(() => {
-    // Ensure doctors data is loaded before fetching appointments
-    if (Object.keys(doctors).length === 0) {
-      return;
-    }
+    if (Object.keys(doctors).length === 0) return;
 
     const bookingsRef = ref(db, 'bookings');
     const ipdBookingsRef = ref(db, 'ipd_bookings');
+    const bloodTestsRef = ref(db, 'bloodTests');
 
-    const handleBookings = (snapshot: DataSnapshot) => {
-      const data = snapshot.val() as Record<string, OPDData | undefined>;
-      const opdAppointments: OPDAppointment[] = data
-        ? Object.entries(data).map(([id, value]) => ({
+    let allAppointments: Appointment[] = [];
+
+    onValue(bookingsRef, (bookingsSnapshot) => {
+      const opdData = bookingsSnapshot.val() as Record<string, OPDData | undefined>;
+      const opdAppointments: OPDAppointment[] = opdData
+        ? Object.entries(opdData).map(([id, val]) => ({
             id,
-            name: value?.name ?? '',
-            phone: value?.phone ?? '',
-            date: value?.date ?? '',
-            time: value?.time ?? '',
-            doctor: getDoctorName(value?.doctor),
+            name: val?.name ?? '',
+            phone: val?.phone ?? '',
+            date: val?.date ?? '',
+            time: val?.time ?? '',
+            doctor: getDoctorName(val?.doctor),
             appointmentType: 'OPD',
-            amount: value?.amount || 0,
+            amount: val?.amount || 0,
+            serviceName: val?.serviceName,
           }))
         : [];
-      return opdAppointments;
-    };
 
-    const handleIPDBookings = (snapshot: DataSnapshot) => {
-      const data = snapshot.val() as Record<string, IPDData | undefined>;
-      const ipdAppointments: IPDAppointment[] = data
-        ? Object.entries(data).map(([id, value]) => ({
-            id,
-            name: value?.name ?? '',
-            phone: value?.mobileNumber || value?.emergencyMobileNumber || '',
-            date: value?.date ?? '',
-            time: value?.time ?? '',
-            doctor: getDoctorName(value?.doctor),
-            appointmentType: 'IPD',
-            admissionType: value?.admissionType ?? '',
-            age: value?.age ?? 0,
-            bloodGroup: value?.bloodGroup ?? '',
-            dateOfBirth: value?.dateOfBirth ?? '',
-            dischargeDate: value?.dischargeDate ?? '',
-            emergencyMobileNumber: value?.emergencyMobileNumber ?? '',
-            gender: value?.gender ?? '',
-            membershipType: value?.membershipType ?? '',
-            mobileNumber: value?.mobileNumber ?? '',
-            paymentMode: value?.paymentMode ?? '',
-            paymentType: value?.paymentType ?? '',
-            referralDoctor: value?.referralDoctor ?? '',
-            roomType: value?.roomType ?? '',
-            serviceAmount: value?.serviceAmount || 0,
-            services: Array.isArray(value?.services) ? value.services : [],
-          }))
-        : [];
-      return ipdAppointments;
-    };
-
-    const unsubscribeBookings = onValue(bookingsRef, (snapshot) => {
-      const opdAppointments = handleBookings(snapshot);
       onValue(ipdBookingsRef, (ipdSnapshot) => {
-        const ipdAppointments = handleIPDBookings(ipdSnapshot);
-        const allAppointments: Appointment[] = [...opdAppointments, ...ipdAppointments];
-        setAppointments(allAppointments);
-        setFilteredAppointments(allAppointments);
-        generateMonthsData(allAppointments);
-        calculateTotalAmount(allAppointments);
+        const ipdData = ipdSnapshot.val() as Record<string, IPDData | undefined>;
+        const ipdAppointments: IPDAppointment[] = ipdData
+          ? Object.entries(ipdData).map(([id, val]) => ({
+              id,
+              name: val?.name ?? '',
+              phone: val?.mobileNumber || val?.emergencyMobileNumber || '',
+              date: val?.date ?? '',
+              time: val?.time ?? '',
+              doctor: getDoctorName(val?.doctor),
+              appointmentType: 'IPD',
+              admissionType: val?.admissionType ?? '',
+              age: val?.age ?? 0,
+              bloodGroup: val?.bloodGroup ?? '',
+              dateOfBirth: val?.dateOfBirth ?? '',
+              dischargeDate: val?.dischargeDate ?? '',
+              emergencyMobileNumber: val?.emergencyMobileNumber ?? '',
+              gender: val?.gender ?? '',
+              membershipType: val?.membershipType ?? '',
+              paymentMode: val?.paymentMode ?? '',
+              paymentType: val?.paymentType ?? '',
+              referralDoctor: val?.referralDoctor ?? '',
+              roomType: val?.roomType ?? '',
+              amount: val?.amount || 0, // Assuming 'amount' includes services
+              services: Array.isArray(val?.services) ? val?.services : [],
+            }))
+          : [];
+
+        onValue(bloodTestsRef, (bloodSnapshot) => {
+          const bloodData = bloodSnapshot.val() as Record<string, PathologyData | undefined>;
+          const pathologyAppointments: PathologyAppointment[] = bloodData
+            ? Object.entries(bloodData).map(([id, val]) => ({
+                id,
+                name: val?.name ?? '',
+                phone: val?.phone ?? '',
+                date: val?.timestamp ? new Date(val.timestamp).toISOString() : new Date().toISOString(),
+                time: '', // No time in pathology data
+                doctor: 'N/A', // If there's no doctor assigned in bloodTests
+                appointmentType: 'Pathology',
+                bloodTestName: val?.bloodTestName ?? '',
+                amount: val?.amount ?? 0,
+                age: val?.age ?? 0,
+              }))
+            : [];
+
+          allAppointments = [...opdAppointments, ...ipdAppointments, ...pathologyAppointments];
+          setAppointments(allAppointments);
+          setFilteredAppointments(allAppointments);
+          generateMonthsData(allAppointments);
+          calculateTodayAmounts(allAppointments); // Updated function
+        });
       });
     });
-
-    return () => {
-      unsubscribeBookings();
-    };
-  }, [doctors]); // Dependency on doctors
+  }, [doctors]);
 
   // Generate monthly data for charts
   const generateMonthsData = (appointments: Appointment[]) => {
@@ -239,7 +275,8 @@ const DashboardPage: React.FC = () => {
     const dataIPD: { [key: string]: number } = {};
 
     appointments.forEach((appointment) => {
-      const month = format(parseISO(appointment.date), 'MMMM');
+      const parsedDate = parseISO(appointment.date);
+      const month = format(parsedDate, 'MMMM');
       if (appointment.appointmentType === 'OPD') {
         dataOPD[month] = (dataOPD[month] || 0) + 1;
       } else if (appointment.appointmentType === 'IPD') {
@@ -251,70 +288,89 @@ const DashboardPage: React.FC = () => {
     setMonthsDataIPD(dataIPD);
   };
 
-  // Calculate total IPD amount
-  const calculateTotalAmount = (appointments: Appointment[]) => {
-    let totalIPD = 0;
+  // Calculate today's amounts for IPD, OPD, and Pathology
+  const calculateTodayAmounts = (appointments: Appointment[]) => {
+    let ipdTotal = 0;
+    let opdTotal = 0;
+    let pathologyTotal = 0;
+
+    const todayDate = new Date();
+    const todayDateString = format(todayDate, 'yyyy-MM-dd');
 
     appointments.forEach((appointment) => {
-      if (appointment.appointmentType === 'IPD') {
-        const ipdApp = appointment as IPDAppointment;
-        totalIPD += ipdApp.serviceAmount + ipdApp.services.reduce((acc, service) => acc + service.amount, 0);
+      const appointmentDate = parseISO(appointment.date);
+      const appointmentDateFormatted = format(appointmentDate, 'yyyy-MM-dd');
+
+      if (appointmentDateFormatted === todayDateString) {
+        if (appointment.appointmentType === 'IPD') {
+          const ipd = appointment as IPDAppointment;
+          ipdTotal += ipd.amount; // Assuming 'amount' includes services
+        } else if (appointment.appointmentType === 'OPD') {
+          const opd = appointment as OPDAppointment;
+          opdTotal += opd.amount;
+        } else if (appointment.appointmentType === 'Pathology') {
+          const pathology = appointment as PathologyAppointment;
+          pathologyTotal += pathology.amount;
+        }
       }
     });
 
-    setTotalAmountIPD(totalIPD);
+    setTodayAmountIPD(ipdTotal);
+    setTodayAmountOPD(opdTotal);
+    setTodayAmountPathology(pathologyTotal);
   };
 
   // Apply all filters
-  const applyFilters = useCallback((query: string, month: string, today: boolean, date: string) => {
-    let tempAppointments = [...appointments];
+  const applyFilters = useCallback(
+    (query: string, month: string, today: boolean, date: string) => {
+      let tempAppointments = [...appointments];
 
-    if (query) {
-      const lowerQuery = query.toLowerCase();
-      tempAppointments = tempAppointments.filter(
-        (appointment) =>
-          appointment.name.toLowerCase().includes(lowerQuery) ||
-          appointment.phone.includes(query)
-      );
-    }
+      if (query) {
+        const lowerQuery = query.toLowerCase();
+        tempAppointments = tempAppointments.filter(
+          (appointment) =>
+            appointment.name.toLowerCase().includes(lowerQuery) ||
+            appointment.phone.includes(query)
+        );
+      }
 
-    if (month !== 'All') {
-      tempAppointments = tempAppointments.filter((appointment) => {
-        const appointmentMonth = format(parseISO(appointment.date), 'MMMM');
-        return appointmentMonth === month;
-      });
-    }
+      if (month !== 'All') {
+        tempAppointments = tempAppointments.filter((appointment) => {
+          const appointmentMonth = format(parseISO(appointment.date), 'MMMM');
+          return appointmentMonth === month;
+        });
+      }
 
-    if (today) {
-      tempAppointments = tempAppointments.filter((appointment) =>
-        isToday(parseISO(appointment.date))
-      );
-    }
+      if (today) {
+        tempAppointments = tempAppointments.filter((appointment) =>
+          isToday(parseISO(appointment.date))
+        );
+      }
 
-    if (date) {
-      tempAppointments = tempAppointments.filter(
-        (appointment) => format(parseISO(appointment.date), 'yyyy-MM-dd') === date
-      );
-    }
+      if (date) {
+        tempAppointments = tempAppointments.filter(
+          (appointment) => format(parseISO(appointment.date), 'yyyy-MM-dd') === date
+        );
+      }
 
-    setFilteredAppointments(tempAppointments);
-    generateMonthsData(tempAppointments);
-    calculateTotalAmount(tempAppointments);
-  }, [appointments]);
-
-  // Handle search input changes with debouncing
-  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchQuery(query);
-    applyFilters(query, selectedMonth, isTodayFilter, selectedDate);
-  }, [selectedMonth, isTodayFilter, selectedDate, applyFilters]);
-
-  const debouncedSearch = useMemo(
-    () => debounce(handleSearchChange, 300),
-    [handleSearchChange]
+      setFilteredAppointments(tempAppointments);
+      generateMonthsData(tempAppointments);
+      calculateTodayAmounts(tempAppointments);
+    },
+    [appointments]
   );
 
-  // Handle month filter changes
+  const handleSearchChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const query = e.target.value;
+      setSearchQuery(query);
+      applyFilters(query, selectedMonth, isTodayFilter, selectedDate);
+    },
+    [selectedMonth, isTodayFilter, selectedDate, applyFilters]
+  );
+
+  const debouncedSearch = useMemo(() => debounce(handleSearchChange, 300), [handleSearchChange]);
+
   const handleFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const month = e.target.value;
     setSelectedMonth(month);
@@ -323,7 +379,6 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, month, false, '');
   };
 
-  // Handle "Today's Appointments" filter
   const handleTodayFilter = () => {
     setIsTodayFilter(true);
     setSelectedMonth('All');
@@ -331,7 +386,6 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, 'All', true, '');
   };
 
-  // Handle date picker changes
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const date = e.target.value;
     setSelectedDate(date);
@@ -340,12 +394,11 @@ const DashboardPage: React.FC = () => {
     applyFilters(searchQuery, 'All', false, date);
   };
 
-  // Filter appointments for today
   const todayAppointments = appointments.filter((appointment) =>
     isToday(parseISO(appointment.date))
   );
 
-  // Prepare OPD chart data
+  // Charts data
   const chartDataOPD = {
     labels: Object.keys(monthsDataOPD),
     datasets: [
@@ -359,7 +412,6 @@ const DashboardPage: React.FC = () => {
     ],
   };
 
-  // Prepare IPD chart data
   const chartDataIPD = {
     labels: Object.keys(monthsDataIPD),
     datasets: [
@@ -373,15 +425,14 @@ const DashboardPage: React.FC = () => {
     ],
   };
 
-  // Open modal with IPD appointment details
-  const openModal = (appointment: IPDAppointment) => {
-    setSelectedIPDAppointment(appointment);
+  // Modal handlers
+  const openModal = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
     setIsModalOpen(true);
   };
 
-  // Close modal
   const closeModal = () => {
-    setSelectedIPDAppointment(null);
+    setSelectedAppointment(null);
     setIsModalOpen(false);
   };
 
@@ -389,7 +440,7 @@ const DashboardPage: React.FC = () => {
     <>
       <Head>
         <title>Dashboard - Hospital Appointments</title>
-        <meta name="description" content="View and manage all OPD and IPD appointments" />
+        <meta name="description" content="View and manage all OPD, IPD, and Pathology appointments" />
       </Head>
 
       <ToastContainer />
@@ -421,7 +472,7 @@ const DashboardPage: React.FC = () => {
                   setSearchQuery('');
                   setFilteredAppointments(appointments);
                   generateMonthsData(appointments);
-                  calculateTotalAmount(appointments);
+                  calculateTodayAmounts(appointments);
                 }}
                 className={`px-4 py-2 rounded-lg border ${
                   !isTodayFilter && selectedMonth === 'All' && !selectedDate
@@ -481,7 +532,7 @@ const DashboardPage: React.FC = () => {
           </div>
 
           {/* Dashboard Statistics */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
             {/* All Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
@@ -493,13 +544,13 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Today's Appointments */}
+            {/* Today's Appointments Count */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today&apos;s Appointments</p>
+                <p className="text-gray-600">Today's Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>
@@ -515,14 +566,39 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Total IPD Amount */}
+            {/* Today's IPD Amount */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
-              <div className="p-3 bg-indigo-100 rounded-full mr-4">
-                <AiOutlineFileText className="text-indigo-600 text-2xl" />
+              <div className="p-3 bg-green-100 rounded-full mr-4">
+                {/* You can choose a different icon for IPD */}
+                <AiOutlineFileText className="text-green-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Total IPD Amount</p>
-                <p className="text-2xl font-bold text-indigo-600">rs{totalAmountIPD}</p>
+                <p className="text-gray-600">Today's IPD Amount</p>
+                <p className="text-2xl font-bold text-green-600">{formatCurrency(todayAmountIPD)}</p>
+              </div>
+            </div>
+
+            {/* Today's OPD Amount */}
+            <div className="bg-white shadow rounded-lg p-6 flex items-center">
+              <div className="p-3 bg-blue-100 rounded-full mr-4">
+                {/* You can choose a different icon for OPD */}
+                <AiOutlineFileText className="text-blue-600 text-2xl" />
+              </div>
+              <div>
+                <p className="text-gray-600">Today's OPD Amount</p>
+                <p className="text-2xl font-bold text-blue-600">{formatCurrency(todayAmountOPD)}</p>
+              </div>
+            </div>
+
+            {/* Today's Pathology Amount */}
+            <div className="bg-white shadow rounded-lg p-6 flex items-center">
+              <div className="p-3 bg-yellow-100 rounded-full mr-4">
+                {/* You can choose a different icon for Pathology */}
+                <AiOutlineFileText className="text-yellow-600 text-2xl" />
+              </div>
+              <div>
+                <p className="text-gray-600">Today's Pathology Amount</p>
+                <p className="text-2xl font-bold text-yellow-600">{formatCurrency(todayAmountPathology)}</p>
               </div>
             </div>
           </div>
@@ -550,20 +626,18 @@ const DashboardPage: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {format(parseISO(appointment.date), 'dd MMM yyyy')}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.time}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.time || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {appointment.doctor.replace(/_/g, ' ').toUpperCase()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.appointmentType}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {appointment.appointmentType === 'IPD' && (
-                          <button
-                            onClick={() => openModal(appointment as IPDAppointment)}
-                            className="text-indigo-600 hover:text-indigo-900 underline"
-                          >
-                            View Details
-                          </button>
-                        )}
+                        <button
+                          onClick={() => openModal(appointment)}
+                          className="text-indigo-600 hover:text-indigo-900 underline"
+                        >
+                          View Details
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -624,50 +698,101 @@ const DashboardPage: React.FC = () => {
             )}
           </div>
 
-          {/* IPD Appointment Details Modal */}
+          {/* Appointment Details Modal */}
           <Dialog open={isModalOpen} onClose={closeModal} className="fixed z-10 inset-0 overflow-y-auto">
-            {isModalOpen && selectedIPDAppointment && (
+            {isModalOpen && selectedAppointment && (
               <div className="flex items-center justify-center min-h-screen px-4">
                 <div className="fixed inset-0 bg-black bg-opacity-40 transition-opacity" aria-hidden="true"></div>
                 <Dialog.Panel className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl p-6 transform transition-all">
                   <button onClick={closeModal} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
                     ✕
                   </button>
-                  <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">IPD Appointment Details</Dialog.Title>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <p><strong>Name:</strong> {selectedIPDAppointment.name}</p>
-                      <p><strong>Phone:</strong> {selectedIPDAppointment.phone}</p>
-                      <p><strong>Date:</strong> {format(parseISO(selectedIPDAppointment.date), 'dd MMM yyyy')}</p>
-                      <p><strong>Time:</strong> {selectedIPDAppointment.time}</p>
-                      <p><strong>Doctor:</strong> {selectedIPDAppointment.doctor.replace(/_/g, ' ').toUpperCase()}</p>
-                      <p><strong>Admission Type:</strong> {selectedIPDAppointment.admissionType}</p>
-                      <p><strong>Age:</strong> {selectedIPDAppointment.age}</p>
-                      <p><strong>Blood Group:</strong> {selectedIPDAppointment.bloodGroup}</p>
-                    </div>
-                    <div className="space-y-2">
-                      <p><strong>Date of Birth:</strong> {selectedIPDAppointment.dateOfBirth ? format(parseISO(selectedIPDAppointment.dateOfBirth), 'dd MMM yyyy') : '-'}</p>
-                      <p><strong>Discharge Date:</strong> {selectedIPDAppointment.dischargeDate ? format(parseISO(selectedIPDAppointment.dischargeDate), 'dd MMM yyyy') : '-'}</p>
-                      <p><strong>Emergency Number:</strong> {selectedIPDAppointment.emergencyMobileNumber}</p>
-                      <p><strong>Gender:</strong> {selectedIPDAppointment.gender}</p>
-                      <p><strong>Membership Type:</strong> {selectedIPDAppointment.membershipType}</p>
-                      <p><strong>Payment Mode:</strong> {selectedIPDAppointment.paymentMode}</p>
-                      <p><strong>Payment Type:</strong> {selectedIPDAppointment.paymentType}</p>
-                      <p><strong>Referral Doctor:</strong> {selectedIPDAppointment.referralDoctor || '-'}</p>
-                    </div>
-                  </div>
-                  <div className="mt-4 space-y-2">
-                    <p><strong>Room Type:</strong> {selectedIPDAppointment.roomType}</p>
-                    <p><strong>Service Amount:</strong> rs{selectedIPDAppointment.serviceAmount}</p>
-                    <strong>Services:</strong>
-                    <ul className="list-disc list-inside space-y-1">
-                      {selectedIPDAppointment.services.map((service, index) => (
-                        <li key={index} className="text-gray-700">
-                          {service.serviceName} - rs{service.amount} - {service.status}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+
+                  {selectedAppointment.appointmentType === 'IPD' && (
+                    <>
+                      <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">IPD Appointment Details</Dialog.Title>
+                      {(() => {
+                        const ipd = selectedAppointment as IPDAppointment;
+                        return (
+                          <>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <p><strong>Name:</strong> {ipd.name}</p>
+                                <p><strong>Phone:</strong> {ipd.phone}</p>
+                                <p><strong>Date:</strong> {format(parseISO(ipd.date), 'dd MMM yyyy')}</p>
+                                <p><strong>Time:</strong> {ipd.time || '-'}</p>
+                                <p><strong>Doctor:</strong> {ipd.doctor.toUpperCase()}</p>
+                                <p><strong>Admission Type:</strong> {ipd.admissionType}</p>
+                                <p><strong>Age:</strong> {ipd.age}</p>
+                                <p><strong>Blood Group:</strong> {ipd.bloodGroup}</p>
+                              </div>
+                              <div className="space-y-2">
+                                <p><strong>Date of Birth:</strong> {ipd.dateOfBirth ? format(parseISO(ipd.dateOfBirth), 'dd MMM yyyy') : '-'}</p>
+                                <p><strong>Discharge Date:</strong> {ipd.dischargeDate ? format(parseISO(ipd.dischargeDate), 'dd MMM yyyy') : '-'}</p>
+                                <p><strong>Emergency Number:</strong> {ipd.emergencyMobileNumber || '-'}</p>
+                                <p><strong>Gender:</strong> {ipd.gender}</p>
+                                <p><strong>Membership Type:</strong> {ipd.membershipType}</p>
+                                <p><strong>Payment Mode:</strong> {ipd.paymentMode}</p>
+                                <p><strong>Payment Type:</strong> {ipd.paymentType}</p>
+                                <p><strong>Referral Doctor:</strong> {ipd.referralDoctor || '-'}</p>
+                              </div>
+                            </div>
+                            <div className="mt-4 space-y-2">
+                              <p><strong>Room Type:</strong> {ipd.roomType}</p>
+                              <p><strong>Service Amount:</strong> ₹{formatCurrency(ipd.amount)}</p>
+                              <strong>Services:</strong>
+                              <ul className="list-disc list-inside space-y-1">
+                                {ipd.services.map((service, index) => (
+                                  <li key={index} className="text-gray-700">
+                                    {service.serviceName} - ₹{service.amount} - {service.status}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+
+                  {selectedAppointment.appointmentType === 'OPD' && (
+                    <>
+                      <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">OPD Appointment Details</Dialog.Title>
+                      {(() => {
+                        const opd = selectedAppointment as OPDAppointment;
+                        return (
+                          <div className="space-y-2">
+                            <p><strong>Name:</strong> {opd.name}</p>
+                            <p><strong>Phone:</strong> {opd.phone}</p>
+                            <p><strong>Date:</strong> {format(parseISO(opd.date), 'dd MMM yyyy')}</p>
+                            <p><strong>Time:</strong> {opd.time || '-'}</p>
+                            <p><strong>Doctor:</strong> {opd.doctor.toUpperCase()}</p>
+                            <p><strong>Amount:</strong> ₹{formatCurrency(opd.amount)}</p>
+                            <p><strong>Service Name:</strong> {opd.serviceName || '-'}</p>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
+
+                  {selectedAppointment.appointmentType === 'Pathology' && (
+                    <>
+                      <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">Pathology Test Details</Dialog.Title>
+                      {(() => {
+                        const path = selectedAppointment as PathologyAppointment;
+                        return (
+                          <div className="space-y-2">
+                            <p><strong>Name:</strong> {path.name}</p>
+                            <p><strong>Phone:</strong> {path.phone}</p>
+                            <p><strong>Date:</strong> {format(parseISO(path.date), 'dd MMM yyyy')}</p>
+                            <p><strong>Blood Test Name:</strong> {path.bloodTestName}</p>
+                            <p><strong>Amount:</strong> ₹{formatCurrency(path.amount)}</p>
+                            <p><strong>Age:</strong> {path.age}</p>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                 </Dialog.Panel>
               </div>
             )}
@@ -678,7 +803,6 @@ const DashboardPage: React.FC = () => {
   );
 };
 
-// Wrap the DashboardPage with ProtectedRoute for authentication
 const DashboardPageWithProtection: React.FC = () => (
   <ProtectedRoute>
     <DashboardPage />
@@ -686,3 +810,4 @@ const DashboardPageWithProtection: React.FC = () => (
 );
 
 export default DashboardPageWithProtection;
+
