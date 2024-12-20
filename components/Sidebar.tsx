@@ -32,7 +32,9 @@ const navItems: NavItemProps[] = [
       { title: "IPD Admin", icon: <ClipboardList size={20} />, href: "/ipdadmin" },
       { title: "Patient Admin", icon: <BedDouble size={20} />, href: "/patientadmin" },
       { title: "Pathology Admin", icon: <BedDouble size={20} />, href: "/bloodadmin" },
-    ],
+      { title: "Mortality Report", icon: <BedDouble size={20} />, href: "/mortalityadmin" },
+      { title: "Surgery Report", icon: <BedDouble size={20} />, href: "/surgeryadmin" },
+   ],
   },
   {
     title: "OPD",
@@ -55,6 +57,16 @@ const navItems: NavItemProps[] = [
     title: "Pathology",
     icon: <LayoutDashboard size={20} />,
     href: "/bloodtest",
+  },
+  {
+    title: "Mortality",
+    icon: <LayoutDashboard size={20} />,
+    href: "/mortality",
+  },
+  {
+    title: "Surgery",
+    icon: <LayoutDashboard size={20} />,
+    href: "/surgery",
   },
 ];
 

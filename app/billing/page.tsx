@@ -9,12 +9,13 @@ import { useForm, SubmitHandler } from 'react-hook-form'
 import { yupResolver } from '@hookform/resolvers/yup'
 import * as yup from 'yup'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, Phone, Mail, History } from 'lucide-react'
+import { Search, Plus, CheckCircle, ArrowLeft, AlertTriangle, Download, History } from 'lucide-react'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 import { format, parseISO } from 'date-fns'
 import { Dialog, Transition } from '@headlessui/react'
 
+// =================== Interfaces ===================
 interface Service {
   serviceName: string
   amount: number
@@ -28,6 +29,13 @@ interface Payment {
   date: string
 }
 
+interface Equipment {
+  category: string
+  equipmentName: string
+  price: number
+  createdAt?: string
+}
+
 interface BillingRecord {
   id: string
   name: string
@@ -39,7 +47,9 @@ interface BillingRecord {
   bed?: string
   services: Service[]
   payments: Payment[]
+  equipment: Equipment[] // Added equipment
   dischargeDate?: string
+  discountPercentage?: number
 }
 
 interface AdditionalServiceForm {
@@ -52,6 +62,17 @@ interface PaymentForm {
   paymentType: string
 }
 
+interface DiscountForm {
+  discountPercentage: number
+}
+
+interface AdditionalEquipmentForm {
+  category: string
+  equipmentName: string
+  price: number
+}
+
+// =================== Validation Schemas ===================
 const serviceSchema = yup.object({
   serviceName: yup.string().required('Service Name is required'),
   amount: yup
@@ -70,12 +91,113 @@ const paymentSchema = yup.object({
   paymentType: yup.string().required('Payment Type is required'),
 }).required()
 
+const discountSchema = yup.object({
+  discountPercentage: yup
+    .number()
+    .typeError('Discount must be a number')
+    .min(0, 'Discount cannot be negative')
+    .max(100, 'Discount cannot exceed 100%')
+    .required('Discount Percentage is required'),
+}).required()
+
+const equipmentSchema = yup.object({
+  category: yup.string().required('Category is required'),
+  equipmentName: yup.string().required('Equipment Name is required'),
+  price: yup
+    .number()
+    .typeError('Price must be a number')
+    .positive('Price must be positive')
+    .required('Price is required'),
+}).required()
+
+// =================== Utility ===================
 const currencyFormatter = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
   minimumFractionDigits: 2
 })
 
+// =================== Equipment Data ===================
+const equipmentData: Record<string, string[]> = {
+  'General Consumables': [
+    'Cotton rolls and balls',
+    'Gauze pieces and bandages',
+    'Adhesive tapes (micropore, surgical tape)',
+    'Disposable gloves (sterile and non-sterile)',
+    'Syringes (various sizes)',
+    'Needles (various gauges)',
+    'IV cannulas',
+    'IV sets and infusion sets',
+    'Saline bottles (normal saline, dextrose)',
+    'Tourniquets',
+    'Hand sanitizers',
+    'Face masks and shields',
+  ],
+  'Diagnostic Consumables': [
+    'Blood sample collection tubes (EDTA, citrate, serum separator)',
+    'Urine sample containers',
+    'Culture swabs',
+    'Specimen bags',
+    'Glucometer strips',
+    'Lancets',
+  ],
+  'Surgical Consumables': [
+    'Sutures (absorbable, non-absorbable)',
+    'Surgical blades (various sizes)',
+    'Drapes and surgical gowns',
+    'Sterile packs (scissors, forceps, etc.)',
+    'Hemostats and clips',
+    'Sterilization pouches',
+    'Antiseptic solutions (Betadine, Chlorhexidine)',
+  ],
+  'Wound Care and Dressing': [
+    'Antiseptic creams and ointments',
+    'Wound dressing materials (hydrocolloid, foam, etc.)',
+    'Absorbent pads',
+    'Transparent films',
+    'Elastic and crepe bandages',
+    'Plasters and tapes',
+  ],
+  'ICU/CCU Specific Consumables': [
+    'Endotracheal tubes',
+    'Suction catheters',
+    'Oxygen masks and nasal cannulas',
+    'Ventilator circuits',
+    'Disposable CPAP/BiPAP masks',
+    'Disposable ECG electrodes',
+    'Central line kits',
+    'Arterial line kits',
+  ],
+  'Catheters and Tubes': [
+    'Urinary catheters (Foley, Nelaton)',
+    'Ryles tubes',
+    'Feeding tubes',
+    'Chest drainage tubes',
+    'Surgical drains (e.g., JP drains)',
+  ],
+  'Patient Care Consumables': [
+    'Diapers (adult and pediatric)',
+    'Bed sheets and underpads',
+    'Disposable towels',
+    'Patient ID bands',
+    'Thermometer probe covers',
+    'Bedside sponges',
+  ],
+  'Medicated Consumables': [
+    'Insulin pens and cartridges',
+    'Nebulizer masks and kits',
+    'Heparin lock sets',
+    'Heparin vials and syringes',
+    'Ampoules (e.g., adrenaline, epinephrine)',
+  ],
+  'Radiology/Imaging Consumables': [
+    'Xray',
+    'Sonography',
+    'CT Scan',
+  ],
+}
+
+// =================== Main Component ===================
 export default function IPDBillingPage() {
   const [allRecords, setAllRecords] = useState<BillingRecord[]>([])
   const [searchTerm, setSearchTerm] = useState('')
@@ -87,6 +209,7 @@ export default function IPDBillingPage() {
 
   const invoiceRef = useRef<HTMLDivElement>(null)
 
+  // =================== Forms ===================
   const {
     register,
     handleSubmit,
@@ -113,13 +236,46 @@ export default function IPDBillingPage() {
     },
   })
 
+  const {
+    register: registerDiscount,
+    handleSubmit: handleSubmitDiscount,
+    formState: { errors: errorsDiscount },
+    reset: resetDiscount,
+  } = useForm<DiscountForm>({
+    resolver: yupResolver(discountSchema),
+    defaultValues: {
+      discountPercentage: 0,
+    },
+  })
+
+  // ======= Added Equipment Form =======
+  const {
+    register: registerEquipment,
+    handleSubmit: handleSubmitEquipment,
+    formState: { errors: errorsEquipment },
+    reset: resetEquipment,
+    watch: watchEquipment, // Add watch here
+  } = useForm<AdditionalEquipmentForm>({
+    resolver: yupResolver(equipmentSchema),
+    defaultValues: {
+      category: '',
+      equipmentName: '',
+      price: 0,
+    },
+  })
+
+  // Watch the 'category' field
+  const selectedCategory = watchEquipment('category')
+
+  // =================== Fetch Logo ===================
   useEffect(() => {
-    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png'
+    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png' // Replace with your actual logo URL
     getBase64Image(logoUrl, (base64: string) => {
       setLogoBase64(base64)
     })
   }, [])
 
+  // =================== Fetch Billing Records ===================
   useEffect(() => {
     const billingRef = ref(db, 'ipd_bookings')
     const unsubscribe = onValue(billingRef, (snapshot) => {
@@ -139,6 +295,15 @@ export default function IPDBillingPage() {
               }))
             : []
 
+          const equipment: Equipment[] = rec.equipment
+            ? Object.keys(rec.equipment).map((_) => ({
+                category: rec.equipment[_].category,
+                equipmentName: rec.equipment[_].equipmentName,
+                price: Number(rec.equipment[_].price),
+                createdAt: rec.equipment[_].createdAt,
+              }))
+            : []
+
           return {
             id: key,
             name: rec.name,
@@ -153,7 +318,9 @@ export default function IPDBillingPage() {
               amount: Number(service.amount)
             })) as Service[] : [],
             payments: payments,
+            equipment: equipment, // Retrieved equipment
             dischargeDate: rec.dischargeDate || undefined,
+            discountPercentage: rec.discountPercentage || 0,
           }
         })
         setAllRecords(records)
@@ -167,6 +334,7 @@ export default function IPDBillingPage() {
     return () => unsubscribe()
   }, [])
 
+  // =================== Search Handler ===================
   const handleSearch = () => {
     const term = searchTerm.trim().toLowerCase()
     if (!term) {
@@ -183,12 +351,16 @@ export default function IPDBillingPage() {
     setSelectedRecord(null)
   }
 
+  // =================== Select Record ===================
   const handleSelectRecord = (record: BillingRecord) => {
     setSelectedRecord(record)
     reset({ serviceName: '', amount: 0 })
     resetPayment({ paymentAmount: 0, paymentType: '' })
+    resetDiscount({ discountPercentage: record.discountPercentage || 0 })
+    resetEquipment({ category: '', equipmentName: '', price: 0 }) // Reset equipment form
   }
 
+  // =================== Calculations ===================
   const calculateTotalServicesAmount = (services: Service[]) => {
     return services.reduce((sum, s) => sum + s.amount, 0)
   }
@@ -201,11 +373,31 @@ export default function IPDBillingPage() {
     return services.filter(s => s.status === 'pending').reduce((sum, s) => sum + s.amount, 0)
   }
 
+  const calculateTotalEquipmentAmount = (equipment: Equipment[]) => {
+    return equipment.reduce((sum, e) => sum + e.price, 0)
+  }
+
+  const calculateDiscountAmount = (total: number, discountPercentage: number) => {
+    return (total * discountPercentage) / 100
+  }
+
+  const calculateAmountAfterDiscount = (total: number, discount: number) => {
+    return total - discount
+  }
+
+  // Derived values
   const totalServicesAmount = selectedRecord ? calculateTotalServicesAmount(selectedRecord.services) : 0
+  const totalEquipmentAmount = selectedRecord ? calculateTotalEquipmentAmount(selectedRecord.equipment) : 0 // Added
   const totalPaid = selectedRecord ? selectedRecord.totalPaid : 0
   const pendingServicesAmount = selectedRecord ? calculatePendingServicesAmount(selectedRecord.services) : 0
   const completedServicesTotalAmount = selectedRecord ? calculateCompletedServicesAmount(selectedRecord.services) : 0
+  const discountPercentage = selectedRecord ? selectedRecord.discountPercentage || 0 : 0
+  const discountAmount = calculateDiscountAmount(totalServicesAmount + totalEquipmentAmount, discountPercentage) // Updated
+  const amountAfterDiscount = calculateAmountAfterDiscount(totalServicesAmount + totalEquipmentAmount, discountAmount) // Updated
 
+  // =================== Handlers ===================
+
+  // Add Additional Service
   const onSubmitAdditionalService: SubmitHandler<AdditionalServiceForm> = async (data) => {
     if (!selectedRecord) return
     setLoading(true)
@@ -236,6 +428,8 @@ export default function IPDBillingPage() {
         totalPaid: calculateCompletedServicesAmount(updatedServices),
       }
       setSelectedRecord(updatedRecord)
+      setAllRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
+      setFilteredRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
 
       reset({ serviceName: '', amount: 0 })
 
@@ -250,6 +444,7 @@ export default function IPDBillingPage() {
     }
   }
 
+  // Add Payment
   const onSubmitPayment: SubmitHandler<PaymentForm> = async (data) => {
     if (!selectedRecord) return
     setLoading(true)
@@ -308,6 +503,52 @@ export default function IPDBillingPage() {
     }
   }
 
+  // Add Additional Equipment
+  const onSubmitEquipment: SubmitHandler<AdditionalEquipmentForm> = async (data) => {
+    if (!selectedRecord) return
+    setLoading(true)
+    try {
+      const currentEquipment: Equipment[] = selectedRecord.equipment || []
+      const newEquipment: Equipment = {
+        category: data.category,
+        equipmentName: data.equipmentName,
+        price: Number(data.price),
+        createdAt: new Date().toLocaleString(),
+      }
+      const updatedEquipment = [newEquipment, ...currentEquipment]
+
+      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
+      await update(recordRef, {
+        equipment: updatedEquipment,
+      })
+
+      toast.success('Additional equipment added successfully!', {
+        position: 'top-right',
+        autoClose: 5000,
+      })
+
+      const updatedRecord: BillingRecord = {
+        ...selectedRecord,
+        equipment: updatedEquipment,
+      }
+      setSelectedRecord(updatedRecord)
+      setAllRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
+      setFilteredRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
+
+      resetEquipment({ category: '', equipmentName: '', price: 0 })
+
+    } catch (error) {
+      console.error('Error adding equipment:', error)
+      toast.error('Failed to add equipment. Please try again.', {
+        position: 'top-right',
+        autoClose: 5000,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Mark Service as Completed
   const handleMarkServiceCompleted = async (index: number) => {
     if (!selectedRecord) return
     setLoading(true)
@@ -353,6 +594,7 @@ export default function IPDBillingPage() {
     }
   }
 
+  // Discharge Patient
   const handleDischarge = async () => {
     if (!selectedRecord) return
     if (!selectedRecord.roomType || !selectedRecord.bed) {
@@ -394,6 +636,44 @@ export default function IPDBillingPage() {
     }
   }
 
+  // Add Discount
+  const onSubmitDiscount: SubmitHandler<DiscountForm> = async (data) => {
+    if (!selectedRecord) return
+    setLoading(true)
+    try {
+      const discountValue = Number(data.discountPercentage)
+      const recordRef = ref(db, `ipd_bookings/${selectedRecord.id}`)
+      await update(recordRef, {
+        discountPercentage: discountValue,
+      })
+
+      toast.success('Discount applied successfully!', {
+        position: 'top-right',
+        autoClose: 5000,
+      })
+
+      const updatedRecord: BillingRecord = {
+        ...selectedRecord,
+        discountPercentage: discountValue,
+      }
+      setSelectedRecord(updatedRecord)
+      setAllRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
+      setFilteredRecords(prev => prev.map(rec => rec.id === updatedRecord.id ? updatedRecord : rec))
+
+      resetDiscount({ discountPercentage: discountValue })
+
+    } catch (error) {
+      console.error('Error applying discount:', error)
+      toast.error('Failed to apply discount. Please try again.', {
+        position: 'top-right',
+        autoClose: 5000,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // =================== Hospital Info ===================
   const hospitalInfo = {
     logoBase64: logoBase64 || '',
     name: 'Your Hospital Name',
@@ -402,37 +682,41 @@ export default function IPDBillingPage() {
     contactNumber: '+1 (234) 567-8900',
   }
 
-  const InvoiceContent: React.FC = () => (
-    <div className="max-w-4xl mx-auto bg-white text-gray-800 font-sans p-8">
-      <div className="flex items-start justify-between mb-8">
-        {hospitalInfo.logoBase64 && (
-          <div className="flex-shrink-0 mr-4">
-            <img src={hospitalInfo.logoBase64} alt="Hospital Logo" width={64} height={64} />
-          </div>
-        )}
+  // =================== Invoice Component ===================
+  const InvoiceContent: React.FC = () => {
+    const [pages, setPages] = useState<React.ReactNode[]>([])
 
-        <div className="text-right">
-          <h1 className="text-2xl font-bold">{hospitalInfo.name}</h1>
-          <p className="text-sm">{hospitalInfo.address}</p>
-          <div className="flex items-center justify-end text-sm mt-1">
-            <Phone size={14} className="mr-2" />
-            <span>{hospitalInfo.contactNumber}</span>
-          </div>
-          <div className="flex items-center justify-end text-sm mt-1">
-            <Mail size={14} className="mr-2" />
-            <span>{hospitalInfo.email}</span>
-          </div>
-        </div>
-      </div>
+    useEffect(() => {
+      if (selectedRecord) {
+        const pageHeight = 730; // A4 height in pixels at 72 DPI
+        const pageWidth = 500; // A4 width in pixels at 72 DPI
+        const contentPerPage: React.ReactNode[] = []
+        let currentPage: React.ReactNode[] = []
+        let currentHeight = 0
+        const bottomPadding = 20 // 20px bottom padding
 
-      {selectedRecord && (
-        <>
+        const addToPage = (element: React.ReactNode, height: number) => {
+          if (currentHeight + height > pageHeight - bottomPadding) {
+            contentPerPage.push(
+              <div key={contentPerPage.length} style={{ width: `${pageWidth}px`, height: `${pageHeight}px`, padding: '28px 8px 20px 8px', overflow: 'hidden', boxSizing: 'border-box' }}>
+                {currentPage}
+              </div>
+            )
+            currentPage = []
+            currentHeight = 0
+          }
+          currentPage.push(element)
+          currentHeight += height
+        }
+
+        // Header (estimated height: 100px)
+        addToPage(
           <div className="mb-6">
             <h2 className="text-xl font-semibold uppercase tracking-wide border-b pb-2 mb-4">Patient Invoice</h2>
-            <div className="flex justify-between">
+            <div className="flex justify-between flex-wrap">
               <div>
                 <p className="text-sm"><strong>Patient Name:</strong> {selectedRecord.name}</p>
-                <p className="text-sm"><strong>Patient ID:</strong> {selectedRecord.id}</p>
+                {/* <p className="text-sm"><strong>Patient ID:</strong> {selectedRecord.id}</p> */}
                 <p className="text-sm"><strong>Mobile:</strong> {selectedRecord.mobileNumber}</p>
                 <p className="text-sm">
                   <strong>Admission Date:</strong>{' '}
@@ -440,23 +724,28 @@ export default function IPDBillingPage() {
                     ? format(new Date(selectedRecord.services[0].createdAt), 'dd MMM yyyy')
                     : 'N/A'}
                 </p>
+              
+              </div>
+              <div className="text-right">
+                {/* <p className="text-sm"><strong>Invoice #:</strong> {selectedRecord.id}</p> */}
+                <p className="text-sm"><strong>Bill Date:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
                 {selectedRecord.dischargeDate && (
                   <p className="text-sm">
                     <strong>Discharge Date:</strong>{' '}
                     {format(new Date(selectedRecord.dischargeDate), 'dd MMM yyyy')}
                   </p>
                 )}
-              </div>
-              <div className="text-right">
-                <p className="text-sm"><strong>Invoice #:</strong> {selectedRecord.id}</p>
-                <p className="text-sm"><strong>Generated On:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
-                <p className="text-sm"><strong>Payment Type:</strong> {selectedRecord.paymentType.charAt(0).toUpperCase() + selectedRecord.paymentType.slice(1)}</p>
+                {/* <p className="text-sm"><strong>Payment Type:</strong> {selectedRecord.paymentType.charAt(0).toUpperCase() + selectedRecord.paymentType.slice(1)}</p> */}
               </div>
             </div>
-          </div>
+          </div>,
+          100
+        )
 
+        // Itemized Services (estimated height: 50px per item + 50px for header)
+        addToPage(
           <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-3">Itemized Charges</h3>
+            <h3 className="text-lg font-semibold mb-3">Itemized Services</h3>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b text-left">
@@ -475,12 +764,54 @@ export default function IPDBillingPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>,
+          50 + selectedRecord.services.length * 50
+        )
 
+        // Itemized Equipment (estimated height: 50px per item + 50px for header)
+        addToPage(
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-3">Itemized Equipment</h3>
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="py-2 font-medium">Category</th>
+                  <th className="py-2 font-medium">Equipment</th>
+                  <th className="py-2 font-medium text-right">Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedRecord.equipment.map((equip, index) => (
+                  <tr key={index} className="border-b last:border-none">
+                    <td className="py-2">{equip.category}</td>
+                    <td className="py-2">{equip.equipmentName}</td>
+                    <td className="py-2 text-right">{currencyFormatter.format(equip.price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>,
+          50 + selectedRecord.equipment.length * 50
+        )
+
+        // Summary (updated to include equipment)
+        addToPage(
           <div className="mb-6">
             <div className="flex justify-between text-sm mb-1">
-              <span>Total Charges:</span>
+              <span>Total Services Charges:</span>
               <span className="font-semibold">{currencyFormatter.format(totalServicesAmount)}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-1">
+              <span>Total Equipment Charges:</span>
+              <span className="font-semibold">{currencyFormatter.format(totalEquipmentAmount)}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-1">
+              <span>Discount ({discountPercentage}%):</span>
+              <span className="font-semibold text-red-600">- {currencyFormatter.format(discountAmount)}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-1">
+              <span>Amount After Discount:</span>
+              <span className="font-semibold">{currencyFormatter.format(amountAfterDiscount)}</span>
             </div>
             <div className="flex justify-between text-sm mb-1">
               <span>Deposit Amount:</span>
@@ -490,54 +821,99 @@ export default function IPDBillingPage() {
               <span>Total Paid (Completed Services):</span>
               <span className="font-semibold text-red-600">{currencyFormatter.format(totalPaid)}</span>
             </div>
-          </div>
+            <div className="flex justify-between text-sm mb-1">
+              <span>Remaining Balance:</span>
+              <span className="font-semibold">{currencyFormatter.format(amountAfterDiscount + selectedRecord.amount - totalPaid)}</span>
+            </div>
+          </div>,
+          200
+        )
 
+        // Footer (estimated height: 100px)
+        addToPage(
           <div className="text-sm text-gray-600">
             <p>This is a computer-generated invoice and does not require a signature.</p>
             <p>Thank you for choosing {hospitalInfo.name}. We wish you a speedy recovery and continued good health.</p>
-          </div>
-        </>
-      )}
-    </div>
-  )
+          </div>,
+          100
+        )
 
+        // Add any remaining content to the last page
+        if (currentPage.length > 0) {
+          contentPerPage.push(
+            <div key={contentPerPage.length} style={{ width: `${pageWidth}px`, height: `${pageHeight}px`, padding: '28px 8px 20px 8px', overflow: 'hidden', boxSizing: 'border-box' }}>
+              {currentPage}
+            </div>
+          )
+        }
+
+        setPages(contentPerPage)
+      }
+    }, [selectedRecord])
+
+    return (
+      <>
+        {pages.map((page, index) => (
+          <div
+            key={index}
+            className="bg-white text-gray-800 font-sans p-8 pt-28 "
+            style={{
+              backgroundImage: 'url(/letterhead.png)', // Ensure this image exists or remove if not needed
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              backgroundRepeat: 'no-repeat',
+              width: '595px',
+              height: '842px',
+              margin: '0 auto',
+              pageBreakAfter: 'always',
+              overflow: 'hidden',
+              boxSizing: 'border-box',
+            }}
+          >
+            {page}
+          </div>
+        ))}
+      </>
+    )
+  }
+
+  // =================== Download Invoice ===================
   const handleDownloadInvoice = async () => {
     if (!selectedRecord) return
     if (!invoiceRef.current) return
 
-    await new Promise(resolve => setTimeout(resolve, 100))
+    await new Promise(resolve => setTimeout(resolve, 100)) // Ensure content is rendered
 
-    html2canvas(invoiceRef.current, { scale: 3, useCORS: true })
-      .then(canvas => {
+    const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+    const pages = invoiceRef.current.children
+
+    for (let i = 0; i < pages.length; i++) {
+      if (i > 0) pdf.addPage()
+      await html2canvas(pages[i] as HTMLElement, { scale: 3, useCORS: true }).then(canvas => {
         const imgData = canvas.toDataURL('image/png')
-        const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
-        const pdfWidth = pdf.internal.pageSize.getWidth()
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, '', 'FAST')
-        const fileName = selectedRecord.dischargeDate ? `Final_Invoice_${selectedRecord.name}_${selectedRecord.id}.pdf` : `Provisional_Invoice_${selectedRecord.name}_${selectedRecord.id}.pdf`
-        pdf.save(fileName)
+        pdf.addImage(imgData, 'PNG', 0, 0, 595, 842, '', 'FAST')
       })
-      .catch((err: unknown) => {
-        console.error('Error generating PDF:', err)
-        toast.error('Failed to generate PDF. Please try again.', {
-          position: 'top-right',
-          autoClose: 5000,
-        })
-      })
+    }
+
+    const fileName = selectedRecord.dischargeDate
+      ? `Final_Invoice_${selectedRecord.name}_${selectedRecord.id}.pdf`
+      : `Provisional_Invoice_${selectedRecord.name}_${selectedRecord.id}.pdf`
+    pdf.save(fileName)
   }
 
+  // =================== Helper to get Base64 image ===================
   function getBase64Image(imgUrl: string, callback: (base64: string) => void) {
-    const img = new Image();
-    img.setAttribute('crossOrigin', 'anonymous');
+    const img = new Image()
+    img.setAttribute('crossOrigin', 'anonymous')
     img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx?.drawImage(img, 0, 0);
-      const dataURL = canvas.toDataURL('image/png');
-      callback(dataURL);
-    };
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      const ctx = canvas.getContext('2d')
+      ctx?.drawImage(img, 0, 0)
+      const dataURL = canvas.toDataURL('image/png')
+      callback(dataURL)
+    }
     img.onerror = (err: any) => {
       console.error('Error loading logo image:', err)
       callback('')
@@ -545,6 +921,7 @@ export default function IPDBillingPage() {
     img.src = imgUrl
   }
 
+  // =================== Get Record Date for Sorting ===================
   const getRecordDate = (record: BillingRecord): Date => {
     if (record.dischargeDate) {
       return new Date(record.dischargeDate)
@@ -564,6 +941,7 @@ export default function IPDBillingPage() {
         <div className="p-8">
           <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">IPD Billing Management</h1>
 
+          {/* Search Bar */}
           <div className="mb-8">
             <div className="flex items-center bg-gray-100 rounded-full p-2">
               <input
@@ -582,6 +960,7 @@ export default function IPDBillingPage() {
             </div>
           </div>
 
+          {/* Records and Billing Details */}
           <AnimatePresence mode="wait">
             {!selectedRecord ? (
               <motion.div
@@ -637,6 +1016,7 @@ export default function IPDBillingPage() {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.3 }}
               >
+                {/* Back Button */}
                 <button
                   onClick={() => setSelectedRecord(null)}
                   className="mb-6 flex items-center text-indigo-600 hover:text-indigo-800 transition duration-300"
@@ -645,6 +1025,7 @@ export default function IPDBillingPage() {
                   Back to Results
                 </button>
 
+                {/* Billing Details */}
                 <div className="bg-indigo-50 rounded-xl p-6 mb-8">
                   <h2 className="text-2xl font-semibold text-indigo-800 mb-4">Billing Details for {selectedRecord.name}</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -656,20 +1037,23 @@ export default function IPDBillingPage() {
                     <div>
                       <p><strong>Deposit Amount:</strong> Rs. {selectedRecord.amount.toLocaleString()}</p>
                       <p><strong>Total Services Amount:</strong> Rs. {totalServicesAmount.toLocaleString()}</p>
+                      <p><strong>Total Equipment Amount:</strong> Rs. {totalEquipmentAmount.toLocaleString()}</p> {/* Added */}
                       <p><strong>Discharge Date:</strong> {selectedRecord.dischargeDate ? format(parseISO(selectedRecord.dischargeDate), 'dd MMM yyyy') : 'Not discharged'}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex justify-between mb-6">
-                  <div className="bg-green-100 rounded-lg p-4">
+                {/* Financial Summary */}
+                <div className="flex flex-wrap justify-between mb-6">
+                  <div className="bg-green-100 rounded-lg p-4 w-full md:w-1/2 mb-4 md:mb-0">
                     <p className="text-green-800"><strong>Pending Services Amount:</strong> Rs. {pendingServicesAmount.toLocaleString()}</p>
                   </div>
-                  <div className="bg-blue-100 rounded-lg p-4">
+                  <div className="bg-blue-100 rounded-lg p-4 w-full md:w-1/2">
                     <p className="text-blue-800"><strong>Completed Services Amount:</strong> Rs. {completedServicesTotalAmount.toLocaleString()}</p>
                   </div>
                 </div>
 
+                {/* Payment History Button */}
                 <div className="flex items-center justify-end mb-4">
                   <button
                     onClick={() => setIsPaymentHistoryOpen(true)}
@@ -680,6 +1064,7 @@ export default function IPDBillingPage() {
                   </button>
                 </div>
 
+                {/* Record Additional Payment */}
                 {!selectedRecord.dischargeDate && (
                   <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                     <h3 className="text-xl font-semibold text-indigo-800 mb-4">Record Additional Payment</h3>
@@ -694,14 +1079,18 @@ export default function IPDBillingPage() {
                             errorsPayment.paymentAmount ? 'border-red-500' : 'border-gray-300'
                           } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
                         />
-                        {errorsPayment.paymentAmount && <p className="text-red-500 text-sm mt-1">{errorsPayment.paymentAmount.message}</p>}
+                        {errorsPayment.paymentAmount && (
+                          <p className="text-red-500 text-sm mt-1">
+                            {errorsPayment.paymentAmount.message}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-gray-700 mb-2">Payment Type</label>
                         <select
                           {...registerPayment('paymentType')}
                           className={`w-full px-4 py-2 rounded-lg border ${
-                            errorsPayment.paymentType ? 'border-red-500' : 'border-gray-300'
+                            errorsPayment.paymentType ? 'border-red-500': 'border-gray-300'
                           } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
                         >
                           <option value="">Select Payment Type</option>
@@ -709,7 +1098,11 @@ export default function IPDBillingPage() {
                           <option value="online">Online</option>
                           <option value="card">Card</option>
                         </select>
-                        {errorsPayment.paymentType && <p className="text-red-500 text-sm mt-1">{errorsPayment.paymentType.message}</p>}
+                        {errorsPayment.paymentType && (
+                          <p className="text-red-500 text-sm mt-1">
+                            {errorsPayment.paymentType.message}
+                          </p>
+                        )}
                       </div>
                       <button
                         type="submit"
@@ -724,6 +1117,75 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
+                {/* Add Additional Equipment Form */}
+                {!selectedRecord.dischargeDate && (
+                  <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+                    <h3 className="text-xl font-semibold text-indigo-800 mb-4">Add Additional Equipment</h3>
+                    <form onSubmit={handleSubmitEquipment(onSubmitEquipment)} className="space-y-4">
+                      {/* Equipment Category */}
+                      <div>
+                        <label className="block text-gray-700 mb-2">Equipment Category</label>
+                        <select
+                          {...registerEquipment('category')}
+                          className={`w-full px-4 py-2 rounded-lg border ${
+                            errorsEquipment.category ? 'border-red-500' : 'border-gray-300'
+                          } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                        >
+                          <option value="">Select Category</option>
+                          {Object.keys(equipmentData).map((category, idx) => (
+                            <option key={idx} value={category}>{category}</option>
+                          ))}
+                        </select>
+                        {errorsEquipment.category && <p className="text-red-500 text-sm mt-1">{errorsEquipment.category.message}</p>}
+                      </div>
+
+                      {/* Equipment Name */}
+                      <div>
+                        <label className="block text-gray-700 mb-2">Equipment Name</label>
+                        <select
+                          {...registerEquipment('equipmentName')}
+                          className={`w-full px-4 py-2 rounded-lg border ${
+                            errorsEquipment.equipmentName ? 'border-red-500' : 'border-gray-300'
+                          } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                          disabled={!selectedCategory} // Disable if no category is selected
+                        >
+                          <option value="">Select Equipment</option>
+                          {selectedCategory && equipmentData[selectedCategory]?.map((equip, idx) => (
+                            <option key={idx} value={equip}>{equip}</option>
+                          ))}
+                        </select>
+                        {errorsEquipment.equipmentName && <p className="text-red-500 text-sm mt-1">{errorsEquipment.equipmentName.message}</p>}
+                      </div>
+
+                      {/* Price */}
+                      <div>
+                        <label className="block text-gray-700 mb-2">Price (Rs)</label>
+                        <input
+                          type="number"
+                          {...registerEquipment('price')}
+                          placeholder="e.g., 1500"
+                          className={`w-full px-4 py-2 rounded-lg border ${
+                            errorsEquipment.price ? 'border-red-500' : 'border-gray-300'
+                          } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                        />
+                        {errorsEquipment.price && <p className="text-red-500 text-sm mt-1">{errorsEquipment.price.message}</p>}
+                      </div>
+
+                      {/* Submit Button */}
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className={`w-full py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-300 flex items-center justify-center ${
+                          loading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                      >
+                        {loading ? 'Processing...' : <><Plus size={20} className="mr-2" /> Add Equipment</>}
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* Additional Services */}
                 <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                   <h3 className="text-xl font-semibold text-indigo-800 mb-4">Additional Services</h3>
                   {selectedRecord.services.length === 0 ? (
@@ -772,6 +1234,66 @@ export default function IPDBillingPage() {
                   )}
                 </div>
 
+                {/* Additional Equipment Listing */}
+                {selectedRecord.equipment.length > 0 && (
+                  <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+                    <h3 className="text-xl font-semibold text-indigo-800 mb-4">Additional Equipment</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="bg-indigo-50">
+                            <th className="px-4 py-2 text-left">Category</th>
+                            <th className="px-4 py-2 text-left">Equipment Name</th>
+                            <th className="px-4 py-2 text-left">Price (Rs)</th>
+                            <th className="px-4 py-2 text-left">Date/Time</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedRecord.equipment.map((equip, index) => (
+                            <tr key={index} className="border-t">
+                              <td className="px-4 py-2">{equip.category}</td>
+                              <td className="px-4 py-2">{equip.equipmentName}</td>
+                              <td className="px-4 py-2">Rs. {equip.price.toLocaleString()}</td>
+                              <td className="px-4 py-2">{equip.createdAt ? new Date(equip.createdAt).toLocaleString() : 'N/A'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Apply Discount Form */}
+                {!selectedRecord.dischargeDate && (
+                  <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+                    <h3 className="text-xl font-semibold text-indigo-800 mb-4">Apply Discount</h3>
+                    <form onSubmit={handleSubmitDiscount(onSubmitDiscount)} className="space-y-4">
+                      <div>
+                        <label className="block text-gray-700 mb-2">Discount Percentage (%)</label>
+                        <input
+                          type="number"
+                          {...registerDiscount('discountPercentage')}
+                          placeholder="e.g., 10"
+                          className={`w-full px-4 py-2 rounded-lg border ${
+                            errorsDiscount.discountPercentage ? 'border-red-500' : 'border-gray-300'
+                          } focus:outline-none focus:ring-2 focus:ring-indigo-500`}
+                        />
+                        {errorsDiscount.discountPercentage && <p className="text-red-500 text-sm mt-1">{errorsDiscount.discountPercentage.message}</p>}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className={`w-full py-2 px-4 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-300 flex items-center justify-center ${
+                          loading ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                      >
+                        {loading ? 'Processing...' : <><Plus size={20} className="mr-2" /> Apply Discount</>}
+                      </button>
+                    </form>
+                  </div>
+                )}
+
+                {/* Add Additional Service */}
                 {!selectedRecord.dischargeDate && (
                   <div className="bg-white rounded-xl shadow-md p-6 mb-8">
                     <h3 className="text-xl font-semibold text-indigo-800 mb-4">Add Additional Service</h3>
@@ -813,6 +1335,7 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
+                {/* Discharge Button */}
                 {!selectedRecord.dischargeDate && (
                   <div className="flex justify-center mb-8">
                     <button
@@ -827,6 +1350,7 @@ export default function IPDBillingPage() {
                   </div>
                 )}
 
+                {/* Download Invoice Button */}
                 <div className="flex justify-center mb-8">
                   <button
                     onClick={handleDownloadInvoice}
@@ -842,12 +1366,14 @@ export default function IPDBillingPage() {
         </div>
       </div>
 
+      {/* Hidden Invoice for PDF Generation */}
       {selectedRecord && (
         <div ref={invoiceRef} style={{ position: 'absolute', left: '-9999px', top: 0 }}>
           <InvoiceContent />
         </div>
       )}
 
+      {/* Payment History Modal */}
       <Transition appear show={isPaymentHistoryOpen} as={React.Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setIsPaymentHistoryOpen(false)}>
           <Transition.Child
@@ -915,5 +1441,7 @@ export default function IPDBillingPage() {
       </Transition>
     </div>
   )
-}
 
+  // =================== Watch Category for Equipment ===================
+  // Removed the watchCategory function as it's no longer needed
+}

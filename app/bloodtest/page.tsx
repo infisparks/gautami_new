@@ -24,6 +24,7 @@ interface IPatientFormInput {
   age: number;
   bloodTestName: string;
   amount: number;
+  paymentId?: string; // Optional string without Maybe
 }
 
 interface IBloodTestEntry {
@@ -47,6 +48,7 @@ const patientSchema = yup
       .typeError("Amount must be a number")
       .positive("Amount must be positive")
       .required("Amount is required"),
+    paymentId: yup.string().notRequired(), // Optional string
   })
   .required();
 
@@ -58,13 +60,14 @@ const PathologyEntryPage: React.FC = () => {
     reset,
     setValue,
   } = useForm<IPatientFormInput>({
-    resolver: yupResolver(patientSchema),
+    // resolver: yupResolver(patientSchema),
     defaultValues: {
       name: "",
       phone: "",
       age: undefined,
       bloodTestName: "",
       amount: undefined,
+      paymentId: "", // Initialize as empty string
     },
   });
 
@@ -118,6 +121,7 @@ const PathologyEntryPage: React.FC = () => {
         age: data.age,
         bloodTestName: data.bloodTestName,
         amount: data.amount,
+        paymentId: data.paymentId || null, // Include Payment ID if provided
         timestamp: Date.now(),
       });
 
@@ -132,6 +136,7 @@ const PathologyEntryPage: React.FC = () => {
         age: undefined,
         bloodTestName: "",
         amount: undefined,
+        paymentId: "", // Reset Payment ID field
       });
       setShowSuggestions(false);
     } catch (error) {
@@ -184,6 +189,7 @@ const PathologyEntryPage: React.FC = () => {
             {new Date().toLocaleString()}
           </div>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* Patient Name */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -201,6 +207,7 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
+            {/* Patient Phone */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -218,6 +225,7 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
+            {/* Age */}
             <div className="relative">
               <AiOutlineFieldBinary className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -236,6 +244,7 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
+            {/* Blood Test Name */}
             <div className="relative">
               <AiOutlineFieldBinary className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -271,6 +280,25 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
+            {/* Payment ID (Optional) */}
+            <div className="relative">
+              <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="text" // Payment ID is typically alphanumeric
+                {...register("paymentId")}
+                placeholder="Payment ID (Optional)"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                  errors.paymentId ? "border-red-500" : "border-gray-300"
+                } transition duration-200`}
+              />
+              {errors.paymentId && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.paymentId.message}
+                </p>
+              )}
+            </div>
+
+            {/* Amount */}
             <div className="relative">
               <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -289,6 +317,7 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={loading}
