@@ -712,13 +712,13 @@ export default function IPDBillingPage() {
         // Header (estimated height: 100px)
         addToPage(
           <div className="mb-6">
-            <h2 className="text-xl font-semibold uppercase tracking-wide border-b pb-2 mb-4">Patient Invoice</h2>
+            <h2 className="text-sm font-semibold uppercase tracking-wide border-b pb-2 mb-4">Patient Invoice</h2>
             <div className="flex justify-between flex-wrap">
               <div>
-                <p className="text-sm"><strong>Patient Name:</strong> {selectedRecord.name}</p>
+                <p className="text-xs"><strong>Patient Name:</strong> {selectedRecord.name}</p>
                 {/* <p className="text-sm"><strong>Patient ID:</strong> {selectedRecord.id}</p> */}
-                <p className="text-sm"><strong>Mobile:</strong> {selectedRecord.mobileNumber}</p>
-                <p className="text-sm">
+                <p className="text-xs"><strong>Mobile:</strong> {selectedRecord.mobileNumber}</p>
+                <p className="text-xs">
                   <strong>Admission Date:</strong>{' '}
                   {selectedRecord.services[0]?.createdAt
                     ? format(new Date(selectedRecord.services[0].createdAt), 'dd MMM yyyy')
@@ -728,9 +728,9 @@ export default function IPDBillingPage() {
               </div>
               <div className="text-right">
                 {/* <p className="text-sm"><strong>Invoice #:</strong> {selectedRecord.id}</p> */}
-                <p className="text-sm"><strong>Bill Date:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
+                <p className="text-xs"><strong>Bill Date:</strong> {format(new Date(), 'dd MMM yyyy')}</p>
                 {selectedRecord.dischargeDate && (
-                  <p className="text-sm">
+                  <p className="text-xs">
                     <strong>Discharge Date:</strong>{' '}
                     {format(new Date(selectedRecord.dischargeDate), 'dd MMM yyyy')}
                   </p>
@@ -757,9 +757,9 @@ export default function IPDBillingPage() {
               <tbody>
                 {selectedRecord.services.map((service, index) => (
                   <tr key={index} className="border-b last:border-none">
-                    <td className="py-2">{service.serviceName}</td>
-                    <td className="py-2">{service.createdAt ? format(new Date(service.createdAt), 'dd MMM yyyy') : 'N/A'}</td>
-                    <td className="py-2 text-right">{currencyFormatter.format(service.amount)}</td>
+                    <td className="pb-1">{service.serviceName}</td>
+                    <td className="pb-1">{service.createdAt ? format(new Date(service.createdAt), 'dd MMM yyyy') : 'N/A'}</td>
+                    <td className="pb-1 text-right">{currencyFormatter.format(service.amount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -775,17 +775,17 @@ export default function IPDBillingPage() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b text-left">
-                  <th className="py-2 font-medium">Category</th>
-                  <th className="py-2 font-medium">Equipment</th>
-                  <th className="py-2 font-medium text-right">Price</th>
+                  <th className="pb-2 font-medium">Category</th>
+                  <th className="pb-2 font-medium">Equipment</th>
+                  <th className="pb-2 font-medium text-right">Price</th>
                 </tr>
               </thead>
               <tbody>
                 {selectedRecord.equipment.map((equip, index) => (
                   <tr key={index} className="border-b last:border-none">
-                    <td className="py-2">{equip.category}</td>
-                    <td className="py-2">{equip.equipmentName}</td>
-                    <td className="py-2 text-right">{currencyFormatter.format(equip.price)}</td>
+                    <td className="pb-2">{equip.category}</td>
+                    <td className="pb-2">{equip.equipmentName}</td>
+                    <td className="pb-2 text-right">{currencyFormatter.format(equip.price)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -832,8 +832,8 @@ export default function IPDBillingPage() {
         // Footer (estimated height: 100px)
         addToPage(
           <div className="text-sm text-gray-600">
-            <p>This is a computer-generated invoice and does not require a signature.</p>
-            <p>Thank you for choosing {hospitalInfo.name}. We wish you a speedy recovery and continued good health.</p>
+            {/* <p>This is a computer-generated invoice and does not require a signature.</p>
+            <p>Thank you for choosing {hospitalInfo.name}. We wish you a speedy recovery and continued good health.</p> */}
           </div>,
           100
         )
