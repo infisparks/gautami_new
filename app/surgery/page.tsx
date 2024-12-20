@@ -4,7 +4,7 @@
 
 import React, { useState } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
+// import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import { db } from "../../lib/firebase";
 import { ref, push, set } from "firebase/database";
@@ -27,27 +27,27 @@ interface ISurgeryFormInput {
   finalDiagnosis: string;
 }
 
-const surgerySchema = yup
-  .object({
-    name: yup.string().required("Patient name is required"),
-    gender: yup
-      .string()
-      .oneOf(["Male", "Female", "Other"], "Select a valid gender")
-      .required("Gender is required"),
-    age: yup
-      .number()
-      .typeError("Age must be a number")
-      .positive("Age must be positive")
-      .integer("Age must be an integer")
-      .required("Age is required"),
-    surgeryDate: yup
-      .date()
-      .typeError("Invalid date")
-      .required("Surgery date is required"),
-    surgeryTitle: yup.string().required("Title of surgery is required"),
-    finalDiagnosis: yup.string().required("Final diagnosis is required"),
-  })
-  .required();
+// const surgerySchema = yup
+//   .object({
+//     name: yup.string().required("Patient name is required"),
+//     gender: yup
+//       .string()
+//       .oneOf(["Male", "Female", "Other"], "Select a valid gender")
+//       .required("Gender is required"),
+//     age: yup
+//       .number()
+//       .typeError("Age must be a number")
+//       .positive("Age must be positive")
+//       .integer("Age must be an integer")
+//       .required("Age is required"),
+//     surgeryDate: yup
+//       .date()
+//       .typeError("Invalid date")
+//       .required("Surgery date is required"),
+//     surgeryTitle: yup.string().required("Title of surgery is required"),
+//     finalDiagnosis: yup.string().required("Final diagnosis is required"),
+//   })
+//   .required();
 
 const SurgeryEntryPage: React.FC = () => {
   const {

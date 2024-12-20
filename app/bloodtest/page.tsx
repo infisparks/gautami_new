@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup";
+// import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import { db } from "../../lib/firebase";
 import { ref, push, set, onValue } from "firebase/database";
@@ -32,25 +32,25 @@ interface IBloodTestEntry {
   // Add other fields if necessary
 }
 
-const patientSchema = yup
-  .object({
-    name: yup.string().required("Patient name is required"),
-    phone: yup.string().required("Patient phone number is required"),
-    age: yup
-      .number()
-      .typeError("Age must be a number")
-      .positive("Age must be positive")
-      .integer("Age must be an integer")
-      .required("Age is required"),
-    bloodTestName: yup.string().required("Blood test name is required"),
-    amount: yup
-      .number()
-      .typeError("Amount must be a number")
-      .positive("Amount must be positive")
-      .required("Amount is required"),
-    paymentId: yup.string().notRequired(), // Optional string
-  })
-  .required();
+// const patientSchema = yup
+//   .object({
+//     name: yup.string().required("Patient name is required"),
+//     phone: yup.string().required("Patient phone number is required"),
+//     age: yup
+//       .number()
+//       .typeError("Age must be a number")
+//       .positive("Age must be positive")
+//       .integer("Age must be an integer")
+//       .required("Age is required"),
+//     bloodTestName: yup.string().required("Blood test name is required"),
+//     amount: yup
+//       .number()
+//       .typeError("Amount must be a number")
+//       .positive("Amount must be positive")
+//       .required("Amount is required"),
+//     paymentId: yup.string().notRequired(), // Optional string
+//   })
+//   .required();
 
 const PathologyEntryPage: React.FC = () => {
   const {

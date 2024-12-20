@@ -4,7 +4,7 @@
 
 import React, { useState } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-import { yupResolver } from "@hookform/resolvers/yup"; // Ensure this import is present
+// import { yupResolver } from "@hookform/resolvers/yup"; // Ensure this import is present
 import * as yup from "yup";
 import { db } from "../../lib/firebase";
 import { ref, push, set } from "firebase/database";
@@ -34,35 +34,35 @@ interface IFirebaseMortalityReport extends IMortalityReportInput {
 }
 
 // Yup Validation Schema
-const mortalityReportSchema = yup
-  .object({
-    name: yup
-      .string()
-      .required("Patient name is required")
-      .matches(/^[A-Za-z\s]+$/, "Name can only contain letters and spaces"),
-    admissionDate: yup
-      .date()
-      .typeError("Admission date must be a valid date")
-      .max(new Date(), "Admission date cannot be in the future")
-      .required("Admission date is required"),
-    age: yup
-      .number()
-      .typeError("Age must be a number")
-      .positive("Age must be positive")
-      .integer("Age must be an integer")
-      .required("Age is required"),
-    dateOfDeath: yup
-      .date()
-      .typeError("Date of death must be a valid date")
-      .min(yup.ref("admissionDate"), "Date of death cannot be before admission date")
-      .max(new Date(), "Date of death cannot be in the future")
-      .required("Date of death is required"),
-    medicalFindings: yup
-      .string()
-      .required("Medical findings are required")
-      .min(10, "Medical findings must be at least 10 characters"),
-  })
-  .required();
+// const mortalityReportSchema = yup
+//   .object({
+//     name: yup
+//       .string()
+//       .required("Patient name is required")
+//       .matches(/^[A-Za-z\s]+$/, "Name can only contain letters and spaces"),
+//     admissionDate: yup
+//       .date()
+//       .typeError("Admission date must be a valid date")
+//       .max(new Date(), "Admission date cannot be in the future")
+//       .required("Admission date is required"),
+//     age: yup
+//       .number()
+//       .typeError("Age must be a number")
+//       .positive("Age must be positive")
+//       .integer("Age must be an integer")
+//       .required("Age is required"),
+//     dateOfDeath: yup
+//       .date()
+//       .typeError("Date of death must be a valid date")
+//       .min(yup.ref("admissionDate"), "Date of death cannot be before admission date")
+//       .max(new Date(), "Date of death cannot be in the future")
+//       .required("Date of death is required"),
+//     medicalFindings: yup
+//       .string()
+//       .required("Medical findings are required")
+//       .min(10, "Medical findings must be at least 10 characters"),
+//   })
+//   .required();
 
 const MortalityReportPage: React.FC = () => {
   const {
