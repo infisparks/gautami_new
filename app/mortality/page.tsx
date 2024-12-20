@@ -5,7 +5,7 @@
 import React, { useState } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
 // import { yupResolver } from "@hookform/resolvers/yup"; // Ensure this import is present
-import * as yup from "yup";
+// import * as yup from "yup";
 import { db } from "../../lib/firebase";
 import { ref, push, set } from "firebase/database";
 import Head from "next/head";
