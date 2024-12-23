@@ -977,6 +977,7 @@ export default function IPDBillingPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="bg-indigo-100">
+                          <th className="px-4 py-2 text-left">Rank</th> {/* New Rank Column */}
                           <th className="px-4 py-2 text-left">Patient Name</th>
                           <th className="px-4 py-2 text-left">Mobile Number</th>
                           <th className="px-4 py-2 text-left">Total Paid (Rs)</th>
@@ -985,13 +986,14 @@ export default function IPDBillingPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sortedFilteredRecords.map(rec => (
+                        {sortedFilteredRecords.map((rec, index) => (
                           <motion.tr
                             key={rec.id}
                             className="hover:bg-indigo-50 cursor-pointer transition duration-150"
                             onClick={() => handleSelectRecord(rec)}
                             whileHover={{ scale: 1.01 }}
                           >
+                            <td className="border-t px-4 py-2">{index + 1}</td> {/* Display Rank */}
                             <td className="border-t px-4 py-2">{rec.name}</td>
                             <td className="border-t px-4 py-2">{rec.mobileNumber}</td>
                             <td className="border-t px-4 py-2">{rec.totalPaid.toLocaleString()}</td>
@@ -1444,4 +1446,4 @@ export default function IPDBillingPage() {
 
   // =================== Watch Category for Equipment ===================
   // Removed the watchCategory function as it's no longer needed
-}
+} 
