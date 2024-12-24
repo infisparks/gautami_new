@@ -896,24 +896,24 @@ export default function IPDBillingPage() {
   }
 
   // =================== Helper to get Base64 image ===================
-  function getBase64Image(imgUrl: string, callback: (base64: string) => void) {
-    const img = new Image()
-    img.setAttribute('crossOrigin', 'anonymous')
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      canvas.width = img.width
-      canvas.height = img.height
-      const ctx = canvas.getContext('2d')
-      ctx?.drawImage(img, 0, 0)
-      const dataURL = canvas.toDataURL('image/png')
-      callback(dataURL)
-    }
-    img.onerror = (err: any) => {
-      console.error('Error loading logo image:', err)
-      callback('')
-    }
-    img.src = imgUrl
-  }
+  // function getBase64Image(imgUrl: string, callback: (base64: string) => void) {
+  //   const img = new Image()
+  //   img.setAttribute('crossOrigin', 'anonymous')
+  //   img.onload = () => {
+  //     const canvas = document.createElement('canvas')
+  //     canvas.width = img.width
+  //     canvas.height = img.height
+  //     const ctx = canvas.getContext('2d')
+  //     ctx?.drawImage(img, 0, 0)
+  //     const dataURL = canvas.toDataURL('image/png')
+  //     callback(dataURL)
+  //   }
+  //   img.onerror = (err: any) => {
+  //     console.error('Error loading logo image:', err)
+  //     callback('')
+  //   }
+  //   img.src = imgUrl
+  // }
 
   // =================== Get Record Date for Sorting ===================
   const getRecordDate = (record: BillingRecord): Date => {
