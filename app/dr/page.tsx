@@ -5,13 +5,13 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { db } from '@/lib/firebase'
 import { ref, onValue } from 'firebase/database'
-import { ToastContainer, toast } from 'react-toastify'
+import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import { format, isSameDay, parseISO } from 'date-fns'
 import { motion } from 'framer-motion'
 import { FaBed, FaUserInjured, FaHospital, FaProcedures, FaArrowDown, FaArrowUp} from 'react-icons/fa'
-import { jsPDF } from 'jspdf'
-import html2canvas from 'html2canvas'
+// import { jsPDF } from 'jspdf'
+// import html2canvas from 'html2canvas'
 
 // =================== Interfaces ===================
 interface Booking {

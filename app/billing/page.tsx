@@ -204,7 +204,7 @@ export default function IPDBillingPage() {
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([])
   const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
   const [loading, setLoading] = useState(false)
-  const [logoBase64, setLogoBase64] = useState<string | null>(null)
+  // const [logoBase64, setLogoBase64] = useState<string | null>(null)
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
 
   const invoiceRef = useRef<HTMLDivElement>(null)
@@ -268,12 +268,12 @@ export default function IPDBillingPage() {
   const selectedCategory = watchEquipment('category')
 
   // =================== Fetch Logo ===================
-  useEffect(() => {
-    const logoUrl = 'https://yourdomain.com/path-to-your-logo.png' // Replace with your actual logo URL
-    getBase64Image(logoUrl, (base64: string) => {
-      setLogoBase64(base64)
-    })
-  }, [])
+  // useEffect(() => {
+  //   const logoUrl = 'https://yourdomain.com/path-to-your-logo.png' // Replace with your actual logo URL
+  //   // getBase64Image(logoUrl, (base64: string) => {
+  //   //   // setLogoBase64(base64)
+  //   // })
+  // }, [])
 
   // =================== Fetch Billing Records ===================
   useEffect(() => {
