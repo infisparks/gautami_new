@@ -34,6 +34,7 @@ const navItems: NavItemProps[] = [
       { title: "Pathology Admin", icon: <BedDouble size={20} />, href: "/bloodadmin" },
       { title: "Mortality Report", icon: <BedDouble size={20} />, href: "/mortalityadmin" },
       { title: "Surgery Report", icon: <BedDouble size={20} />, href: "/surgeryadmin" },
+      { title: "DPR ", icon: <BedDouble size={20} />, href: "/dr" },
    ],
   },
   {

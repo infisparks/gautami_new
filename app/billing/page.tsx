@@ -674,13 +674,7 @@ export default function IPDBillingPage() {
   }
 
   // =================== Hospital Info ===================
-  const hospitalInfo = {
-    logoBase64: logoBase64 || '',
-    name: 'Your Hospital Name',
-    address: '1234 Health St, Wellness City, Country',
-    email: 'info@yourhospital.com',
-    contactNumber: '+1 (234) 567-8900',
-  }
+
 
   // =================== Invoice Component ===================
   const InvoiceContent: React.FC = () => {

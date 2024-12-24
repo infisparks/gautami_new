@@ -9,7 +9,7 @@ import { ToastContainer, toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import { format, isSameDay, parseISO } from 'date-fns'
 import { motion } from 'framer-motion'
-import { FaBed, FaUserInjured, FaHospital, FaProcedures, FaArrowDown, FaArrowUp, FaDownload } from 'react-icons/fa'
+import { FaBed, FaUserInjured, FaHospital, FaProcedures, FaArrowDown, FaArrowUp} from 'react-icons/fa'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 
@@ -290,35 +290,35 @@ export default function DailyPerformanceReport() {
     return bedDetails
   }
 
-  // =================== Download Report ===================
-  const handleDownloadReport = async () => {
-    if (!reportRef.current) {
-      toast.error('Report content not found.', {
-        position: 'top-right',
-        autoClose: 5000,
-      })
-      return
-    }
+  // // =================== Download Report ===================
+  // const handleDownloadReport = async () => {
+  //   if (!reportRef.current) {
+  //     toast.error('Report content not found.', {
+  //       position: 'top-right',
+  //       autoClose: 5000,
+  //     })
+  //     return
+  //   }
 
-    try {
-      const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true })
-      const imgData = canvas.toDataURL('image/png')
+  //   try {
+  //     const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true })
+  //     const imgData = canvas.toDataURL('image/png')
 
-      const pdf = new jsPDF('p', 'pt', 'a4')
-      const imgProps = pdf.getImageProperties(imgData)
-      const pdfWidth = pdf.internal.pageSize.getWidth()
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width
+  //     const pdf = new jsPDF('p', 'pt', 'a4')
+  //     const imgProps = pdf.getImageProperties(imgData)
+  //     const pdfWidth = pdf.internal.pageSize.getWidth()
+  //     const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width
 
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
-      pdf.save(`Daily_Performance_Report_${format(new Date(), 'yyyyMMdd')}.pdf`)
-    } catch (error) {
-      console.error('Error generating PDF:', error)
-      toast.error('Failed to generate PDF. Please try again.', {
-        position: 'top-right',
-        autoClose: 5000,
-      })
-    }
-  }
+  //     pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
+  //     pdf.save(`Daily_Performance_Report_${format(new Date(), 'yyyyMMdd')}.pdf`)
+  //   } catch (error) {
+  //     console.error('Error generating PDF:', error)
+  //     toast.error('Failed to generate PDF. Please try again.', {
+  //       position: 'top-right',
+  //       autoClose: 5000,
+  //     })
+  //   }
+  // }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-6">
@@ -528,13 +528,13 @@ export default function DailyPerformanceReport() {
 
         {/* Download Button */}
         <div className="flex justify-end mb-8">
-          <button
+          {/* <button
             onClick={handleDownloadReport}
             className="flex items-center bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-300"
           >
             <FaDownload className="mr-2" />
             Download Report
-          </button>
+          </button> */}
         </div>
 
         {/* Hidden Report Content for PDF Generation */}
