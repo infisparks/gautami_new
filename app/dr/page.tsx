@@ -1,17 +1,23 @@
-// DailyPerformanceReport.tsx
-
 'use client'
 
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useMemo } from 'react'
 import { db } from '@/lib/firebase'
 import { ref, onValue } from 'firebase/database'
-import { ToastContainer } from 'react-toastify'
+import { ToastContainer, toast } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import { format, isSameDay, parseISO } from 'date-fns'
 import { motion } from 'framer-motion'
-import { FaBed, FaUserInjured, FaHospital, FaProcedures, FaArrowDown, FaArrowUp} from 'react-icons/fa'
-// import { jsPDF } from 'jspdf'
-// import html2canvas from 'html2canvas'
+import {
+  FaBed,
+  FaUserInjured,
+  FaHospital,
+  FaProcedures,
+  FaArrowDown,
+  FaArrowUp,
+  FaDownload,
+} from 'react-icons/fa'
+import { jsPDF } from 'jspdf'
+import html2canvas from 'html2canvas'
 
 // =================== Interfaces ===================
 interface Booking {
@@ -112,142 +118,110 @@ export default function DailyPerformanceReport() {
     bedsAvailable: 0,
   })
 
+  // Ref for offscreen multi-page PDF container
   const reportRef = useRef<HTMLDivElement>(null)
 
   // =================== Fetch Data ===================
-  // Fetch Bookings (OPD)
   useEffect(() => {
+    const unsubArray: Array<() => void> = []
+
+    // Bookings (OPD)
     const bookingsRef = ref(db, 'bookings')
-    const unsubscribe = onValue(bookingsRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        const fetchedBookings: Booking[] = Object.values(data)
-        setBookings(fetchedBookings)
-      } else {
-        setBookings([])
-      }
-    })
+    unsubArray.push(
+      onValue(bookingsRef, (snapshot) => {
+        const data = snapshot.val()
+        setBookings(data ? (Object.values(data) as Booking[]) : [])
+      })
+    )
 
-    return () => unsubscribe()
-  }, [])
+    // IPD Bookings
+    const ipdRef = ref(db, 'ipd_bookings')
+    unsubArray.push(
+      onValue(ipdRef, (snapshot) => {
+        const data = snapshot.val()
+        setIpdBookings(data ? (Object.values(data) as IPDBooking[]) : [])
+      })
+    )
 
-  // Fetch IPD Bookings
-  useEffect(() => {
-    const ipdBookingsRef = ref(db, 'ipd_bookings')
-    const unsubscribe = onValue(ipdBookingsRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        const fetchedIPDBookings: IPDBooking[] = Object.values(data)
-        setIpdBookings(fetchedIPDBookings)
-      } else {
-        setIpdBookings([])
-      }
-    })
-
-    return () => unsubscribe()
-  }, [])
-
-  // Fetch Surgeries
-  useEffect(() => {
+    // Surgeries
     const surgeriesRef = ref(db, 'surgeries')
-    const unsubscribe = onValue(surgeriesRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        const fetchedSurgeries: Surgery[] = Object.values(data)
-        setSurgeries(fetchedSurgeries)
-      } else {
-        setSurgeries([])
-      }
-    })
+    unsubArray.push(
+      onValue(surgeriesRef, (snapshot) => {
+        const data = snapshot.val()
+        setSurgeries(data ? (Object.values(data) as Surgery[]) : [])
+      })
+    )
 
-    return () => unsubscribe()
-  }, [])
-
-  // Fetch Beds
-  useEffect(() => {
+    // Beds
     const bedsRef = ref(db, 'beds')
-    const unsubscribe = onValue(bedsRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        setBeds(data)
-      } else {
-        setBeds({})
-      }
-    })
+    unsubArray.push(
+      onValue(bedsRef, (snapshot) => {
+        const data = snapshot.val()
+        setBeds(data || {})
+      })
+    )
 
-    return () => unsubscribe()
-  }, [])
-
-  // Fetch Mortality Reports
-  useEffect(() => {
+    // Mortality
     const mortalityRef = ref(db, 'mortalityReports')
-    const unsubscribe = onValue(mortalityRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        const fetchedMortalityReports: MortalityReport[] = Object.values(data)
-        setMortalityReports(fetchedMortalityReports)
-      } else {
-        setMortalityReports([])
-      }
-    })
+    unsubArray.push(
+      onValue(mortalityRef, (snapshot) => {
+        const data = snapshot.val()
+        setMortalityReports(data ? (Object.values(data) as MortalityReport[]) : [])
+      })
+    )
 
-    return () => unsubscribe()
+    // Cleanup
+    return () => {
+      unsubArray.forEach((u) => u())
+    }
   }, [])
 
-  // =================== Calculate Metrics ===================
+  // =================== Calculate Today's Metrics ===================
   useEffect(() => {
     const today = new Date()
 
-    // Total OPD Today
-    const totalOPD = bookings.filter((booking) => {
-      const bookingDate = parseISO(booking.date)
-      return isSameDay(bookingDate, today)
-    }).length
+    // OPD Today
+    const totalOPD = bookings.filter((bk) => isSameDay(parseISO(bk.date), today)).length
 
-    // Total IPD Admissions Today
-    const totalIPDAdmissions = ipdBookings.filter((ipd) => {
-      const admissionDate = parseISO(ipd.date)
-      return isSameDay(admissionDate, today)
-    }).length
+    // IPD Admissions
+    const totalIPDAdmissions = ipdBookings.filter((ipd) =>
+      isSameDay(parseISO(ipd.date), today)
+    ).length
 
-    // Total IPD Discharges Today
+    // IPD Discharges
     const totalIPDDischarges = ipdBookings.filter((ipd) => {
       if (!ipd.dischargeDate) return false
-      const dischargeDate = parseISO(ipd.dischargeDate)
-      return isSameDay(dischargeDate, today)
+      return isSameDay(parseISO(ipd.dischargeDate), today)
     }).length
 
-    // Total IPD Referrals Today
+    // IPD Referrals
     const totalIPDReferrals = ipdBookings.filter((ipd) => {
       if (!ipd.referralDoctor) return false
-      const referralDate = parseISO(ipd.createdAt)
-      return isSameDay(referralDate, today)
+      // Assume referral date is createdAt
+      return isSameDay(parseISO(ipd.createdAt), today)
     }).length
 
-    // Total Surgeries Today
-    const totalSurgeries = surgeries.filter((surgery) => {
-      const surgeryDate = parseISO(surgery.surgeryDate)
-      return isSameDay(surgeryDate, today)
-    }).length
+    // Surgeries
+    const totalSurgeries = surgeries.filter((srg) =>
+      isSameDay(parseISO(srg.surgeryDate), today)
+    ).length
 
-    // Total Mortality Reports Today
-    const totalMortalityReports = mortalityReports.filter((mr) => {
-      const deathDate = parseISO(mr.dateOfDeath)
-      return isSameDay(deathDate, today)
-    }).length
+    // Mortality
+    const totalMortalityReports = mortalityReports.filter((mr) =>
+      isSameDay(parseISO(mr.dateOfDeath), today)
+    ).length
 
-    // Bed Status
+    // Beds
     let totalBeds = 0
     let bedsOccupied = 0
     let bedsAvailable = 0
-
     Object.keys(beds).forEach((ward) => {
       Object.keys(beds[ward]).forEach((bedKey) => {
-        totalBeds += 1
+        totalBeds++
         if (beds[ward][bedKey].status.toLowerCase() === 'occupied') {
-          bedsOccupied += 1
+          bedsOccupied++
         } else {
-          bedsAvailable += 1
+          bedsAvailable++
         }
       })
     })
@@ -265,9 +239,9 @@ export default function DailyPerformanceReport() {
     })
   }, [bookings, ipdBookings, surgeries, beds, mortalityReports])
 
-  // =================== Detailed Bed Status ===================
-  const getBedDetails = () => {
-    const bedDetails: Array<{
+  // =================== Derived Data ===================
+  const bedDetails = useMemo(() => {
+    const details: Array<{
       ward: string
       bedNumber?: string
       bedKey: string
@@ -277,7 +251,7 @@ export default function DailyPerformanceReport() {
 
     Object.keys(beds).forEach((ward) => {
       Object.keys(beds[ward]).forEach((bedKey) => {
-        bedDetails.push({
+        details.push({
           ward,
           bedNumber: beds[ward][bedKey].bedNumber,
           bedKey,
@@ -286,39 +260,43 @@ export default function DailyPerformanceReport() {
         })
       })
     })
+    return details
+  }, [beds])
 
-    return bedDetails
+  const todayMortalityReports = useMemo(() => {
+    return mortalityReports.filter((mr) => isSameDay(parseISO(mr.dateOfDeath), new Date()))
+  }, [mortalityReports])
+
+  // =================== Download DPR (Multi-page) ===================
+  const handleDownloadReport = async () => {
+    if (!reportRef.current) {
+      toast.error('Report content not found.', { position: 'top-right', autoClose: 5000 })
+      return
+    }
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100)) // small delay
+
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4' })
+      const pages = reportRef.current.children
+
+      for (let i = 0; i < pages.length; i++) {
+        if (i > 0) pdf.addPage()
+        const canvas = await html2canvas(pages[i] as HTMLElement, {
+          scale: 3,
+          useCORS: true,
+        })
+        const imgData = canvas.toDataURL('image/png')
+        // A4 @72DPI => 595 width x 842 height
+        pdf.addImage(imgData, 'PNG', 0, 0, 595, 842, '', 'FAST')
+      }
+
+      pdf.save(`DPR_${format(new Date(), 'yyyyMMdd_HHmmss')}.pdf`)
+      toast.success('DPR downloaded successfully!', { position: 'top-right', autoClose: 3000 })
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      toast.error('Failed to generate PDF. Please try again.', { position: 'top-right', autoClose: 5000 })
+    }
   }
-
-  // // =================== Download Report ===================
-  // const handleDownloadReport = async () => {
-  //   if (!reportRef.current) {
-  //     toast.error('Report content not found.', {
-  //       position: 'top-right',
-  //       autoClose: 5000,
-  //     })
-  //     return
-  //   }
-
-  //   try {
-  //     const canvas = await html2canvas(reportRef.current, { scale: 2, useCORS: true })
-  //     const imgData = canvas.toDataURL('image/png')
-
-  //     const pdf = new jsPDF('p', 'pt', 'a4')
-  //     const imgProps = pdf.getImageProperties(imgData)
-  //     const pdfWidth = pdf.internal.pageSize.getWidth()
-  //     const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width
-
-  //     pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight)
-  //     pdf.save(`Daily_Performance_Report_${format(new Date(), 'yyyyMMdd')}.pdf`)
-  //   } catch (error) {
-  //     console.error('Error generating PDF:', error)
-  //     toast.error('Failed to generate PDF. Please try again.', {
-  //       position: 'top-right',
-  //       autoClose: 5000,
-  //     })
-  //   }
-  // }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-6">
@@ -326,9 +304,9 @@ export default function DailyPerformanceReport() {
       <div className="max-w-7xl mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden p-8">
         <h1 className="text-4xl font-bold text-green-800 mb-8 text-center">Daily Performance Report</h1>
 
-        {/* Metrics Cards */}
+        {/* ========== Metrics Cards ========== */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Total OPD Today */}
+          {/* OPD */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -337,12 +315,12 @@ export default function DailyPerformanceReport() {
           >
             <FaHospital className="text-green-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalOPD}</p>
-              <p className="text-gray-500">Total OPD Today</p>
+              <p className="text-lg font-semibold">{metrics.totalOPD}</p>
+              <p className="text-gray-500 text-xs">Total OPD Today</p>
             </div>
           </motion.div>
 
-          {/* Total IPD Admissions Today */}
+          {/* IPD Admissions */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -351,12 +329,12 @@ export default function DailyPerformanceReport() {
           >
             <FaUserInjured className="text-blue-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalIPDAdmissions}</p>
-              <p className="text-gray-500">IPD Admissions Today</p>
+              <p className="text-lg font-semibold">{metrics.totalIPDAdmissions}</p>
+              <p className="text-gray-500 text-xs">IPD Admissions Today</p>
             </div>
           </motion.div>
 
-          {/* Total IPD Discharges Today */}
+          {/* IPD Discharges */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -365,12 +343,12 @@ export default function DailyPerformanceReport() {
           >
             <FaArrowDown className="text-red-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalIPDDischarges}</p>
-              <p className="text-gray-500">IPD Discharges Today</p>
+              <p className="text-lg font-semibold">{metrics.totalIPDDischarges}</p>
+              <p className="text-gray-500 text-xs">IPD Discharges Today</p>
             </div>
           </motion.div>
 
-          {/* Total IPD Referrals Today */}
+          {/* IPD Referrals */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -379,12 +357,12 @@ export default function DailyPerformanceReport() {
           >
             <FaArrowUp className="text-purple-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalIPDReferrals}</p>
-              <p className="text-gray-500">IPD Referrals Today</p>
+              <p className="text-lg font-semibold">{metrics.totalIPDReferrals}</p>
+              <p className="text-gray-500 text-xs">IPD Referrals Today</p>
             </div>
           </motion.div>
 
-          {/* Total Surgeries Today */}
+          {/* Surgeries */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -393,12 +371,12 @@ export default function DailyPerformanceReport() {
           >
             <FaProcedures className="text-yellow-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalSurgeries}</p>
-              <p className="text-gray-500">Surgeries Today</p>
+              <p className="text-lg font-semibold">{metrics.totalSurgeries}</p>
+              <p className="text-gray-500 text-xs">Surgeries Today</p>
             </div>
           </motion.div>
 
-          {/* Total Mortality Reports Today */}
+          {/* Mortality */}
           <motion.div
             className="bg-white rounded-xl shadow-md p-6 flex items-center"
             initial={{ opacity: 0, y: 20 }}
@@ -407,8 +385,8 @@ export default function DailyPerformanceReport() {
           >
             <FaUserInjured className="text-red-700 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalMortalityReports}</p>
-              <p className="text-gray-500">Mortality Reports Today</p>
+              <p className="text-lg font-semibold">{metrics.totalMortalityReports}</p>
+              <p className="text-gray-500 text-xs">Mortality Reports Today</p>
             </div>
           </motion.div>
 
@@ -421,8 +399,8 @@ export default function DailyPerformanceReport() {
           >
             <FaBed className="text-indigo-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.totalBeds}</p>
-              <p className="text-gray-500">Total Beds</p>
+              <p className="text-lg font-semibold">{metrics.totalBeds}</p>
+              <p className="text-gray-500 text-xs">Total Beds</p>
             </div>
           </motion.div>
 
@@ -435,8 +413,8 @@ export default function DailyPerformanceReport() {
           >
             <FaBed className="text-red-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.bedsOccupied}</p>
-              <p className="text-gray-500">Beds Occupied</p>
+              <p className="text-lg font-semibold">{metrics.bedsOccupied}</p>
+              <p className="text-gray-500 text-xs">Beds Occupied</p>
             </div>
           </motion.div>
 
@@ -449,8 +427,8 @@ export default function DailyPerformanceReport() {
           >
             <FaBed className="text-green-500 text-4xl mr-4" />
             <div>
-              <p className="text-xl font-semibold">{metrics.bedsAvailable}</p>
-              <p className="text-gray-500">Beds Available</p>
+              <p className="text-lg font-semibold">{metrics.bedsAvailable}</p>
+              <p className="text-gray-500 text-xs">Beds Available</p>
             </div>
           </motion.div>
         </div>
@@ -462,20 +440,20 @@ export default function DailyPerformanceReport() {
             <table className="w-full text-sm">
               <thead className="bg-indigo-100">
                 <tr>
-                  <th className="px-4 py-2 text-left">Ward</th>
-                  <th className="px-4 py-2 text-left">Bed Number</th>
-                  <th className="px-4 py-2 text-left">Type</th>
-                  <th className="px-4 py-2 text-left">Status</th>
+                  <th className="px-2 py-1 text-left text-xs align-middle">Ward</th>
+                  <th className="px-2 py-1 text-left text-xs align-middle">Bed Number</th>
+                  <th className="px-2 py-1 text-left text-xs align-middle">Type</th>
+                  <th className="px-2 py-1 text-left text-xs align-middle">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {getBedDetails().map((bed, index) => (
+                {bedDetails.map((bed, index) => (
                   <tr key={index} className="border-t">
-                    <td className="px-4 py-2 capitalize">{bed.ward.replace(/_/g, ' ')}</td>
-                    <td className="px-4 py-2">{bed.bedNumber || bed.bedKey}</td>
-                    <td className="px-4 py-2 capitalize">{bed.type || 'Standard'}</td>
+                    <td className="px-2 py-1 capitalize text-xs align-middle">{bed.ward.replace(/_/g, ' ')}</td>
+                    <td className="px-2 py-1 text-xs align-middle">{bed.bedNumber || bed.bedKey}</td>
+                    <td className="px-2 py-1 capitalize text-xs align-middle">{bed.type || 'Standard'}</td>
                     <td
-                      className={`px-4 py-2 capitalize ${
+                      className={`px-2 py-1 capitalize text-xs align-middle ${
                         bed.status.toLowerCase() === 'occupied' ? 'text-red-600' : 'text-green-600'
                       }`}
                     >
@@ -488,38 +466,35 @@ export default function DailyPerformanceReport() {
           </div>
         </div>
 
-        {/* Mortality Reports Section */}
+        {/* Mortality Reports */}
         <div className="bg-white rounded-xl shadow-md p-6 mb-8">
           <h2 className="text-2xl font-semibold text-red-700 mb-4">Mortality Reports Today</h2>
-          {metrics.totalMortalityReports === 0 ? (
-            <p className="text-gray-500">No mortality reports today.</p>
+          {todayMortalityReports.length === 0 ? (
+            <p className="text-gray-500 text-xs">No mortality reports today.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-red-100">
                   <tr>
-                    <th className="px-4 py-2 text-left">Name</th>
-                    <th className="px-4 py-2 text-left">Age</th>
-                    <th className="px-4 py-2 text-left">Date of Death</th>
-                    <th className="px-4 py-2 text-left">Medical Findings</th>
-                    <th className="px-4 py-2 text-left">Time Span (Days)</th>
+                    <th className="px-2 py-1 text-left text-xs align-middle">Name</th>
+                    <th className="px-2 py-1 text-left text-xs align-middle">Age</th>
+                    <th className="px-2 py-1 text-left text-xs align-middle">Date of Death</th>
+                    <th className="px-2 py-1 text-left text-xs align-middle">Medical Findings</th>
+                    <th className="px-2 py-1 text-left text-xs align-middle">Time Span (Days)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {mortalityReports
-                    .filter((mr) => {
-                      const deathDate = parseISO(mr.dateOfDeath)
-                      return isSameDay(deathDate, new Date())
-                    })
-                    .map((mr, index) => (
-                      <tr key={index} className="border-t">
-                        <td className="px-4 py-2">{mr.name}</td>
-                        <td className="px-4 py-2">{mr.age}</td>
-                        <td className="px-4 py-2">{format(parseISO(mr.dateOfDeath), 'dd MMM yyyy')}</td>
-                        <td className="px-4 py-2">{mr.medicalFindings}</td>
-                        <td className="px-4 py-2">{mr.timeSpanDays}</td>
-                      </tr>
-                    ))}
+                  {todayMortalityReports.map((mr, index) => (
+                    <tr key={index} className="border-t">
+                      <td className="px-2 py-1 text-xs align-middle">{mr.name}</td>
+                      <td className="px-2 py-1 text-xs align-middle">{mr.age}</td>
+                      <td className="px-2 py-1 text-xs align-middle">
+                        {format(parseISO(mr.dateOfDeath), 'dd MMM yyyy')}
+                      </td>
+                      <td className="px-2 py-1 text-xs align-middle">{mr.medicalFindings}</td>
+                      <td className="px-2 py-1 text-xs align-middle">{mr.timeSpanDays}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -528,26 +503,30 @@ export default function DailyPerformanceReport() {
 
         {/* Download Button */}
         <div className="flex justify-end mb-8">
-          {/* <button
+          <button
             onClick={handleDownloadReport}
             className="flex items-center bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition duration-300"
           >
             <FaDownload className="mr-2" />
-            Download Report
-          </button> */}
+            Download DPR
+          </button>
         </div>
 
-        {/* Hidden Report Content for PDF Generation */}
-        <div ref={reportRef} className="hidden">
-          <ReportContent metrics={metrics} bedDetails={getBedDetails()} mortalityReports={mortalityReports.filter((mr) => isSameDay(parseISO(mr.dateOfDeath), new Date()))} />
+        {/* Offscreen Multi-Page Container */}
+        <div ref={reportRef} style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+          <DPRMultiPage
+            metrics={metrics}
+            bedDetails={bedDetails}
+            mortalityReports={todayMortalityReports}
+          />
         </div>
       </div>
     </div>
   )
 }
 
-// =================== Report Content Component ===================
-interface ReportContentProps {
+// =================== Multi-page DPR Content ===================
+interface DPRMultiPageProps {
   metrics: {
     totalOPD: number
     totalIPDAdmissions: number
@@ -569,82 +548,215 @@ interface ReportContentProps {
   mortalityReports: MortalityReport[]
 }
 
-const ReportContent: React.FC<ReportContentProps> = ({ metrics, bedDetails, mortalityReports }) => {
-  return (
-    <div className="w-full" style={{ fontFamily: 'Arial, sans-serif' }}>
-      {/* Letterhead */}
-      <div className="flex items-center justify-center mb-4">
-        <img src="/letterhead.png" alt="Hospital Letterhead" className="w-64" /> {/* Ensure this path is correct */}
+/**
+ * DPRMultiPage breaks the content into multiple A4 pages:
+ * - The letterhead covers the full 595x842.
+ * - The content is placed 70px from the top and 70px from the bottom.
+ */
+function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPageProps) {
+  const [pages, setPages] = useState<React.ReactNode[]>([])
+
+  // Pair metrics for two items per row
+  const pairedMetrics = useMemo(() => {
+    const metricsArray = [
+      { label: 'Total OPD Today', value: metrics.totalOPD },
+      { label: 'IPD Admissions', value: metrics.totalIPDAdmissions },
+      { label: 'IPD Discharges', value: metrics.totalIPDDischarges },
+      { label: 'IPD Referrals', value: metrics.totalIPDReferrals },
+      { label: 'Surgeries Today', value: metrics.totalSurgeries },
+      { label: 'Mortality Reports', value: metrics.totalMortalityReports },
+      { label: 'Total Beds', value: metrics.totalBeds },
+      { label: 'Beds Occupied', value: metrics.bedsOccupied },
+      { label: 'Beds Available', value: metrics.bedsAvailable },
+    ]
+
+    const pairs = []
+    for (let i = 0; i < metricsArray.length; i += 2) {
+      pairs.push(metricsArray.slice(i, i + 2))
+    }
+    return pairs
+  }, [metrics])
+
+  useEffect(() => {
+    const pageWidth = 595
+    const pageHeight = 842
+
+    // Content area
+    const topOffset = 90
+    const bottomOffset = 70
+    const maxContentHeight = pageHeight - (topOffset + bottomOffset) // 702
+
+    const contentPages: React.ReactNode[] = []
+    let currentPage: React.ReactNode[] = []
+    let currentHeight = 0
+
+    // Helper to push content blocks onto the current page or create a new page if needed.
+    const addToPage = (element: React.ReactNode, blockHeight: number) => {
+      if (currentHeight + blockHeight > maxContentHeight) {
+        contentPages.push(
+          <div
+            key={contentPages.length}
+            style={{
+              position: 'relative',
+              width: `${pageWidth}px`,
+              height: `${pageHeight}px`,
+              overflow: 'hidden',
+            }}
+          >
+            <DPRPageLayout topOffset={topOffset} bottomOffset={bottomOffset}>
+              {currentPage}
+            </DPRPageLayout>
+          </div>
+        )
+        currentPage = []
+        currentHeight = 0
+      }
+      currentPage.push(element)
+      currentHeight += blockHeight
+    }
+
+    // ========== 1. Header ( ~40px ) ==========
+    addToPage(
+      <div key="header" style={{ marginBottom: '8px' }}>
+        <div style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '18px', fontWeight: '700', margin: '0' }}>Daily Performance Report</h1>
+          <p style={{ fontSize: '10px', color: '#555', margin: '4px 0 0 0' }}>
+            Date: {format(new Date(), 'dd MMM yyyy')}
+          </p>
+        </div>
+      </div>,
+      40
+    )
+
+    // ========== 2. Metrics Table ( ~120px ) ==========
+    const metricsContent = (
+      <div key="metrics" style={{ marginBottom: '12px' }}>
+        <h2 style={{ fontSize: '12px', fontWeight: '600', marginBottom: '6px' }}>Today’s Metrics</h2>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
+          <tbody>
+            {pairedMetrics.map((pair, idx) => (
+              <tr key={idx}>
+                {pair.map((item, index) => (
+                  <React.Fragment key={index}>
+                    <td
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '4px',
+                        fontWeight: '500',
+                        verticalAlign: 'middle', // Vertically center content
+                      }}
+                    >
+                      {item.label}
+                    </td>
+                    <td
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '4px',
+                        textAlign: 'center',
+                        verticalAlign: 'middle', // Vertically center content
+                      }}
+                    >
+                      {item.value}
+                    </td>
+                  </React.Fragment>
+                ))}
+                {/* If odd number, add empty cells */}
+                {pair.length === 1 && (
+                  <>
+                    <td
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '4px',
+                        verticalAlign: 'middle',
+                      }}
+                    ></td>
+                    <td
+                      style={{
+                        border: '1px solid #ddd',
+                        padding: '4px',
+                        verticalAlign: 'middle',
+                      }}
+                    ></td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+    )
+    addToPage(metricsContent, 120)
 
-      {/* Report Title */}
-      <h1 className="text-center text-2xl font-bold mb-6">Daily Performance Report</h1>
-
-      {/* Report Date */}
-      <p className="text-center mb-8">Date: {format(new Date(), 'dd MMMM yyyy')}</p>
-
-      {/* Metrics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div>
-          <h2 className="text-xl font-semibold">Total OPD Today</h2>
-          <p className="text-2xl">{metrics.totalOPD}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">IPD Admissions Today</h2>
-          <p className="text-2xl">{metrics.totalIPDAdmissions}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">IPD Discharges Today</h2>
-          <p className="text-2xl">{metrics.totalIPDDischarges}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">IPD Referrals Today</h2>
-          <p className="text-2xl">{metrics.totalIPDReferrals}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">Surgeries Today</h2>
-          <p className="text-2xl">{metrics.totalSurgeries}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">Mortality Reports Today</h2>
-          <p className="text-2xl">{metrics.totalMortalityReports}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">Total Beds</h2>
-          <p className="text-2xl">{metrics.totalBeds}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">Beds Occupied</h2>
-          <p className="text-2xl">{metrics.bedsOccupied}</p>
-        </div>
-        <div>
-          <h2 className="text-xl font-semibold">Beds Available</h2>
-          <p className="text-2xl">{metrics.bedsAvailable}</p>
-        </div>
-      </div>
-
-      {/* Detailed Bed Status */}
-      <div>
-        <h2 className="text-xl font-semibold mb-4">Detailed Bed Status</h2>
-        <table className="w-full border-collapse">
+    // ========== 3. Detailed Bed Status ==========
+    // Approximate height estimation
+    const bedHeaderH = 24
+    const bedRowHeight = 12
+    const bedBodyH = bedDetails.length * bedRowHeight + bedHeaderH
+    addToPage(
+      <div key="beds" style={{ marginBottom: '12px' }}>
+        <h2 style={{ fontSize: '12px', fontWeight: '600', marginBottom: '6px' }}>Detailed Bed Status</h2>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
           <thead>
-            <tr>
-              <th className="border px-4 py-2">Ward</th>
-              <th className="border px-4 py-2">Bed Number</th>
-              <th className="border px-4 py-2">Type</th>
-              <th className="border px-4 py-2">Status</th>
+            <tr style={{ backgroundColor: '#f0f4f8' }}>
+              <th
+                style={{
+                  border: '1px solid #ddd',
+                  padding: '2px',
+                  textAlign: 'left',
+                  verticalAlign: 'middle', // Vertically center header
+                }}
+              >
+                Ward
+              </th>
+              <th
+                style={{
+                  border: '1px solid #ddd',
+                  padding: '2px',
+                  textAlign: 'left',
+                  verticalAlign: 'middle', // Vertically center header
+                }}
+              >
+                Bed Number
+              </th>
+              <th
+                style={{
+                  border: '1px solid #ddd',
+                  padding: '2px',
+                  textAlign: 'left',
+                  verticalAlign: 'middle', // Vertically center header
+                }}
+              >
+                Type
+              </th>
+              <th
+                style={{
+                  border: '1px solid #ddd',
+                  padding: '2px',
+                  textAlign: 'left',
+                  verticalAlign: 'middle', // Vertically center header
+                }}
+              >
+                Status
+              </th>
             </tr>
           </thead>
           <tbody>
             {bedDetails.map((bed, index) => (
-              <tr key={index}>
-                <td className="border px-4 py-2 capitalize">{bed.ward.replace(/_/g, ' ')}</td>
-                <td className="border px-4 py-2">{bed.bedNumber || bed.bedKey}</td>
-                <td className="border px-4 py-2 capitalize">{bed.type || 'Standard'}</td>
+              <tr key={index} style={{ borderBottom: '1px solid #ddd' }}>
+                <td style={{ padding: '2px', textTransform: 'capitalize', verticalAlign: 'middle' }}>
+                  {bed.ward.replace(/_/g, ' ')}
+                </td>
+                <td style={{ padding: '2px', verticalAlign: 'middle' }}>{bed.bedNumber || bed.bedKey}</td>
+                <td style={{ padding: '2px', textTransform: 'capitalize', verticalAlign: 'middle' }}>
+                  {bed.type || 'Standard'}
+                </td>
                 <td
-                  className={`border px-4 py-2 capitalize ${
-                    bed.status.toLowerCase() === 'occupied' ? 'text-red-600' : 'text-green-600'
-                  }`}
+                  style={{
+                    padding: '2px',
+                    textTransform: 'capitalize',
+                    color: bed.status.toLowerCase() === 'occupied' ? '#e74c3c' : '#2ecc71',
+                    verticalAlign: 'middle',
+                  }}
                 >
                   {bed.status}
                 </td>
@@ -652,43 +764,170 @@ const ReportContent: React.FC<ReportContentProps> = ({ metrics, bedDetails, mort
             ))}
           </tbody>
         </table>
-      </div>
+      </div>,
+      bedBodyH
+    )
 
-      {/* Mortality Reports Section */}
-      <div className="mt-8">
-        <h2 className="text-xl font-semibold mb-4">Mortality Reports Today</h2>
+    // ========== 4. Mortality Reports ==========
+    const mortalityContent = (
+      <div key="mortality" style={{ marginBottom: '12px' }}>
+        <h2 style={{ fontSize: '12px', fontWeight: '600', color: '#e74c3c', marginBottom: '6px' }}>
+          Mortality Reports Today
+        </h2>
         {mortalityReports.length === 0 ? (
-          <p className="text-gray-500">No mortality reports today.</p>
+          <p style={{ fontSize: '8px', color: '#555' }}>No mortality reports today.</p>
         ) : (
-          <table className="w-full border-collapse">
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
             <thead>
-              <tr>
-                <th className="border px-4 py-2">Name</th>
-                <th className="border px-4 py-2">Age</th>
-                <th className="border px-4 py-2">Date of Death</th>
-                <th className="border px-4 py-2">Medical Findings</th>
-                <th className="border px-4 py-2">Time Span (Days)</th>
+              <tr style={{ backgroundColor: '#fdecea' }}>
+                <th
+                  style={{
+                    border: '1px solid #ddd',
+                    padding: '2px',
+                    textAlign: 'left',
+                    verticalAlign: 'middle', // Vertically center header
+                  }}
+                >
+                  Name
+                </th>
+                <th
+                  style={{
+                    border: '1px solid #ddd',
+                    padding: '2px',
+                    textAlign: 'left',
+                    verticalAlign: 'middle', // Vertically center header
+                  }}
+                >
+                  Age
+                </th>
+                <th
+                  style={{
+                    border: '1px solid #ddd',
+                    padding: '2px',
+                    textAlign: 'left',
+                    verticalAlign: 'middle', // Vertically center header
+                  }}
+                >
+                  Date of Death
+                </th>
+                <th
+                  style={{
+                    border: '1px solid #ddd',
+                    padding: '2px',
+                    textAlign: 'left',
+                    verticalAlign: 'middle', // Vertically center header
+                  }}
+                >
+                  Medical Findings
+                </th>
+                <th
+                  style={{
+                    border: '1px solid #ddd',
+                    padding: '2px',
+                    textAlign: 'left',
+                    verticalAlign: 'middle', // Vertically center header
+                  }}
+                >
+                  Time Span (Days)
+                </th>
               </tr>
             </thead>
             <tbody>
               {mortalityReports.map((mr, index) => (
-                <tr key={index}>
-                  <td className="border px-4 py-2">{mr.name}</td>
-                  <td className="border px-4 py-2">{mr.age}</td>
-                  <td className="border px-4 py-2">{format(parseISO(mr.dateOfDeath), 'dd MMM yyyy')}</td>
-                  <td className="border px-4 py-2">{mr.medicalFindings}</td>
-                  <td className="border px-4 py-2">{mr.timeSpanDays}</td>
+                <tr key={index} style={{ borderBottom: '1px solid #ddd' }}>
+                  <td style={{ padding: '2px', verticalAlign: 'middle' }}>{mr.name}</td>
+                  <td style={{ padding: '2px', verticalAlign: 'middle' }}>{mr.age}</td>
+                  <td style={{ padding: '2px', verticalAlign: 'middle' }}>
+                    {format(parseISO(mr.dateOfDeath), 'dd MMM yyyy')}
+                  </td>
+                  <td style={{ padding: '2px', verticalAlign: 'middle' }}>{mr.medicalFindings}</td>
+                  <td style={{ padding: '2px', verticalAlign: 'middle' }}>{mr.timeSpanDays}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+    )
+    // Approximate height estimation
+    const mortHeaderH = 24
+    const mortRowHeight = 12
+    const mortBodyH = mortalityReports.length * mortRowHeight + mortHeaderH
+    addToPage(mortalityContent, mortBodyH)
 
-      {/* Footer */}
-      <div className="mt-8 text-center text-sm text-gray-600">
+    // ========== 5. Footer ~30px ==========
+    addToPage(
+      <div key="footer" style={{ textAlign: 'center', fontSize: '6px', color: '#666', marginTop: '8px' }}>
         <p>This is a computer-generated report and does not require a signature.</p>
         <p>Thank you for choosing Our Hospital. We are committed to your health and well-being.</p>
+      </div>,
+      30
+    )
+
+    // If there's any content left in currentPage, create the final page
+    if (currentPage.length > 0) {
+      contentPages.push(
+        <div
+          key={contentPages.length}
+          style={{
+            position: 'relative',
+            width: `${pageWidth}px`,
+            height: `${pageHeight}px`,
+            overflow: 'hidden',
+          }}
+        >
+          <DPRPageLayout topOffset={topOffset} bottomOffset={bottomOffset}>
+            {currentPage}
+          </DPRPageLayout>
+        </div>
+      )
+    }
+
+    setPages(contentPages)
+  }, [pairedMetrics, bedDetails, mortalityReports])
+
+  return <>{pages.map((page, idx) => <React.Fragment key={idx}>{page}</React.Fragment>)}</>
+}
+
+// =================== Page Layout with Full Letterhead ===================
+interface DPRPageLayoutProps {
+  children: React.ReactNode
+  topOffset: number
+  bottomOffset: number
+}
+
+/**
+ * DPRPageLayout fills the entire 595x842 page with the letterhead image,
+ * and places the content within an absolutely positioned container
+ * at top=70px, bottom=70px, left/right=16px.
+ */
+function DPRPageLayout({ children, topOffset, bottomOffset }: DPRPageLayoutProps) {
+  return (
+    <div
+      style={{
+        width: '595px',   // A4 width
+        height: '842px',  // A4 height
+        backgroundImage: 'url(/letterhead.png)', // Full-page letterhead
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+        position: 'relative',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Content container with top/bottom offsets */}
+      <div
+        style={{
+          position: 'absolute',
+          top: `${topOffset}px`,       // 70px from top
+          left: '16px',
+          right: '16px',
+          bottom: `${bottomOffset}px`, // 70px from bottom
+          overflow: 'hidden',
+          padding: '8px', // Add padding for better spacing
+        }}
+      >
+        {children}
       </div>
     </div>
   )
