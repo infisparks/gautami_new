@@ -1,27 +1,28 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { db } from '../../lib/firebase';
 import { ref, push, update, get, onValue } from 'firebase/database';
 import Head from 'next/head';
 import { 
-  AiOutlineUser, 
-  AiOutlineMail, 
-  AiOutlinePhone, 
-  AiOutlineCalendar, 
-  AiOutlineClockCircle, 
-  AiOutlineMessage, 
-  AiOutlineDollarCircle, 
-  AiOutlineInfoCircle
-} from 'react-icons/ai';
+  FaUser, 
+  FaEnvelope, 
+  FaPhone, 
+  FaCalendarAlt, 
+  FaClock, 
+  FaRegCommentDots, 
+  FaDollarSign, 
+  FaInfoCircle,
+  FaMicrophone,
+  FaMicrophoneSlash
+} from 'react-icons/fa';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import Select from 'react-select';
-
-// Remove unused Yup imports and schema
+import Select, { ActionMeta, SingleValue } from 'react-select';
+import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 interface IFormInput {
   name: string;
@@ -77,6 +78,257 @@ const OPDBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
+  const [listening, setListening] = useState(false);
+  const [doctorMenuIsOpen, setDoctorMenuIsOpen] = useState(false); // State to control dropdown
+  const doctorSelectRef = useRef<any>(null); // Reference to the doctor Select component
+
+  // Define voice commands with alternative phrases
+  const commands = [
+    // Name Commands
+    {
+      command: 'name *',
+      callback: (name: string) => {
+        const trimmedName = name.trim().replace(/\s+/g, ' ');
+        setValue('name', trimmedName, { shouldValidate: true });
+        toast.info(`Name set to: ${trimmedName}`);
+      },
+    },
+    {
+      command: 'mera naam *',
+      callback: (name: string) => {
+        const trimmedName = name.trim().replace(/\s+/g, ' ');
+        setValue('name', trimmedName, { shouldValidate: true });
+        toast.info(`Name set to: ${trimmedName}`);
+      },
+    },
+    {
+      command: 'my name *',
+      callback: (name: string) => {
+        const trimmedName = name.trim().replace(/\s+/g, ' ');
+        setValue('name', trimmedName, { shouldValidate: true });
+        toast.info(`Name set to: ${trimmedName}`);
+      },
+    },
+
+    // Email Commands
+    {
+      command: 'email *',
+      callback: (email: string) => {
+        const trimmedEmail = email.trim().replace(/\s+/g, '');
+        setValue('email', trimmedEmail, { shouldValidate: true });
+        toast.info(`Email set to: ${trimmedEmail}`);
+      },
+    },
+    {
+      command: 'mera email *',
+      callback: (email: string) => {
+        const trimmedEmail = email.trim().replace(/\s+/g, '');
+        setValue('email', trimmedEmail, { shouldValidate: true });
+        toast.info(`Email set to: ${trimmedEmail}`);
+      },
+    },
+
+    // Phone Commands
+    {
+      command: 'number *',
+      callback: (phone: string) => {
+        const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setValue('phone', sanitizedPhone, { shouldValidate: true });
+        toast.info(`Phone number set to: ${sanitizedPhone}`);
+      },
+    },
+    {
+      command: 'mera number *',
+      callback: (phone: string) => {
+        const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setValue('phone', sanitizedPhone, { shouldValidate: true });
+        toast.info(`Phone number set to: ${sanitizedPhone}`);
+      },
+    },
+    {
+      command: 'my number *',
+      callback: (phone: string) => {
+        const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setValue('phone', sanitizedPhone, { shouldValidate: true });
+        toast.info(`Phone number set to: ${sanitizedPhone}`);
+      },
+    },
+
+    // Date Commands
+    {
+      command: 'Set date to *',
+      callback: (date: string) => {
+        const parsedDate = new Date(Date.parse(date));
+        if (!isNaN(parsedDate.getTime())) {
+          setValue('date', parsedDate, { shouldValidate: true });
+          toast.info(`Date set to: ${parsedDate.toLocaleDateString()}`);
+        } else {
+          toast.error('Invalid date format. Please try again.');
+        }
+      },
+    },
+
+    // Time Commands
+    {
+      command: 'Set time to *',
+      callback: (time: string) => {
+        setValue('time', time.trim(), { shouldValidate: true });
+        toast.info(`Time set to: ${time.trim()}`);
+      },
+    },
+
+    // Message Commands
+    {
+      command: 'message *',
+      callback: (message: string) => {
+        const trimmedMessage = message.trim();
+        setValue('message', trimmedMessage, { shouldValidate: false });
+        toast.info(`Message set.`);
+      },
+    },
+
+    // Payment Method Commands
+    {
+      command: 'payment method *',
+      callback: (method: string) => {
+        const option = PaymentOptions.find(
+          (opt) => opt.label.toLowerCase() === method.toLowerCase()
+        );
+        if (option) {
+          setValue('paymentMethod', option, { shouldValidate: true });
+          toast.info(`Payment method set to: ${option.label}`);
+        } else {
+          toast.error(`Payment method "${method}" not recognized.`);
+        }
+      },
+    },
+
+    // Amount Commands
+    {
+      command: 'amount *',
+      callback: (amount: string) => {
+        const numericAmount = parseFloat(amount.replace(/[^0-9.]/g, ''));
+        if (!isNaN(numericAmount)) {
+          setValue('amount', numericAmount, { shouldValidate: true });
+          toast.info(`Amount set to: Rs ${numericAmount}`);
+        } else {
+          toast.error('Invalid amount. Please try again.');
+        }
+      },
+    },
+
+    // Service Name Commands
+    {
+      command: 'service *',
+      callback: (serviceName: string) => {
+        const trimmedServiceName = serviceName.trim().replace(/\s+/g, ' ');
+        setValue('serviceName', trimmedServiceName, { shouldValidate: true });
+        toast.info(`Service name set to: ${trimmedServiceName}`);
+      },
+    },
+    {
+      command: 'mera service *',
+      callback: (serviceName: string) => {
+        const trimmedServiceName = serviceName.trim().replace(/\s+/g, ' ');
+        setValue('serviceName', trimmedServiceName, { shouldValidate: true });
+        toast.info(`Service name set to: ${trimmedServiceName}`);
+      },
+    },
+    {
+      command: 'my service *',
+      callback: (serviceName: string) => {
+        const trimmedServiceName = serviceName.trim().replace(/\s+/g, ' ');
+        setValue('serviceName', trimmedServiceName, { shouldValidate: true });
+        toast.info(`Service name set to: ${trimmedServiceName}`);
+      },
+    },
+
+    // Doctor Commands
+    {
+      command: 'drop down',
+      callback: () => {
+        setDoctorMenuIsOpen(true);
+        toast.info('Doctor dropdown opened.');
+      },
+    },
+    {
+      command: 'select doctor *',
+      callback: (doctorName: string) => {
+        const normalizedDoctorName = doctorName.trim().toLowerCase();
+
+        // Attempt to handle minor spelling mistakes by using partial matching
+        let selectedDoctor = doctors.find(
+          (doc) => doc.label.toLowerCase() === normalizedDoctorName
+        );
+        if (!selectedDoctor) {
+          selectedDoctor = doctors.find(
+            (doc) => doc.label.toLowerCase().includes(normalizedDoctorName)
+          );
+        }
+
+        if (selectedDoctor) {
+          setValue('doctor', selectedDoctor, { shouldValidate: true });
+          setDoctorMenuIsOpen(false); // Close the dropdown after selection
+          toast.info(`Doctor set to: ${selectedDoctor.label}`);
+        } else {
+          toast.error(`Doctor "${doctorName}" not found.`);
+        }
+      },
+    },
+    // Additional doctor commands to handle common misspellings
+    {
+      command: 'select doctor number *',
+      callback: (doctorNumber: string) => {
+        // Assuming each doctor has a unique number, this can be implemented if such data exists
+        // For now, we'll notify that this feature is not implemented
+        toast.error('Selecting doctor by number is not implemented.');
+      },
+    },
+
+    // Preview Command
+    {
+      command: 'preview',
+      callback: () => {
+        handlePreview();
+        toast.info('Form previewed.');
+      },
+    },
+
+    // Cancel Preview Command
+    {
+      command: 'cancel',
+      callback: () => {
+        setPreviewData(null);
+        toast.info('Preview canceled.');
+      },
+    },
+
+    // Submit Command
+    {
+      command: 'submit',
+      callback: () => {
+        handleSubmit(onSubmit)();
+      },
+    },
+  ];
+
+  // Initialize Speech Recognition with commands
+  const {
+    transcript,
+    resetTranscript,
+    browserSupportsSpeechRecognition,
+    listening: micListening,
+  } = useSpeechRecognition({ commands });
+
+  // Start listening automatically if desired
+  useEffect(() => {
+    if (browserSupportsSpeechRecognition) {
+      // Optionally start listening automatically
+      // SpeechRecognition.startListening({ continuous: true });
+    } else {
+      toast.error('Browser does not support speech recognition.');
+    }
+  }, [browserSupportsSpeechRecognition]);
 
   // Fetch doctors from Firebase
   useEffect(() => {
@@ -167,6 +419,7 @@ const OPDBookingPage: React.FC = () => {
         serviceName: '',
       });
       setPreviewData(null);
+      resetTranscript();
     } catch (error) {
       console.error('Error booking appointment:', error);
       toast.error('Failed to book appointment. Please try again.', {
@@ -183,6 +436,23 @@ const OPDBookingPage: React.FC = () => {
     setPreviewData(watch());
   };
 
+  // Start/Stop Listening
+  const toggleListening = () => {
+    if (micListening) {
+      SpeechRecognition.stopListening();
+      setListening(false);
+      toast.info('Voice recognition stopped.');
+    } else {
+      if (browserSupportsSpeechRecognition) {
+        SpeechRecognition.startListening({ continuous: true });
+        setListening(true);
+        toast.info('Voice recognition started.');
+      } else {
+        toast.error('Browser does not support speech recognition.');
+      }
+    }
+  };
+
   return (
     <>
       <Head>
@@ -196,10 +466,41 @@ const OPDBookingPage: React.FC = () => {
       <main className="min-h-screen bg-gradient-to-r from-green-100 to-teal-200 flex items-center justify-center p-6">
         <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl p-10">
           <h2 className="text-3xl font-bold text-center text-teal-600 mb-8">Book an Appointment</h2>
+          
+          {/* Voice Control Buttons */}
+          <div className="flex justify-center mb-6 space-x-4">
+            <button
+              type="button"
+              onClick={toggleListening}
+              className="flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              {micListening ? <FaMicrophoneSlash className="mr-2" /> : <FaMicrophone className="mr-2" />}
+              {micListening ? 'Stop Listening' : 'Start Voice Control'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                resetTranscript();
+                toast.info('Transcript cleared.');
+              }}
+              className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400"
+            >
+              Reset Transcript
+            </button>
+          </div>
+
+          {/* Display Transcript */}
+          {micListening && (
+            <div className="mb-6 p-4 bg-gray-100 rounded-lg">
+              <h3 className="text-lg font-semibold mb-2">Listening...</h3>
+              <p className="text-gray-700">{transcript}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Name Field */}
             <div className="relative">
-              <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
+              <FaUser className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
                 {...register('name', { required: 'Name is required' })}
@@ -213,7 +514,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Email Field */}
             <div className="relative">
-              <AiOutlineMail className="absolute top-3 left-3 text-gray-400" />
+              <FaEnvelope className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="email"
                 {...register('email', { pattern: { value: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, message: 'Invalid email' } })}
@@ -227,7 +528,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Phone Field */}
             <div className="relative">
-              <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
+              <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="tel"
                 {...register('phone', {
@@ -244,7 +545,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Date Field */}
             <div className="relative">
-              <AiOutlineCalendar className="absolute top-3 left-3 text-gray-400" />
+              <FaCalendarAlt className="absolute top-3 left-3 text-gray-400" />
               <Controller
                 control={control}
                 name="date"
@@ -266,7 +567,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Time Field */}
             <div className="relative">
-              <AiOutlineClockCircle className="absolute top-3 left-3 text-gray-400" />
+              <FaClock className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
                 {...register('time', { required: 'Time is required' })}
@@ -281,7 +582,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Message Field */}
             <div className="relative">
-              <AiOutlineMessage className="absolute top-3 left-3 text-gray-400" />
+              <FaRegCommentDots className="absolute top-3 left-3 text-gray-400" />
               <textarea
                 {...register('message')}
                 placeholder="Message (Optional)"
@@ -316,7 +617,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Amount Field */}
             <div className="relative">
-              <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
+              <FaDollarSign className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
                 {...register('amount', { 
@@ -334,7 +635,7 @@ const OPDBookingPage: React.FC = () => {
 
             {/* Service Name Field */}
             <div className="relative">
-              <AiOutlineInfoCircle className="absolute top-3 left-3 text-gray-400" />
+              <FaInfoCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
                 {...register('serviceName', { required: 'Service name is required' })}
@@ -362,6 +663,10 @@ const OPDBookingPage: React.FC = () => {
                     className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
                     isClearable
                     onChange={(value) => field.onChange(value)}
+                    menuIsOpen={doctorMenuIsOpen}
+                    onMenuClose={() => setDoctorMenuIsOpen(false)}
+                    onMenuOpen={() => setDoctorMenuIsOpen(true)}
+                    ref={doctorSelectRef}
                   />
                 )}
               />

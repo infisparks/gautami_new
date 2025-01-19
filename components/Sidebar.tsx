@@ -2,7 +2,17 @@
 
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutDashboard, Users, ClipboardList, UserPlus, BedDouble, LogOut, ChevronDown, Menu, X } from 'lucide-react';
+import {
+  LayoutDashboard,
+  Users,
+  ClipboardList,
+  UserPlus,
+  BedDouble,
+  LogOut,
+  ChevronDown,
+  Menu,
+  X,
+} from "lucide-react";
 import { auth } from "../lib/firebase"; // Adjust the import path as necessary
 import { signOut } from "firebase/auth";
 import { useRouter, usePathname } from "next/navigation";
@@ -35,7 +45,7 @@ const navItems: NavItemProps[] = [
       { title: "Mortality Report", icon: <BedDouble size={20} />, href: "/mortalityadmin" },
       { title: "Surgery Report", icon: <BedDouble size={20} />, href: "/surgeryadmin" },
       { title: "DPR ", icon: <BedDouble size={20} />, href: "/dr" },
-   ],
+    ],
   },
   {
     title: "OPD",
@@ -229,11 +239,11 @@ const Sidebar: React.FC = () => {
         variants={sidebarVariants}
         initial="closed"
         animate={isOpen || !isMobile ? "open" : "closed"}
-        className="bg-gray-900 text-gray-100 w-64 h-screen fixed top-0 left-0 z-40 shadow-xl"
+        className="bg-gray-900 text-gray-100 w-64 h-screen fixed top-0 left-0 z-40 shadow-xl flex flex-col"
         aria-label="Sidebar"
       >
         {/* Header with Logo */}
-        <div className="flex items-center justify-start h-16 bg-gray-800 border-b border-gray-700 px-4">
+        <div className="flex items-center justify-start h-16 bg-gray-800 border-b border-gray-700 px-4 flex-shrink-0">
           <div className="flex items-center">
             <div className="bg-white rounded-full p-1 shadow-md">
               <Image src={logo} alt="Logo" width={42} height={42} className="rounded-full" />
@@ -243,12 +253,12 @@ const Sidebar: React.FC = () => {
         </div>
 
         {/* Navigation Items */}
-        <nav className="mt-4 px-3" role="menu">
+        <nav className="mt-4 px-3 flex-1 overflow-y-auto" role="menu">
           <div className="space-y-1">{renderNavItems(navItems)}</div>
         </nav>
 
         {/* Logout Button */}
-        <div className="absolute bottom-0 w-full p-4 border-t border-gray-800">
+        <div className="w-full p-4 border-t border-gray-800 flex-shrink-0">
           <button
             onClick={handleLogout}
             className="flex items-center w-full p-2 text-gray-300 hover:bg-blue-700 hover:text-white rounded-md transition-colors"
@@ -286,4 +296,3 @@ const Sidebar: React.FC = () => {
 };
 
 export default Sidebar;
-

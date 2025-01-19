@@ -9,6 +9,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { onAuthStateChanged, User } from "firebase/auth"; // Import User type
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import 'regenerator-runtime/runtime'; // Add this line
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
