@@ -21,7 +21,7 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import Select, { ActionMeta, SingleValue } from 'react-select';
+import Select from 'react-select';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 interface IFormInput {
@@ -78,7 +78,7 @@ const OPDBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  const [listening, setListening] = useState(false);
+  // const [listening, setListening] = useState(false);
   const [doctorMenuIsOpen, setDoctorMenuIsOpen] = useState(false); // State to control dropdown
   const doctorSelectRef = useRef<any>(null); // Reference to the doctor Select component
 
@@ -276,14 +276,14 @@ const OPDBookingPage: React.FC = () => {
       },
     },
     // Additional doctor commands to handle common misspellings
-    {
-      command: 'select doctor number *',
-      callback: (doctorNumber: string) => {
-        // Assuming each doctor has a unique number, this can be implemented if such data exists
-        // For now, we'll notify that this feature is not implemented
-        toast.error('Selecting doctor by number is not implemented.');
-      },
-    },
+    // {
+    //   command: 'select doctor number *',
+    //   callback: (doctorNumber: string) => {
+    //     // Assuming each doctor has a unique number, this can be implemented if such data exists
+    //     // For now, we'll notify that this feature is not implemented
+    //     toast.error('Selecting doctor by number is not implemented.');
+    //   },
+    // },
 
     // Preview Command
     {
@@ -440,12 +440,12 @@ const OPDBookingPage: React.FC = () => {
   const toggleListening = () => {
     if (micListening) {
       SpeechRecognition.stopListening();
-      setListening(false);
+      // setListening(false);
       toast.info('Voice recognition stopped.');
     } else {
       if (browserSupportsSpeechRecognition) {
         SpeechRecognition.startListening({ continuous: true });
-        setListening(true);
+        // setListening(true);
         toast.info('Voice recognition started.');
       } else {
         toast.error('Browser does not support speech recognition.');
