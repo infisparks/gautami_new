@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Dialog, Transition } from "@headlessui/react";
-// import letterhead from "@/public/letterhead.png";
 // ===== IMPORT THE INVOICE COMPONENT HERE =====
 import InvoiceDownload from "./InvoiceDownload";
 
@@ -378,17 +377,6 @@ export default function IPDBillingPage() {
   };
 
   // =================== Calculations ===================
-  // const calculateAllItemsTotal = (services: ServiceItem[]) => {
-  //   return services.reduce((sum, s) => sum + s.amount, 0);
-  // };
-
-  // const totalItemsAmount = selectedRecord
-  //   ? calculateAllItemsTotal(selectedRecord.services)
-  //   : 0;
-  // const discountInRs = selectedRecord?.discount || 0;
-  // // const amountAfterDiscount = totalItemsAmount - discountInRs;
-
-  // Totals for summary breakdown:
   const hospitalServiceTotal = selectedRecord
     ? selectedRecord.services
         .filter((s) => s.type === "service")
@@ -401,6 +389,34 @@ export default function IPDBillingPage() {
     : 0;
   const discountVal = selectedRecord?.discount || 0;
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal;
+
+  // =================== Helper Function to Send Payment Notification ===================
+  const sendPaymentNotification = async (
+    patientMobile: string,
+    patientName: string,
+    paymentAmount: number,
+    updatedDeposit: number
+  ) => {
+    const apiUrl = "https://wa.medblisss.com/send-text";
+    const payload = {
+      token: "99583991572",
+      number: `91${patientMobile}`, // assuming mobile number doesn't include country code
+      message: `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`
+    };
+
+    try {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        console.error("Notification API responded with an error:", response.statusText);
+      }
+    } catch (error) {
+      console.error("Error sending payment notification:", error);
+    }
+  };
 
   // =================== Handlers ===================
 
@@ -474,7 +490,7 @@ export default function IPDBillingPage() {
     }
   };
 
-  // 2) Add Payment
+  // 2) Add Payment with Notification
   const onSubmitPayment: SubmitHandler<PaymentForm> = async (formData) => {
     if (!selectedRecord) return;
     setLoading(true);
@@ -501,6 +517,14 @@ export default function IPDBillingPage() {
         `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`
       );
       await update(recordRef, { amount: updatedDeposit });
+
+      // Send notification message to patient
+      await sendPaymentNotification(
+        selectedRecord.mobileNumber,
+        selectedRecord.name,
+        Number(formData.paymentAmount),
+        updatedDeposit
+      );
 
       toast.success("Payment recorded successfully!", {
         position: "top-right",

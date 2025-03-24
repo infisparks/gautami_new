@@ -1,15 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { db } from '../../lib/firebase'; // <-- adjust path as needed
-import {
-  ref,
-  push,
-  update,
-  onValue,
- 
-} from 'firebase/database';
+import { ref, push, update, onValue } from 'firebase/database';
 import Head from 'next/head';
 import {
   FaUser,
@@ -19,8 +13,7 @@ import {
   FaClock,
   FaHome,
   FaUserFriends,
- 
-  FaStethoscope
+  FaStethoscope,
 } from 'react-icons/fa';
 
 import { ToastContainer, toast } from 'react-toastify';
@@ -56,7 +49,6 @@ interface IPDFormInput {
   admissionType: { label: string; value: string } | null;
 }
 
-/** Gender, Admission, Room Type, etc. */
 const GenderOptions = [
   { value: 'male', label: 'Male' },
   { value: 'female', label: 'Female' },
@@ -71,11 +63,11 @@ const AdmissionTypeOptions = [
 ];
 
 const RoomTypeOptions = [
-  { value: 'female_ward', label: 'Female Ward (5 Rooms)' },
-  { value: 'icu', label: 'ICU (3 Beds)' },
-  { value: 'male_ward', label: 'Male Ward (5 Beds)' },
-  { value: 'deluxe', label: 'Deluxe (2 Beds)' },
-  { value: 'nicu', label: 'NICU (1 Bed)' },
+  { value: 'female_ward', label: 'Female Ward ' },
+  { value: 'icu', label: 'ICU' },
+  { value: 'male_ward', label: 'Male Ward ' },
+  { value: 'deluxe', label: 'Deluxe' },
+  { value: 'nicu', label: 'NICU' },
 ];
 
 /**
@@ -99,12 +91,12 @@ interface PatientRecord {
   gender?: string;
   age?: number;
   address?: string;
-  // Potentially other fields, e.g., OPD / IPD subfields
 }
 
 /** ---------------
  *    MAIN COMPONENT
- *  --------------- */
+ *  ---------------
+ */
 const IPDBookingPage: React.FC = () => {
   const {
     register,
@@ -134,16 +126,11 @@ const IPDBookingPage: React.FC = () => {
     },
   });
 
-  // For loading, preview, doctors, bed list, etc.
+  // State for loading, preview, doctors, beds, and local patient data
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IPDFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
   const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
-
-  // Watch for changes to room type so we can load available beds
-  const selectedRoomType = watch('roomType');
-
-  // For local patient data & auto-suggestion
   const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
   const [patientNameInput, setPatientNameInput] = useState('');
   const [patientSuggestions, setPatientSuggestions] = useState<
@@ -154,6 +141,9 @@ const IPDBookingPage: React.FC = () => {
     data: PatientRecord;
   } | null>(null);
 
+  // Watch for changes in room type to load available beds
+  const selectedRoomType = watch('roomType');
+
   /** -------------
    *   FETCH DOCTORS
    *  ------------- */
@@ -162,7 +152,6 @@ const IPDBookingPage: React.FC = () => {
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        // Filter IPD or both
         const doctorsList = Object.keys(data)
           .filter((key) => {
             const department = String(data[key].department || '').toLowerCase();
@@ -182,7 +171,8 @@ const IPDBookingPage: React.FC = () => {
 
   /** ---------------------------
    *  FETCH ALL PATIENTS AT START
-   *  --------------------------- */
+   *  ---------------------------
+   */
   useEffect(() => {
     const patientsRef = ref(db, 'patients');
     const unsubscribe = onValue(patientsRef, (snapshot) => {
@@ -209,7 +199,8 @@ const IPDBookingPage: React.FC = () => {
 
   /** --------------------------------
    *  CLIENT-SIDE FILTER FOR SUGGESTIONS
-   *  -------------------------------- */
+   *  --------------------------------
+   */
   const filterPatientSuggestions = (name: string) => {
     if (name.length < 2) {
       setPatientSuggestions([]);
@@ -226,7 +217,6 @@ const IPDBookingPage: React.FC = () => {
     setPatientSuggestions(suggestions);
   };
 
-  // Watch name input to filter suggestions unless a patient is already selected
   useEffect(() => {
     if (!selectedPatient) {
       filterPatientSuggestions(patientNameInput);
@@ -235,17 +225,15 @@ const IPDBookingPage: React.FC = () => {
 
   /** -------------------------
    *  AUTO-FILL ON PATIENT SELECT
-   *  ------------------------- */
+   *  -------------------------
+   */
   const handleSelectPatient = (patientId: string) => {
     const found = allPatients.find((p) => p.id === patientId);
     if (!found) return;
-
     setSelectedPatient({ id: found.id, data: found });
     setValue('name', found.name);
     setValue('phone', found.phone || '');
     setValue('age', found.age || 0);
-
-    // Convert gender string -> { label, value }
     if (found.gender) {
       const g = GenderOptions.find(
         (opt) => opt.value?.toLowerCase() === found.gender?.toLowerCase()
@@ -254,7 +242,6 @@ const IPDBookingPage: React.FC = () => {
     } else {
       setValue('gender', null);
     }
-
     setValue('address', found.address || '');
     setPatientNameInput(found.name);
     setPatientSuggestions([]);
@@ -263,7 +250,8 @@ const IPDBookingPage: React.FC = () => {
 
   /** ---------------------
    *   LOAD AVAILABLE BEDS
-   *  --------------------- */
+   *  ---------------------
+   */
   useEffect(() => {
     if (selectedRoomType?.value) {
       const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
@@ -277,8 +265,6 @@ const IPDBookingPage: React.FC = () => {
               value: key,
             }));
           setBeds(bedList);
-
-          // If we already had a bed selected, we might want to reset it
           if (bedList.length === 0) {
             setValue('bed', null);
           }
@@ -294,19 +280,46 @@ const IPDBookingPage: React.FC = () => {
     }
   }, [selectedRoomType, setValue]);
 
+  /** -----------------------------
+   *  HELPER: SEND WHATSAPP MESSAGE
+   * -----------------------------
+   */
+  const sendWhatsAppMessage = async (phone: string, message: string) => {
+    // Ensure the phone number starts with "91"
+    const formattedNumber = phone.startsWith('91') ? phone : `91${phone}`;
+    try {
+      const response = await fetch('https://wa.medblisss.com/send-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: '99583991572',
+          number: formattedNumber,
+          message: message,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Error sending WhatsApp message');
+      }
+      const data = await response.json();
+      console.log('WhatsApp message sent:', data);
+    } catch (error) {
+      console.error('WhatsApp API error:', error);
+    }
+  };
+
   /** --------
    *   SUBMIT
    *  -------- */
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true);
     try {
-      // 1) Occupy the bed if user selected one
+      // 1) Occupy the bed if selected
       if (data.roomType?.value && data.bed?.value) {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
         await update(bedRef, { status: 'Occupied' });
       }
 
-      // 2) IPD data to store under patients/{patientId}/ipd
+      // 2) Prepare IPD data to store under the patient record
       const ipdData = {
         name: data.name,
         phone: data.phone,
@@ -326,12 +339,11 @@ const IPDBookingPage: React.FC = () => {
         createdAt: new Date().toISOString(),
       };
 
-      // 3) Check if we have an existing patient or need to create a new one
+      // 3) Check if patient exists or create a new patient record
       let patientId: string;
       if (selectedPatient) {
         patientId = selectedPatient.id;
       } else {
-        // create new patient node
         const newPatientRef = push(ref(db, 'patients'));
         await update(newPatientRef, {
           name: data.name,
@@ -344,17 +356,30 @@ const IPDBookingPage: React.FC = () => {
         patientId = newPatientRef.key as string;
       }
 
-      // 4) push IPD record under that patient
+      // 4) Push the IPD record under the patient
       const ipdRef = ref(db, `patients/${patientId}/ipd`);
       const newIpdRef = push(ipdRef);
       await update(newIpdRef, ipdData);
+
+      // 5) Construct professional messages for patient and relative
+      const patientMessage = `Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${
+        data.bed?.label || 'N/A'
+      } in ${data.roomType?.label || 'N/A'} has been allocated. Thank you for choosing our hospital.`;
+      
+      const relativeMessage = `Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${
+        data.bed?.label || 'N/A'
+      } in ${data.roomType?.label || 'N/A'}. Please contact us for further details.`;
+
+      // 6) Send WhatsApp messages to both patient and relative
+      await sendWhatsAppMessage(data.phone, patientMessage);
+      await sendWhatsAppMessage(data.relativePhone, relativeMessage);
 
       toast.success('IPD Admission created successfully!', {
         position: 'top-right',
         autoClose: 5000,
       });
 
-      // 5) Reset everything
+      // 7) Reset form and state
       reset({
         name: '',
         phone: '',
@@ -390,13 +415,9 @@ const IPDBookingPage: React.FC = () => {
    *   PREVIEW
    *  -------- */
   const handlePreview = () => {
-    // Just show what’s in the form
     setPreviewData(watch());
   };
 
-  /** -----------------
-   *   BEDS AVAILABLE?
-   *  ----------------- */
   const bedsAvailable = beds.length > 0;
 
   return (
@@ -415,7 +436,7 @@ const IPDBookingPage: React.FC = () => {
           </h2>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Patient Name + Auto-Suggest */}
+            {/* Patient Name with Auto-Suggest */}
             <div className="relative">
               <FaUser className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -453,7 +474,7 @@ const IPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Phone Field */}
+            {/* Patient Phone */}
             <div className="relative">
               <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -504,7 +525,6 @@ const IPDBookingPage: React.FC = () => {
 
             {/* Age & Address */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Age */}
               <div className="relative">
                 <FaTransgender className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -524,8 +544,6 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {/* Address (Optional) */}
               <div className="relative">
                 <FaHome className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -537,9 +555,8 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Relative Name & Phone & Address */}
+            {/* Relative Name & Phone */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Relative Name */}
               <div className="relative">
                 <FaUserFriends className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -558,8 +575,6 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {/* Relative Phone */}
               <div className="relative">
                 <FaPhone className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -584,7 +599,7 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Relative Address (optional) */}
+            {/* Relative Address */}
             <div className="relative">
               <FaHome className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -597,7 +612,6 @@ const IPDBookingPage: React.FC = () => {
 
             {/* Date & Time */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Date */}
               <div className="relative">
                 <FaCalendarAlt className="absolute top-3 left-3 text-gray-400" />
                 <Controller
@@ -622,8 +636,6 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {/* Time */}
               <div className="relative">
                 <FaClock className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -647,7 +659,6 @@ const IPDBookingPage: React.FC = () => {
 
             {/* Room Type & Bed */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Room Type */}
               <div>
                 <label className="block text-gray-700 mb-2">Room Type</label>
                 <Controller
@@ -671,8 +682,6 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {/* Bed */}
               <div>
                 <label className="block text-gray-700 mb-2">Bed</label>
                 <Controller
@@ -683,9 +692,7 @@ const IPDBookingPage: React.FC = () => {
                     <Select
                       {...field}
                       options={beds}
-                      placeholder={
-                        beds.length > 0 ? 'Select Bed' : 'No Beds Available'
-                      }
+                      placeholder={beds.length > 0 ? 'Select Bed' : 'No Beds Available'}
                       classNamePrefix="react-select"
                       className={errors.bed ? 'border-red-500' : ''}
                       onChange={(val) => field.onChange(val)}
@@ -701,9 +708,8 @@ const IPDBookingPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Doctor & ReferDoctor */}
+            {/* Doctor & Referral Doctor */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Under Care of Doctor */}
               <div>
                 <label className="block text-gray-700 mb-2">
                   Under Care of Doctor
@@ -729,8 +735,6 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-
-              {/* Referral Doctor (optional) */}
               <div className="relative">
                 <FaStethoscope className="absolute top-3 left-3 text-gray-400" />
                 <input
@@ -810,13 +814,11 @@ const IPDBookingPage: React.FC = () => {
                     </p>
                     {previewData.relativeAddress && (
                       <p>
-                        <strong>Relative Address:</strong>{' '}
-                        {previewData.relativeAddress}
+                        <strong>Relative Address:</strong> {previewData.relativeAddress}
                       </p>
                     )}
                     <p>
-                      <strong>Admission Date:</strong>{' '}
-                      {previewData.date.toLocaleDateString()}
+                      <strong>Admission Date:</strong> {previewData.date.toLocaleDateString()}
                     </p>
                     <p>
                       <strong>Admission Time:</strong> {previewData.time}
@@ -833,20 +835,17 @@ const IPDBookingPage: React.FC = () => {
                     )}
                     {previewData.doctor && (
                       <p>
-                        <strong>Under Care of Doctor:</strong>{' '}
-                        {previewData.doctor.label}
+                        <strong>Under Care of Doctor:</strong> {previewData.doctor.label}
                       </p>
                     )}
                     {previewData.referDoctor && (
                       <p>
-                        <strong>Referral Doctor:</strong>{' '}
-                        {previewData.referDoctor}
+                        <strong>Referral Doctor:</strong> {previewData.referDoctor}
                       </p>
                     )}
                     {previewData.admissionType && (
                       <p>
-                        <strong>Admission Type:</strong>{' '}
-                        {previewData.admissionType.label}
+                        <strong>Admission Type:</strong> {previewData.admissionType.label}
                       </p>
                     )}
                   </div>
@@ -886,8 +885,7 @@ const IPDBookingPage: React.FC = () => {
             {/* No Beds Available Warning */}
             {!bedsAvailable && (
               <p className="text-red-500 text-center mt-4">
-                No beds are available for the selected room type. Please choose
-                a different room type.
+                No beds are available for the selected room type. Please choose a different room type.
               </p>
             )}
           </form>

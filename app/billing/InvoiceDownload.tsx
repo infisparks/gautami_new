@@ -7,6 +7,14 @@ import { Download } from "lucide-react";
 // Replace with your actual image import:
 import letterhead from "@/public/letterhead.png";
 
+// Firebase Storage imports (ensure Firebase is initialized in your project)
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from "firebase/storage";
+
 /** ========== Data model interfaces ========== **/
 interface ServiceItem {
   serviceName: string;
@@ -46,63 +54,56 @@ type InvoiceDownloadProps = {
 /**
  * InvoiceDownload
  * 
- * Renders a "Download Invoice" button, plus a hidden invoice layout
- * that is captured by html2canvas and saved to PDF with jsPDF.
+ * Renders buttons for downloading the invoice as a PDF and sending the invoice PDF on WhatsApp.
+ * The WhatsApp button generates the PDF using jsPDF (by capturing a hidden invoice layout),
+ * uploads it to Firebase Storage, retrieves the download URL, and posts that URL to the provided API.
  */
 export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   const invoiceRef = useRef<HTMLDivElement>(null);
 
-  // ========== PDF Generation Handler ==========
-  const handleDownloadInvoice = async () => {
-    if (!invoiceRef.current) return;
+  // Generate PDF from the hidden invoice layout and return the jsPDF instance
+  const generatePDF = async (): Promise<jsPDF> => {
+    if (!invoiceRef.current) throw new Error("Invoice element not found.");
 
-    // Wait briefly to ensure fonts/images are loaded
+    // Wait briefly to ensure fonts and images are loaded
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // 1) Render the invoiceRef into a single tall canvas (with transparent BG).
+    // Render the invoice layout to a canvas
     const canvas = await html2canvas(invoiceRef.current, {
       scale: 3,
       useCORS: true,
-      backgroundColor: null, // Keep background transparent
+      backgroundColor: null, // transparent background
     });
 
-    // Convert that canvas to a PNG data URL
-    // const fullImgData = canvas.toDataURL("image/png");
-
-    // 2) Set up jsPDF (portrait, A4)
+    // Set up jsPDF (portrait, A4)
     const pdf = new jsPDF({
       orientation: "p",
       unit: "pt",
       format: "a4",
     });
 
-    const pdfWidth = 595;  // A4 width in points
+    const pdfWidth = 595; // A4 width in points
     const pdfHeight = 842; // A4 height in points
-
-    // Define margins
-    const topMargin = 120;   
-    const bottomMargin = 80; 
-    const sideMargin = 20;   
+    const topMargin = 120;
+    const bottomMargin = 80;
+    const sideMargin = 20;
     const contentHeight = pdfHeight - topMargin - bottomMargin;
-
-    // Determine scaling from canvas px to PDF points
     const scaleRatio = pdfWidth / canvas.width;
-    // The entire invoice height in PDF points after scaling:
     const fullContentHeightPts = canvas.height * scaleRatio;
 
-    let currentPos = 0; // track how far we've printed (in PDF points)
+    let currentPos = 0;
     let pageCount = 0;
 
-    // 3) Slice the tall canvas into multiple PDF pages
+    // Slice the tall canvas into chunks to fit on multiple PDF pages if necessary
     while (currentPos < fullContentHeightPts) {
       pageCount += 1;
 
-      // Add a new page in PDF if it's not the first one
+      // Add a new page if it's not the first one
       if (pageCount > 1) {
         pdf.addPage();
       }
 
-      // OPTIONAL: Draw your letterhead/watermark behind the page
+      // OPTIONAL: Add your letterhead/watermark in the background
       pdf.addImage(
         letterhead.src,
         "PNG",
@@ -114,16 +115,14 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
         "FAST"
       );
 
-      // Figure out the portion of the big canvas to copy
+      // Determine the portion of the canvas to capture
       const sourceY = Math.floor(currentPos / scaleRatio);
       const sourceHeight = Math.floor(contentHeight / scaleRatio);
 
-      // Make a temp canvas for the "chunk"
+      // Create a temporary canvas to capture the chunk
       const pageCanvas = document.createElement("canvas");
       pageCanvas.width = canvas.width;
       pageCanvas.height = sourceHeight;
-
-      // Copy the portion from the big canvas
       const pageCtx = pageCanvas.getContext("2d");
       if (pageCtx) {
         pageCtx.drawImage(
@@ -139,39 +138,100 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
         );
       }
 
-      // Convert that chunk to a data URL
+      // Convert the chunk to a PNG data URL
       const chunkImgData = pageCanvas.toDataURL("image/png");
-      // How tall it is in PDF points
       const chunkHeightPts = sourceHeight * scaleRatio;
 
-      // 4) Place this chunk in the PDF with side margins
+      // Add the chunk to the PDF with side margins
       pdf.addImage(
         chunkImgData,
         "PNG",
-        sideMargin,                // x
-        topMargin,                 // y
+        sideMargin, // x
+        topMargin, // y
         pdfWidth - 2 * sideMargin, // width
-        chunkHeightPts,            // height
+        chunkHeightPts, // height
         "",
         "FAST"
       );
 
-      // Move downward for next page
       currentPos += contentHeight;
     }
 
-    // Determine filename
-    const fileName = record.dischargeDate
-      ? `Final_Invoice_${record.name}_${record.ipdId}.pdf`
-      : `Provisional_Invoice_${record.name}_${record.ipdId}.pdf`;
+    return pdf;
+  };
 
-    // 5) Save the PDF
-    pdf.save(fileName);
+  // Handler for downloading the PDF locally
+  const handleDownloadInvoice = async () => {
+    try {
+      const pdf = await generatePDF();
+      const fileName = record.dischargeDate
+        ? `Final_Invoice_${record.name}_${record.ipdId}.pdf`
+        : `Provisional_Invoice_${record.name}_${record.ipdId}.pdf`;
+      pdf.save(fileName);
+    } catch (error) {
+      console.error(error);
+      alert("Failed to generate the invoice PDF.");
+    }
+  };
+
+  // Handler for sending the PDF on WhatsApp
+  const handleSendPdfOnWhatsapp = async () => {
+    try {
+      const pdf = await generatePDF();
+
+      // Get the PDF as a Blob
+      const pdfBlob = pdf.output("blob");
+      if (!pdfBlob) throw new Error("Failed to generate PDF blob.");
+
+      // Upload the PDF blob to Firebase Storage
+      const storage = getStorage();
+      const storagePath = `invoices/invoice-${record.ipdId}-${Date.now()}.pdf`;
+      const fileRef = storageRef(storage, storagePath);
+      await uploadBytes(fileRef, pdfBlob);
+
+      // Retrieve the download URL for the uploaded PDF
+      const downloadUrl = await getDownloadURL(fileRef);
+
+      // Format the mobile number (ensure it starts with "91")
+      const formattedNumber = record.mobileNumber.startsWith("91")
+        ? record.mobileNumber
+        : `91${record.mobileNumber}`;
+
+      // Prepare the payload for the API call
+      const payload = {
+        token: "99583991572",
+        number: formattedNumber,
+        imageUrl: downloadUrl, // field name remains as "imageUrl"
+        caption:
+          "Dear Patient, please find attached your invoice PDF for your recent visit. Thank you for choosing our services.",
+      };
+
+      // Post the payload to the WhatsApp API endpoint
+      const response = await fetch(
+        "https://wa.medblisss.com/send-image-url",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to send the invoice on WhatsApp.");
+      }
+
+      alert("Invoice PDF sent successfully on WhatsApp!");
+    } catch (error) {
+      console.error(error);
+      alert("An error occurred while sending the invoice PDF on WhatsApp.");
+    }
   };
 
   // ========== Data & Layout Logic ==========
 
-  // 1) Group Hospital Services
+  // Group Hospital Services
   const groupedHospitalServices = Object.values(
     record.services
       .filter((s) => s.type === "service")
@@ -199,7 +259,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
       })
   );
 
-  // 2) Group Consultant Charges by Doctor Name
+  // Group Consultant Charges by Doctor Name
   const groupedConsultantServices = Object.values(
     record.services
       .filter((s) => s.type === "doctorvisit")
@@ -227,7 +287,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
       })
   );
 
-  // 3) Totals Calculation
+  // Totals Calculation
   const hospitalServiceTotal = record.services
     .filter((s) => s.type === "service")
     .reduce((sum, s) => sum + s.amount, 0);
@@ -242,7 +302,15 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   // ========== Render ==========
   return (
     <div className="flex flex-col items-center">
-      {/* The Download button visible in the UI */}
+      {/* Button to send invoice PDF on WhatsApp */}
+      <button
+        onClick={handleSendPdfOnWhatsapp}
+        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition duration-300 flex items-center mb-4 text-[10px]"
+      >
+        Send Invoice PDF on WhatsApp
+      </button>
+
+      {/* Button to download invoice as PDF */}
       <button
         onClick={handleDownloadInvoice}
         className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition duration-300 flex items-center mb-4 text-[10px]"
@@ -261,11 +329,10 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           left: "-9999px",
           top: 0,
           width: "595px", // A4 width
-          // Ensure no forced background color:
           backgroundColor: "transparent",
         }}
       >
-        {/* Invoice content - adjust styling as needed */}
+        {/* Invoice content */}
         <div className="text-[10px] text-gray-800 p-4 bg-transparent">
           {/* Combined Patient & Billing Info + Totals Card */}
           <div className="my-2 p-2 rounded shadow-sm border border-gray-200">
@@ -383,7 +450,6 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
                     <td className="p-1 text-right">
                       {item.totalAmount.toLocaleString()}
                     </td>
-                    <hr />
                   </tr>
                 ))}
               </tbody>
