@@ -6,10 +6,11 @@ import "./globals.css";
 import Sidebar from "../components/Sidebar"; // Adjust this import based on your project structure
 import { auth } from "../lib/firebase";
 import { useRouter, usePathname } from "next/navigation";
-import { onAuthStateChanged, User } from "firebase/auth"; // Import User type
+import { onAuthStateChanged, User } from "firebase/auth";
+import { getDatabase, ref, onValue } from "firebase/database"; // For reading user type from Realtime DB
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-import 'regenerator-runtime/runtime'; // Add this line
+import "regenerator-runtime/runtime"; // Add this line
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -27,61 +28,99 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [user, setUser] = useState<User | null>(null); // Specify the type for user
+  // Logged-in Firebase user
+  const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  // "admin" or "staff" (or null if not found)
+  const [userType, setUserType] = useState<string | null>(null);
+
   const router = useRouter();
   const pathname = usePathname();
 
+  // 1. Check if user is authenticated
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      setLoading(false); // Set loading to false once we have auth state
+      setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
+  // 2. Fetch user type from Realtime Database (adjust path as needed)
+  useEffect(() => {
+    if (user) {
+      const db = getDatabase();
+      const userRef = ref(db, `user/${user.uid}`); // e.g. "user/UID" => { type: "staff" }
+      onValue(userRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.type) {
+          setUserType(data.type);
+        } else {
+          setUserType(null);
+        }
+      });
+    } else {
+      setUserType(null);
+    }
+  }, [user]);
+
+  // 3. Protect routes (redirect if not logged in, or if staff tries to access restricted routes)
   useEffect(() => {
     if (!loading) {
-      if (user) {
-        // If user is logged in, prevent access to login/register
-        if (pathname === "/login" || pathname === "/register") {
-          router.push("/dashboard"); // Redirect to dashboard or home if trying to access login/register
-        }
-      } else {
-        // If not logged in, restrict access to protected routes
+      // If user not logged in, allow only /login or /register
+      if (!user) {
         const publicPaths = ["/login", "/register"];
         const isPublicPath = publicPaths.includes(pathname);
         if (!isPublicPath) {
           router.push("/login");
         }
+      } else {
+        // If user IS logged in and tries to go to /login or /register => push /dashboard
+        if (pathname === "/login" || pathname === "/register") {
+          router.push("/dashboard");
+        }
+
+        // If user is "staff" and tries to go to restricted route => redirect to /opd
+        if (userType === "staff") {
+          const restrictedPaths = [
+            "/dashboard",
+            "/opdadmin",
+            "/ipdadmin",
+            "/patientadmin",
+            "/bloodadmin",
+            "/mortalityadmin",
+            "/surgeryadmin",
+            "/dr",
+          ];
+          if (restrictedPaths.includes(pathname)) {
+            router.push("/opd");
+          }
+        }
       }
     }
-  }, [user, loading, pathname, router]);
+  }, [user, userType, loading, pathname, router]);
 
   return (
     <html lang="en">
       <head>
-        {/* Add any global head elements here */}
+        {/* Any global <head> elements */}
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
       >
         <ToastContainer />
         {loading ? (
-          // Display loading if still checking auth state
           <div className="flex items-center justify-center min-h-screen">
             <p>Loading...</p>
           </div>
         ) : user ? (
           <div className="flex">
-            <Sidebar />
-            <main className="flex-1 ml-0 bg-gray-50 min-h-screen">
-              {children}
-            </main>
+            {/* Pass userType to the Sidebar */}
+            <Sidebar userType={userType} />
+            <main className="flex-1 ml-0 bg-gray-50 min-h-screen">{children}</main>
           </div>
         ) : (
-          // Render children if not logged in (login/register)
+          // Not logged in => show children (login/register)
           <>{children}</>
         )}
       </body>

@@ -27,6 +27,7 @@
     "framer-motion": "^11.14.1",
     "headlessui": "^0.0.0",
     "hospital-hrms": "file:",
+    "html2pdf.js": "^0.10.3",
     "install": "^0.13.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",

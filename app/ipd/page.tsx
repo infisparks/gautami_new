@@ -1,73 +1,73 @@
-// app/ipd/page.tsx
-
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import { db } from '../../lib/firebase';
-import { ref, push, update, onValue } from 'firebase/database';
+import { db } from '../../lib/firebase'; // <-- adjust path as needed
+import {
+  ref,
+  push,
+  update,
+  onValue,
+ 
+} from 'firebase/database';
 import Head from 'next/head';
-import { 
-  AiOutlineUser, 
-  AiOutlinePhone, 
-  AiOutlineCalendar, 
-  AiOutlineClockCircle, 
-  AiOutlineInfoCircle, 
-  AiOutlineMail 
-} from 'react-icons/ai';
+import {
+  FaUser,
+  FaPhone,
+  FaTransgender,
+  FaCalendarAlt,
+  FaClock,
+  FaHome,
+  FaUserFriends,
+ 
+  FaStethoscope
+} from 'react-icons/fa';
+
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
-import Select, { SingleValue } from 'react-select';
+import Select from 'react-select';
 
+/** ---------------------------
+ *   TYPE & CONSTANT DEFINITIONS
+ *  ---------------------------
+ */
 interface IPDFormInput {
+  /** Basic Patient Info */
   name: string;
-  email?: string;
-  gender: { label: string; value: string };
-  dateOfBirth: Date;
+  phone: string;
+  gender: { label: string; value: string } | null;
   age: number;
-  bloodGroup: { label: string; value: string };
+  address?: string;
+
+  /** Relative Info */
+  relativeName: string;
+  relativePhone: string;
+  relativeAddress?: string;
+
+  /** IPD Details */
   date: Date;
   time: string;
-  mobileNumber: string;
-  emergencyMobileNumber?: string;
-  membershipType: { label: string; value: string };
-  roomType: { label: string; value: string };
-  bed: { label: string; value: string };
-  doctor: { label: string; value: string };
-  referralDoctor?: string;
-  admissionType: { label: string; value: string };
+  roomType: { label: string; value: string } | null;
+  bed: { label: string; value: string } | null;
+  doctor: { label: string; value: string } | null;
+  referDoctor?: string;
+  admissionType: { label: string; value: string } | null;
 }
 
-const AdmissionTypes = [
-  { value: 'general', label: 'General' },
-  { value: 'surgery', label: 'Surgery' },
-  { value: 'accident_emergency', label: 'Accident/Emergency' },
-  { value: 'day_observation', label: 'Day Observation' },
-];
-
+/** Gender, Admission, Room Type, etc. */
 const GenderOptions = [
   { value: 'male', label: 'Male' },
   { value: 'female', label: 'Female' },
   { value: 'other', label: 'Other' },
 ];
 
-const BloodGroupOptions = [
-  { value: 'A+', label: 'A+' },
-  { value: 'A-', label: 'A-' },
-  { value: 'B+', label: 'B+' },
-  { value: 'B-', label: 'B-' },
-  { value: 'AB+', label: 'AB+' },
-  { value: 'AB-', label: 'AB-' },
-  { value: 'O+', label: 'O+' },
-  { value: 'O-', label: 'O-' },
-];
-
-const MembershipTypeOptions = [
-  { value: 'regular', label: 'Regular' },
-  { value: 'premium', label: 'Premium' },
-  { value: 'vip', label: 'VIP' },
+const AdmissionTypeOptions = [
+  { value: 'general', label: 'General' },
+  { value: 'surgery', label: 'Surgery' },
+  { value: 'accident_emergency', label: 'Accident/Emergency' },
+  { value: 'day_observation', label: 'Day Observation' },
 ];
 
 const RoomTypeOptions = [
@@ -78,61 +78,97 @@ const RoomTypeOptions = [
   { value: 'nicu', label: 'NICU (1 Bed)' },
 ];
 
+/**
+ * Utility function: Format a Date to 12-hour time with AM/PM
+ */
 function formatAMPM(date: Date): string {
   let hours = date.getHours();
   let minutes: string | number = date.getMinutes();
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12;
-  hours = hours ? hours : 12; 
+  hours = hours ? hours : 12; // the hour '0' should be '12'
   minutes = minutes < 10 ? '0' + minutes : minutes;
   return `${hours}:${minutes} ${ampm}`;
 }
 
+/** Representation of local patient data */
+interface PatientRecord {
+  id: string;
+  name: string;
+  phone: string;
+  gender?: string;
+  age?: number;
+  address?: string;
+  // Potentially other fields, e.g., OPD / IPD subfields
+}
+
+/** ---------------
+ *    MAIN COMPONENT
+ *  --------------- */
 const IPDBookingPage: React.FC = () => {
   const {
     register,
     handleSubmit,
     control,
-    formState: { errors },
+    setValue,
     reset,
     watch,
-    setValue,
+    formState: { errors },
   } = useForm<IPDFormInput>({
     defaultValues: {
+      name: '',
+      phone: '',
+      gender: null,
+      age: 0,
+      address: '',
+      relativeName: '',
+      relativePhone: '',
+      relativeAddress: '',
       date: new Date(),
       time: formatAMPM(new Date()),
-      gender: { label: 'Male', value: 'male' },
-      bloodGroup: { label: 'A+', value: 'A+' },
-      membershipType: { label: 'Regular', value: 'regular' },
-      roomType: { label: 'Female Ward (5 Rooms)', value: 'female_ward' },
-      bed: { label: 'Bed 1', value: 'bed_1' },
-      doctor: { label: 'Select Doctor', value: '' },
-      admissionType: { label: 'General', value: 'general' },
-      age: 0,
-      dateOfBirth: new Date(),
-      mobileNumber: '',
-      referralDoctor: '',
-      email: '',
+      roomType: null,
+      bed: null,
+      doctor: null,
+      referDoctor: '',
+      admissionType: null,
     },
   });
 
+  // For loading, preview, doctors, bed list, etc.
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IPDFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
   const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
-  const [selectedRoomType, setSelectedRoomType] = useState<{ label: string; value: string } | null>(null);
 
+  // Watch for changes to room type so we can load available beds
+  const selectedRoomType = watch('roomType');
+
+  // For local patient data & auto-suggestion
+  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+  const [patientNameInput, setPatientNameInput] = useState('');
+  const [patientSuggestions, setPatientSuggestions] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const [selectedPatient, setSelectedPatient] = useState<{
+    id: string;
+    data: PatientRecord;
+  } | null>(null);
+
+  /** -------------
+   *   FETCH DOCTORS
+   *  ------------- */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
+        // Filter IPD or both
         const doctorsList = Object.keys(data)
-          .filter(key => {
-            const department = data[key].department.toLowerCase();
+          .filter((key) => {
+            const department = String(data[key].department || '').toLowerCase();
             return department === 'ipd' || department === 'both';
           })
-          .map(key => ({
+          .map((key) => ({
             label: data[key].name,
             value: key,
           }));
@@ -141,114 +177,208 @@ const IPDBookingPage: React.FC = () => {
         setDoctors([]);
       }
     });
-
     return () => unsubscribe();
   }, []);
 
+  /** ---------------------------
+   *  FETCH ALL PATIENTS AT START
+   *  --------------------------- */
   useEffect(() => {
-    if (selectedRoomType) {
+    const patientsRef = ref(db, 'patients');
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        setAllPatients([]);
+        return;
+      }
+      const loaded: PatientRecord[] = [];
+      for (const key in data) {
+        loaded.push({
+          id: key,
+          name: data[key].name,
+          phone: data[key].phone,
+          gender: data[key].gender,
+          age: data[key].age,
+          address: data[key].address,
+        });
+      }
+      setAllPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  /** --------------------------------
+   *  CLIENT-SIDE FILTER FOR SUGGESTIONS
+   *  -------------------------------- */
+  const filterPatientSuggestions = (name: string) => {
+    if (name.length < 2) {
+      setPatientSuggestions([]);
+      return;
+    }
+    const lower = name.toLowerCase();
+    const matched = allPatients.filter((p) =>
+      p.name.toLowerCase().includes(lower)
+    );
+    const suggestions = matched.map((p) => ({
+      label: `${p.name} - ${p.phone}`,
+      value: p.id,
+    }));
+    setPatientSuggestions(suggestions);
+  };
+
+  // Watch name input to filter suggestions unless a patient is already selected
+  useEffect(() => {
+    if (!selectedPatient) {
+      filterPatientSuggestions(patientNameInput);
+    }
+  }, [patientNameInput, selectedPatient, allPatients]);
+
+  /** -------------------------
+   *  AUTO-FILL ON PATIENT SELECT
+   *  ------------------------- */
+  const handleSelectPatient = (patientId: string) => {
+    const found = allPatients.find((p) => p.id === patientId);
+    if (!found) return;
+
+    setSelectedPatient({ id: found.id, data: found });
+    setValue('name', found.name);
+    setValue('phone', found.phone || '');
+    setValue('age', found.age || 0);
+
+    // Convert gender string -> { label, value }
+    if (found.gender) {
+      const g = GenderOptions.find(
+        (opt) => opt.value?.toLowerCase() === found.gender?.toLowerCase()
+      );
+      setValue('gender', g || null);
+    } else {
+      setValue('gender', null);
+    }
+
+    setValue('address', found.address || '');
+    setPatientNameInput(found.name);
+    setPatientSuggestions([]);
+    toast.info(`Patient ${found.name} selected.`);
+  };
+
+  /** ---------------------
+   *   LOAD AVAILABLE BEDS
+   *  --------------------- */
+  useEffect(() => {
+    if (selectedRoomType?.value) {
       const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
       const unsubscribe = onValue(bedsRef, (snapshot) => {
         const data = snapshot.val();
         if (data) {
-          const bedsList = Object.keys(data)
-            .filter(key => data[key].status === "Available")
-            .map(key => ({
+          const bedList = Object.keys(data)
+            .filter((key) => data[key].status === 'Available')
+            .map((key) => ({
               label: `Bed ${data[key].bedNumber}`,
               value: key,
             }));
-          setBeds(bedsList);
-          if (bedsList.length > 0) {
-            setValue('bed', bedsList[0]);
-          } else {
-            setValue('bed', { label: 'No Bed', value: '' });
+          setBeds(bedList);
+
+          // If we already had a bed selected, we might want to reset it
+          if (bedList.length === 0) {
+            setValue('bed', null);
           }
         } else {
           setBeds([]);
-          setValue('bed', { label: 'No Bed', value: '' });
+          setValue('bed', null);
         }
       });
       return () => unsubscribe();
     } else {
       setBeds([]);
-      setValue('bed', { label: 'No Bed', value: '' });
+      setValue('bed', null);
     }
   }, [selectedRoomType, setValue]);
 
-  const dateOfBirth = watch('dateOfBirth');
-
-  useEffect(() => {
-    if (dateOfBirth) {
-      const calculatedAge = calculateAge(dateOfBirth);
-      setValue('age', calculatedAge);
-    }
-  }, [dateOfBirth, setValue]);
-
-  const calculateAge = (dob: Date): number => {
-    const diffMs = Date.now() - dob.getTime();
-    const ageDate = new Date(diffMs);
-    return Math.abs(ageDate.getUTCFullYear() - 1970);
-  };
-
+  /** --------
+   *   SUBMIT
+   *  -------- */
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true);
     try {
-      if (data.bed && data.bed.value && data.roomType.value) {
+      // 1) Occupy the bed if user selected one
+      if (data.roomType?.value && data.bed?.value) {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
-        await update(bedRef, { status: "Occupied" });
+        await update(bedRef, { status: 'Occupied' });
       }
 
-      const admissionData = {
+      // 2) IPD data to store under patients/{patientId}/ipd
+      const ipdData = {
         name: data.name,
-        email: data.email || '',
-        gender: data.gender.value,
-        dateOfBirth: data.dateOfBirth.toISOString(),
+        phone: data.phone,
+        gender: data.gender?.value || '',
         age: data.age,
-        bloodGroup: data.bloodGroup.value,
+        address: data.address || '',
+        relativeName: data.relativeName,
+        relativePhone: data.relativePhone,
+        relativeAddress: data.relativeAddress || '',
         date: data.date.toISOString(),
         time: data.time,
-        mobileNumber: data.mobileNumber,
-        emergencyMobileNumber: data.emergencyMobileNumber || '',
-        membershipType: data.membershipType.value,
-        roomType: data.roomType.value,
-        bed: data.bed.value,
-        doctor: data.doctor.value,
-        referralDoctor: data.referralDoctor || '',
-        admissionType: data.admissionType.value,
-        dischargeDate: '',
+        roomType: data.roomType?.value || '',
+        bed: data.bed?.value || '',
+        doctor: data.doctor?.value || '',
+        referDoctor: data.referDoctor || '',
+        admissionType: data.admissionType?.value || '',
         createdAt: new Date().toISOString(),
       };
 
-      const ipdRef = ref(db, 'ipd_bookings');
-      const newIpdRef = push(ipdRef);
-      await update(newIpdRef, admissionData);
+      // 3) Check if we have an existing patient or need to create a new one
+      let patientId: string;
+      if (selectedPatient) {
+        patientId = selectedPatient.id;
+      } else {
+        // create new patient node
+        const newPatientRef = push(ref(db, 'patients'));
+        await update(newPatientRef, {
+          name: data.name,
+          phone: data.phone,
+          gender: data.gender?.value || '',
+          age: data.age,
+          address: data.address || '',
+          createdAt: new Date().toISOString(),
+        });
+        patientId = newPatientRef.key as string;
+      }
 
-      toast.success('IPD Admission booked successfully!', {
-        position: "top-right",
+      // 4) push IPD record under that patient
+      const ipdRef = ref(db, `patients/${patientId}/ipd`);
+      const newIpdRef = push(ipdRef);
+      await update(newIpdRef, ipdData);
+
+      toast.success('IPD Admission created successfully!', {
+        position: 'top-right',
         autoClose: 5000,
       });
 
+      // 5) Reset everything
       reset({
+        name: '',
+        phone: '',
+        gender: null,
+        age: 0,
+        address: '',
+        relativeName: '',
+        relativePhone: '',
+        relativeAddress: '',
         date: new Date(),
         time: formatAMPM(new Date()),
-        gender: { label: 'Male', value: 'male' },
-        bloodGroup: { label: 'A+', value: 'A+' },
-        membershipType: { label: 'Regular', value: 'regular' },
-        roomType: { label: 'Female Ward (5 Rooms)', value: 'female_ward' },
-        bed: { label: 'Bed 1', value: 'bed_1' },
-        doctor: { label: 'Select Doctor', value: '' },
-        admissionType: { label: 'General', value: 'general' },
-        age: 0,
-        dateOfBirth: new Date(),
-        mobileNumber: '',
-        referralDoctor: '',
-        email: '',
+        roomType: null,
+        bed: null,
+        doctor: null,
+        referDoctor: '',
+        admissionType: null,
       });
       setPreviewData(null);
-    } catch (error) {
-      console.error('Error booking IPD admission:', error);
-      toast.error('Failed to book IPD admission. Please try again.', {
-        position: "top-right",
+      setPatientNameInput('');
+      setSelectedPatient(null);
+    } catch (err) {
+      console.error('Error in IPD booking:', err);
+      toast.error('Error: Failed to book IPD admission.', {
+        position: 'top-right',
         autoClose: 5000,
       });
     } finally {
@@ -256,58 +386,98 @@ const IPDBookingPage: React.FC = () => {
     }
   };
 
+  /** --------
+   *   PREVIEW
+   *  -------- */
   const handlePreview = () => {
+    // Just show what’s in the form
     setPreviewData(watch());
   };
 
-  // Determine if beds are available
+  /** -----------------
+   *   BEDS AVAILABLE?
+   *  ----------------- */
   const bedsAvailable = beds.length > 0;
 
   return (
     <>
       <Head>
-        <title>IPD Admission Form</title>
-        <meta name="description" content="Book your IPD admission easily" />
-        <link rel="icon" href="/favicon.ico" />
+        <title>IPD Admission</title>
+        <meta name="description" content="IPD Admission form with auto-complete" />
       </Head>
 
       <ToastContainer />
 
-      <main className="min-h-screen bg-gradient-to-r from-purple-100 to-pink-200 flex items-center justify-center p-6">
-        <div className="w-full max-w-5xl bg-white rounded-3xl shadow-xl p-10">
-          <h2 className="text-3xl font-bold text-center text-pink-600 mb-8">IPD Admission Form</h2>
+      <main className="min-h-screen bg-gradient-to-r from-cyan-100 to-blue-200 flex items-center justify-center p-6">
+        <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl p-10">
+          <h2 className="text-3xl font-bold text-center text-blue-700 mb-8">
+            IPD Admission
+          </h2>
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            {/* Patient Name + Auto-Suggest */}
             <div className="relative">
-              <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
+              <FaUser className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('name', { required: 'Full Name is required' })}
-                placeholder="Full Name"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+                value={patientNameInput}
+                onChange={(e) => {
+                  setPatientNameInput(e.target.value);
+                  setValue('name', e.target.value, { shouldValidate: true });
+                  setSelectedPatient(null);
+                }}
+                placeholder="Patient Name"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.name ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
-              {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
+              {errors.name && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.name.message}
+                </p>
+              )}
+
+              {/* Suggestions Dropdown */}
+              {patientSuggestions.length > 0 && !selectedPatient && (
+                <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto">
+                  {patientSuggestions.map((sug) => (
+                    <li
+                      key={sug.value}
+                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                      onClick={() => handleSelectPatient(sug.value)}
+                    >
+                      {sug.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
+            {/* Phone Field */}
             <div className="relative">
-              <AiOutlineMail className="absolute top-3 left-3 text-gray-400" />
+              <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="email"
-                {...register('email', {
+                type="tel"
+                {...register('phone', {
+                  required: 'Phone number is required',
                   pattern: {
-                    value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                    message: 'Enter a valid email address',
+                    value: /^[0-9]{10}$/,
+                    message: 'Must be a valid 10-digit phone number',
                   },
                 })}
-                placeholder="Email (Optional)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                  errors.email ? 'border-red-500' : 'border-gray-300'
+                placeholder="Patient Phone Number"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  errors.phone ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
-              {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
+              {errors.phone && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.phone.message}
+                </p>
+              )}
             </div>
 
+            {/* Gender */}
             <div>
               <label className="block text-gray-700 mb-2">Gender</label>
               <Controller
@@ -320,82 +490,116 @@ const IPDBookingPage: React.FC = () => {
                     options={GenderOptions}
                     placeholder="Select Gender"
                     classNamePrefix="react-select"
-                    className={`${errors.gender ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
+                    className={`${errors.gender ? 'border-red-500' : ''}`}
+                    onChange={(val) => field.onChange(val)}
                   />
                 )}
               />
-              {errors.gender && <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>}
+              {errors.gender && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.gender.message}
+                </p>
+              )}
             </div>
 
+            {/* Age & Address */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Age */}
               <div className="relative">
-                <AiOutlineCalendar className="absolute top-3 left-3 text-gray-400" />
-                <Controller
-                  control={control}
-                  name="dateOfBirth"
-                  rules={{ required: 'Date of Birth is required' }}
-                  render={({ field }) => (
-                    <DatePicker
-                      selected={field.value}
-                      onChange={(date: Date | null) => {
-                        if (date) field.onChange(date);
-                      }}
-                      dateFormat="dd/MM/yyyy"
-                      placeholderText="Select Date of Birth"
-                      className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                        errors.dateOfBirth ? 'border-red-500' : 'border-gray-300'
-                      } transition duration-200`}
-                      showYearDropdown
-                      scrollableYearDropdown
-                      yearDropdownItemNumber={100}
-                      maxDate={new Date()}
-                    />
-                  )}
-                />
-                {errors.dateOfBirth && <p className="text-red-500 text-sm mt-1">{errors.dateOfBirth.message}</p>}
-              </div>
-
-              <div className="relative">
-                <AiOutlineInfoCircle className="absolute top-3 left-3 text-gray-400" />
+                <FaTransgender className="absolute top-3 left-3 text-gray-400" />
                 <input
                   type="number"
-                  {...register('age', { required: 'Age is required' })}
+                  {...register('age', {
+                    required: 'Age is required',
+                    min: { value: 1, message: 'Age must be positive' },
+                  })}
                   placeholder="Age"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     errors.age ? 'border-red-500' : 'border-gray-300'
                   } transition duration-200`}
-                  readOnly
                 />
-                {errors.age && <p className="text-red-500 text-sm mt-1">{errors.age.message}</p>}
+                {errors.age && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.age.message}
+                  </p>
+                )}
+              </div>
+
+              {/* Address (Optional) */}
+              <div className="relative">
+                <FaHome className="absolute top-3 left-3 text-gray-400" />
+                <input
+                  type="text"
+                  {...register('address')}
+                  placeholder="Patient Address (Optional)"
+                  className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                />
               </div>
             </div>
 
-            <div>
-              <label className="block text-gray-700 mb-2">Blood Group</label>
-              <Controller
-                control={control}
-                name="bloodGroup"
-                rules={{ required: 'Blood Group is required' }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={BloodGroupOptions}
-                    placeholder="Select Blood Group"
-                    classNamePrefix="react-select"
-                    className={`${errors.bloodGroup ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
-                  />
+            {/* Relative Name & Phone & Address */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Relative Name */}
+              <div className="relative">
+                <FaUserFriends className="absolute top-3 left-3 text-gray-400" />
+                <input
+                  type="text"
+                  {...register('relativeName', {
+                    required: 'Relative name is required',
+                  })}
+                  placeholder="Relative Name"
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    errors.relativeName ? 'border-red-500' : 'border-gray-300'
+                  } transition duration-200`}
+                />
+                {errors.relativeName && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.relativeName.message}
+                  </p>
                 )}
-              />
-              {errors.bloodGroup && <p className="text-red-500 text-sm mt-1">{errors.bloodGroup.message}</p>}
+              </div>
+
+              {/* Relative Phone */}
+              <div className="relative">
+                <FaPhone className="absolute top-3 left-3 text-gray-400" />
+                <input
+                  type="tel"
+                  {...register('relativePhone', {
+                    required: 'Relative phone is required',
+                    pattern: {
+                      value: /^[0-9]{10}$/,
+                      message: 'Must be a valid 10-digit phone number',
+                    },
+                  })}
+                  placeholder="Relative Phone Number"
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    errors.relativePhone ? 'border-red-500' : 'border-gray-300'
+                  } transition duration-200`}
+                />
+                {errors.relativePhone && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.relativePhone.message}
+                  </p>
+                )}
+              </div>
             </div>
 
+            {/* Relative Address (optional) */}
+            <div className="relative">
+              <FaHome className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="text"
+                {...register('relativeAddress')}
+                placeholder="Relative Address (Optional)"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+              />
+            </div>
+
+            {/* Date & Time */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Date */}
               <div className="relative">
-                <AiOutlineCalendar className="absolute top-3 left-3 text-gray-400" />
+                <FaCalendarAlt className="absolute top-3 left-3 text-gray-400" />
                 <Controller
                   control={control}
                   name="date"
@@ -403,95 +607,47 @@ const IPDBookingPage: React.FC = () => {
                   render={({ field }) => (
                     <DatePicker
                       selected={field.value}
-                      onChange={(date: Date | null) => {
-                        if (date) field.onChange(date);
-                      }}
+                      onChange={(dt) => dt && field.onChange(dt)}
                       dateFormat="dd/MM/yyyy"
                       placeholderText="Select Date"
-                      className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+                      className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                         errors.date ? 'border-red-500' : 'border-gray-300'
                       } transition duration-200`}
-                      maxDate={new Date()}
                     />
                   )}
                 />
-                {errors.date && <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>}
+                {errors.date && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.date.message}
+                  </p>
+                )}
               </div>
 
+              {/* Time */}
               <div className="relative">
-                <AiOutlineClockCircle className="absolute top-3 left-3 text-gray-400" />
+                <FaClock className="absolute top-3 left-3 text-gray-400" />
                 <input
                   type="text"
-                  {...register('time', { required: 'Time is required' })}
+                  {...register('time', {
+                    required: 'Time is required',
+                  })}
                   placeholder="Time"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     errors.time ? 'border-red-500' : 'border-gray-300'
                   } transition duration-200`}
                   defaultValue={formatAMPM(new Date())}
                 />
-                {errors.time && <p className="text-red-500 text-sm mt-1">{errors.time.message}</p>}
+                {errors.time && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.time.message}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="relative">
-              <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="tel"
-                {...register('mobileNumber', {
-                  required: 'Mobile Number is required',
-                  pattern: {
-                    value: /^[0-9]{10}$/,
-                    message: 'Enter a valid 10-digit mobile number',
-                  },
-                })}
-                placeholder="Mobile Number"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                  errors.mobileNumber ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-              />
-              {errors.mobileNumber && <p className="text-red-500 text-sm mt-1">{errors.mobileNumber.message}</p>}
-            </div>
-
-            <div className="relative">
-              <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="tel"
-                {...register('emergencyMobileNumber', {
-                  pattern: {
-                    value: /^[0-9]{10}$/,
-                    message: 'Enter a valid 10-digit emergency mobile number',
-                  },
-                })}
-                placeholder="Emergency Mobile Number (Optional)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                  errors.emergencyMobileNumber ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-              />
-              {errors.emergencyMobileNumber && <p className="text-red-500 text-sm mt-1">{errors.emergencyMobileNumber.message}</p>}
-            </div>
-
-            <div>
-              <label className="block text-gray-700 mb-2">Membership Type</label>
-              <Controller
-                control={control}
-                name="membershipType"
-                rules={{ required: 'Membership Type is required' }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={MembershipTypeOptions}
-                    placeholder="Select Membership Type"
-                    classNamePrefix="react-select"
-                    className={`${errors.membershipType ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
-                  />
-                )}
-              />
-              {errors.membershipType && <p className="text-red-500 text-sm mt-1">{errors.membershipType.message}</p>}
-            </div>
-
+            {/* Room Type & Bed */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Room Type */}
               <div>
                 <label className="block text-gray-700 mb-2">Room Type</label>
                 <Controller
@@ -504,20 +660,21 @@ const IPDBookingPage: React.FC = () => {
                       options={RoomTypeOptions}
                       placeholder="Select Room Type"
                       classNamePrefix="react-select"
-                      className={`${errors.roomType ? 'border-red-500' : 'border-gray-300'}`}
-                      onChange={(value: SingleValue<{ label: string; value: string }>) => {
-                        field.onChange(value);
-                        setSelectedRoomType(value);
-                      }}
-                      value={field.value}
+                      className={errors.roomType ? 'border-red-500' : ''}
+                      onChange={(val) => field.onChange(val)}
                     />
                   )}
                 />
-                {errors.roomType && <p className="text-red-500 text-sm mt-1">{errors.roomType.message}</p>}
+                {errors.roomType && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.roomType.message}
+                  </p>
+                )}
               </div>
 
+              {/* Bed */}
               <div>
-                <label className="block text-gray-700 mb-2">Select Bed</label>
+                <label className="block text-gray-700 mb-2">Bed</label>
                 <Controller
                   control={control}
                   name="bed"
@@ -526,53 +683,66 @@ const IPDBookingPage: React.FC = () => {
                     <Select
                       {...field}
                       options={beds}
-                      placeholder={beds.length > 0 ? "Select Bed" : "No Beds Available"}
+                      placeholder={
+                        beds.length > 0 ? 'Select Bed' : 'No Beds Available'
+                      }
                       classNamePrefix="react-select"
-                      className={`${errors.bed ? 'border-red-500' : 'border-gray-300'}`}
+                      className={errors.bed ? 'border-red-500' : ''}
+                      onChange={(val) => field.onChange(val)}
                       isDisabled={!selectedRoomType || beds.length === 0}
-                      onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                      value={field.value}
                     />
                   )}
                 />
-                {errors.bed && <p className="text-red-500 text-sm mt-1">{errors.bed.message}</p>}
+                {errors.bed && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.bed.message}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div>
-              <label className="block text-gray-700 mb-2">Under Care of Doctor</label>
-              <Controller
-                control={control}
-                name="doctor"
-                rules={{ required: 'Doctor selection is required' }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={doctors}
-                    placeholder="Select Doctor"
-                    classNamePrefix="react-select"
-                    className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
-                  />
+            {/* Doctor & ReferDoctor */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Under Care of Doctor */}
+              <div>
+                <label className="block text-gray-700 mb-2">
+                  Under Care of Doctor
+                </label>
+                <Controller
+                  control={control}
+                  name="doctor"
+                  rules={{ required: 'Doctor selection is required' }}
+                  render={({ field }) => (
+                    <Select
+                      {...field}
+                      options={doctors}
+                      placeholder="Select Doctor"
+                      classNamePrefix="react-select"
+                      className={errors.doctor ? 'border-red-500' : ''}
+                      onChange={(val) => field.onChange(val)}
+                    />
+                  )}
+                />
+                {errors.doctor && (
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.doctor.message}
+                  </p>
                 )}
-              />
-              {errors.doctor && <p className="text-red-500 text-sm mt-1">{errors.doctor.message}</p>}
+              </div>
+
+              {/* Referral Doctor (optional) */}
+              <div className="relative">
+                <FaStethoscope className="absolute top-3 left-3 text-gray-400" />
+                <input
+                  type="text"
+                  {...register('referDoctor')}
+                  placeholder="Referral Doctor (Optional)"
+                  className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                />
+              </div>
             </div>
 
-            <div className="relative">
-              <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="text"
-                {...register('referralDoctor')}
-                placeholder="Referral Doctor (Optional)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 ${
-                  errors.referralDoctor ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-              />
-              {errors.referralDoctor && <p className="text-red-500 text-sm mt-1">{errors.referralDoctor.message}</p>}
-            </div>
-
+            {/* Admission Type */}
             <div>
               <label className="block text-gray-700 mb-2">Admission Type</label>
               <Controller
@@ -582,16 +752,19 @@ const IPDBookingPage: React.FC = () => {
                 render={({ field }) => (
                   <Select
                     {...field}
-                    options={AdmissionTypes}
+                    options={AdmissionTypeOptions}
                     placeholder="Select Admission Type"
                     classNamePrefix="react-select"
-                    className={`${errors.admissionType ? 'border-red-500' : 'border-gray-300'}`}
-                    onChange={(value: SingleValue<{ label: string; value: string }>) => field.onChange(value)}
-                    value={field.value}
+                    className={errors.admissionType ? 'border-red-500' : ''}
+                    onChange={(val) => field.onChange(val)}
                   />
                 )}
               />
-              {errors.admissionType && <p className="text-red-500 text-sm mt-1">{errors.admissionType.message}</p>}
+              {errors.admissionType && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.admissionType.message}
+                </p>
+              )}
             </div>
 
             {/* Preview Button */}
@@ -608,24 +781,74 @@ const IPDBookingPage: React.FC = () => {
             {previewData && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
-                  <h3 className="text-2xl font-semibold mb-4">Preview IPD Admission</h3>
+                  <h3 className="text-2xl font-semibold mb-4">
+                    Preview IPD Admission
+                  </h3>
                   <div className="space-y-2">
-                    <p><strong>Full Name:</strong> {previewData.name}</p>
-                    {previewData.email && <p><strong>Email:</strong> {previewData.email}</p>}
-                    <p><strong>Gender:</strong> {previewData.gender.label}</p>
-                    <p><strong>Date of Birth:</strong> {previewData.dateOfBirth.toLocaleDateString()}</p>
-                    <p><strong>Age:</strong> {previewData.age}</p>
-                    <p><strong>Blood Group:</strong> {previewData.bloodGroup.label}</p>
-                    <p><strong>Date:</strong> {previewData.date.toLocaleDateString()}</p>
-                    <p><strong>Time:</strong> {previewData.time}</p>
-                    <p><strong>Mobile Number:</strong> {previewData.mobileNumber}</p>
-                    {previewData.emergencyMobileNumber && <p><strong>Emergency Mobile Number:</strong> {previewData.emergencyMobileNumber}</p>}
-                    <p><strong>Membership Type:</strong> {previewData.membershipType.label}</p>
-                    <p><strong>Room Type:</strong> {previewData.roomType.label}</p>
-                    <p><strong>Bed:</strong> {previewData.bed.label}</p>
-                    <p><strong>Under Care of Doctor:</strong> {previewData.doctor.label}</p>
-                    {previewData.referralDoctor && <p><strong>Referral Doctor:</strong> {previewData.referralDoctor}</p>}
-                    <p><strong>Admission Type:</strong> {previewData.admissionType.label}</p>
+                    <p>
+                      <strong>Patient Name:</strong> {previewData.name}
+                    </p>
+                    <p>
+                      <strong>Phone:</strong> {previewData.phone}
+                    </p>
+                    <p>
+                      <strong>Gender:</strong> {previewData.gender?.label}
+                    </p>
+                    <p>
+                      <strong>Age:</strong> {previewData.age}
+                    </p>
+                    {previewData.address && (
+                      <p>
+                        <strong>Address:</strong> {previewData.address}
+                      </p>
+                    )}
+                    <p>
+                      <strong>Relative Name:</strong> {previewData.relativeName}
+                    </p>
+                    <p>
+                      <strong>Relative Phone:</strong> {previewData.relativePhone}
+                    </p>
+                    {previewData.relativeAddress && (
+                      <p>
+                        <strong>Relative Address:</strong>{' '}
+                        {previewData.relativeAddress}
+                      </p>
+                    )}
+                    <p>
+                      <strong>Admission Date:</strong>{' '}
+                      {previewData.date.toLocaleDateString()}
+                    </p>
+                    <p>
+                      <strong>Admission Time:</strong> {previewData.time}
+                    </p>
+                    {previewData.roomType && (
+                      <p>
+                        <strong>Room Type:</strong> {previewData.roomType.label}
+                      </p>
+                    )}
+                    {previewData.bed && (
+                      <p>
+                        <strong>Bed:</strong> {previewData.bed.label}
+                      </p>
+                    )}
+                    {previewData.doctor && (
+                      <p>
+                        <strong>Under Care of Doctor:</strong>{' '}
+                        {previewData.doctor.label}
+                      </p>
+                    )}
+                    {previewData.referDoctor && (
+                      <p>
+                        <strong>Referral Doctor:</strong>{' '}
+                        {previewData.referDoctor}
+                      </p>
+                    )}
+                    {previewData.admissionType && (
+                      <p>
+                        <strong>Admission Type:</strong>{' '}
+                        {previewData.admissionType.label}
+                      </p>
+                    )}
                   </div>
                   <div className="mt-6 flex justify-end space-x-4">
                     <button
@@ -637,7 +860,7 @@ const IPDBookingPage: React.FC = () => {
                     </button>
                     <button
                       type="submit"
-                      className={`px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition duration-200 ${
+                      className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 ${
                         loading ? 'opacity-50 cursor-not-allowed' : ''
                       }`}
                       disabled={loading}
@@ -653,17 +876,18 @@ const IPDBookingPage: React.FC = () => {
             <button
               type="submit"
               disabled={loading || !bedsAvailable}
-              className={`w-full py-3 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-pink-500 ${
+              className={`w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                 loading || !bedsAvailable ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
               {loading ? 'Submitting...' : 'Submit Admission'}
             </button>
 
-            {/* No Beds Available Message */}
+            {/* No Beds Available Warning */}
             {!bedsAvailable && (
               <p className="text-red-500 text-center mt-4">
-                No beds are available for the selected room type. Please choose a different room type.
+                No beds are available for the selected room type. Please choose
+                a different room type.
               </p>
             )}
           </form>

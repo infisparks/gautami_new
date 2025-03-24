@@ -2,17 +2,24 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import { db } from '../../lib/firebase';
-import { ref, push, update, get, onValue } from 'firebase/database';
+import { db } from '../../lib/firebase'; // <-- Adjust if needed
+import {
+  ref,
+  push,
+  update,
+  get,
+  onValue
+} from 'firebase/database';
 import Head from 'next/head';
-import { 
-  FaUser, 
-  FaEnvelope, 
-  FaPhone, 
-  FaCalendarAlt, 
-  FaClock, 
-  FaRegCommentDots, 
-  FaDollarSign, 
+import {
+  FaUser,
+  FaPhone,
+  FaBirthdayCake,
+  FaMapMarkerAlt,
+  FaCalendarAlt,
+  FaClock,
+  FaRegCommentDots,
+  FaDollarSign,
   FaInfoCircle,
   FaMicrophone,
   FaMicrophoneSlash
@@ -24,10 +31,16 @@ import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
+/** ---------------------------
+ *   TYPE & CONSTANT DEFINITIONS
+ *  ---------------------------
+ */
 interface IFormInput {
   name: string;
-  email?: string;
   phone: string;
+  age: number;
+  gender: { label: string; value: string } | null;
+  address?: string;
   date: Date;
   time: string;
   message?: string;
@@ -37,12 +50,31 @@ interface IFormInput {
   doctor: { label: string; value: string } | null;
 }
 
+interface PatientRecord {
+  id: string;
+  name: string;
+  phone: string;
+  age?: number;
+  gender?: string;
+  address?: string;
+  createdAt?: string;
+  opd?: any; // Extra subfields
+}
+
 const PaymentOptions = [
   { value: 'cash', label: 'Cash' },
   { value: 'online', label: 'Online' },
 ];
 
-// Function to format time to 12-hour format with AM/PM
+const GenderOptions = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'other', label: 'Other' },
+];
+
+/**
+ * Utility function: Format a Date to 12-hour time with AM/PM
+ */
 function formatAMPM(date: Date): string {
   let hours = date.getHours();
   let minutes: string | number = date.getMinutes();
@@ -53,6 +85,9 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+/** ---------------
+ *    MAIN COMPONENT
+ *  --------------- */
 const OPDBookingPage: React.FC = () => {
   const {
     register,
@@ -64,67 +99,67 @@ const OPDBookingPage: React.FC = () => {
     setValue,
   } = useForm<IFormInput>({
     defaultValues: {
+      name: '',
+      phone: '',
+      age: 0,
+      gender: null,
+      address: '',
       date: new Date(),
       time: formatAMPM(new Date()),
+      message: '',
       paymentMethod: null,
       amount: 0,
-      message: '',
-      email: '',
-      doctor: null,
       serviceName: '',
+      doctor: null,
     },
   });
 
+  // States for voice recognition, loading, preview modal, and doctors
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  // const [listening, setListening] = useState(false);
-  const [doctorMenuIsOpen, setDoctorMenuIsOpen] = useState(false); // State to control dropdown
-  const doctorSelectRef = useRef<any>(null); // Reference to the doctor Select component
+  const [doctorMenuIsOpen, setDoctorMenuIsOpen] = useState(false);
+  const doctorSelectRef = useRef<any>(null);
 
-  // Define voice commands with alternative phrases
+  // States for patient auto-suggest & selection
+  const [patientNameInput, setPatientNameInput] = useState('');
+  const [patientSuggestions, setPatientSuggestions] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const [selectedPatient, setSelectedPatient] = useState<
+    { id: string; data: PatientRecord } | null
+  >(null);
+
+  // We'll store all patients locally and filter them in memory
+  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+
+  /** ---------------------------
+   *  SPEECH RECOGNITION COMMANDS
+   *  --------------------------- */
   const commands = [
     // Name Commands
     {
       command: 'name *',
       callback: (name: string) => {
-        const trimmedName = name.trim().replace(/\s+/g, ' ');
-        setValue('name', trimmedName, { shouldValidate: true });
-        toast.info(`Name set to: ${trimmedName}`);
+        setPatientNameInput(name.trim());
+        setValue('name', name.trim(), { shouldValidate: true });
+        toast.info(`Name set to: ${name.trim()}`);
       },
     },
     {
       command: 'mera naam *',
       callback: (name: string) => {
-        const trimmedName = name.trim().replace(/\s+/g, ' ');
-        setValue('name', trimmedName, { shouldValidate: true });
-        toast.info(`Name set to: ${trimmedName}`);
+        setPatientNameInput(name.trim());
+        setValue('name', name.trim(), { shouldValidate: true });
+        toast.info(`Name set to: ${name.trim()}`);
       },
     },
     {
       command: 'my name *',
       callback: (name: string) => {
-        const trimmedName = name.trim().replace(/\s+/g, ' ');
-        setValue('name', trimmedName, { shouldValidate: true });
-        toast.info(`Name set to: ${trimmedName}`);
-      },
-    },
-
-    // Email Commands
-    {
-      command: 'email *',
-      callback: (email: string) => {
-        const trimmedEmail = email.trim().replace(/\s+/g, '');
-        setValue('email', trimmedEmail, { shouldValidate: true });
-        toast.info(`Email set to: ${trimmedEmail}`);
-      },
-    },
-    {
-      command: 'mera email *',
-      callback: (email: string) => {
-        const trimmedEmail = email.trim().replace(/\s+/g, '');
-        setValue('email', trimmedEmail, { shouldValidate: true });
-        toast.info(`Email set to: ${trimmedEmail}`);
+        setPatientNameInput(name.trim());
+        setValue('name', name.trim(), { shouldValidate: true });
+        toast.info(`Name set to: ${name.trim()}`);
       },
     },
 
@@ -154,9 +189,50 @@ const OPDBookingPage: React.FC = () => {
       },
     },
 
+    // Age Command
+    {
+      command: 'age *',
+      callback: (age: string) => {
+        const numericAge = parseInt(age.replace(/\D/g, ''), 10);
+        if (!isNaN(numericAge) && numericAge > 0) {
+          setValue('age', numericAge, { shouldValidate: true });
+          toast.info(`Age set to: ${numericAge}`);
+        } else {
+          toast.error('Invalid age. Please try again.');
+        }
+      },
+    },
+
+    // Gender Command
+    {
+      command: 'gender *',
+      callback: (gender: string) => {
+        const normalizedGender = gender.trim().toLowerCase();
+        const option = GenderOptions.find(
+          (opt) => opt.label.toLowerCase() === normalizedGender
+        );
+        if (option) {
+          setValue('gender', option, { shouldValidate: true });
+          toast.info(`Gender set to: ${option.label}`);
+        } else {
+          toast.error(`Gender "${gender}" not recognized.`);
+        }
+      },
+    },
+
+    // Address Command
+    {
+      command: 'address *',
+      callback: (address: string) => {
+        const trimmedAddress = address.trim();
+        setValue('address', trimmedAddress, { shouldValidate: false });
+        toast.info('Address set.');
+      },
+    },
+
     // Date Commands
     {
-      command: 'Set date to *',
+      command: 'set date to *',
       callback: (date: string) => {
         const parsedDate = new Date(Date.parse(date));
         if (!isNaN(parsedDate.getTime())) {
@@ -170,7 +246,7 @@ const OPDBookingPage: React.FC = () => {
 
     // Time Commands
     {
-      command: 'Set time to *',
+      command: 'set time to *',
       callback: (time: string) => {
         setValue('time', time.trim(), { shouldValidate: true });
         toast.info(`Time set to: ${time.trim()}`);
@@ -183,7 +259,7 @@ const OPDBookingPage: React.FC = () => {
       callback: (message: string) => {
         const trimmedMessage = message.trim();
         setValue('message', trimmedMessage, { shouldValidate: false });
-        toast.info(`Message set.`);
+        toast.info('Message set.');
       },
     },
 
@@ -255,8 +331,6 @@ const OPDBookingPage: React.FC = () => {
       command: 'select doctor *',
       callback: (doctorName: string) => {
         const normalizedDoctorName = doctorName.trim().toLowerCase();
-
-        // Attempt to handle minor spelling mistakes by using partial matching
         let selectedDoctor = doctors.find(
           (doc) => doc.label.toLowerCase() === normalizedDoctorName
         );
@@ -265,27 +339,17 @@ const OPDBookingPage: React.FC = () => {
             (doc) => doc.label.toLowerCase().includes(normalizedDoctorName)
           );
         }
-
         if (selectedDoctor) {
           setValue('doctor', selectedDoctor, { shouldValidate: true });
-          setDoctorMenuIsOpen(false); // Close the dropdown after selection
+          setDoctorMenuIsOpen(false);
           toast.info(`Doctor set to: ${selectedDoctor.label}`);
         } else {
           toast.error(`Doctor "${doctorName}" not found.`);
         }
       },
     },
-    // Additional doctor commands to handle common misspellings
-    // {
-    //   command: 'select doctor number *',
-    //   callback: (doctorNumber: string) => {
-    //     // Assuming each doctor has a unique number, this can be implemented if such data exists
-    //     // For now, we'll notify that this feature is not implemented
-    //     toast.error('Selecting doctor by number is not implemented.');
-    //   },
-    // },
 
-    // Preview Command
+    // Preview & Submit Commands
     {
       command: 'preview',
       callback: () => {
@@ -293,8 +357,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info('Form previewed.');
       },
     },
-
-    // Cancel Preview Command
     {
       command: 'cancel',
       callback: () => {
@@ -302,8 +364,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info('Preview canceled.');
       },
     },
-
-    // Submit Command
     {
       command: 'submit',
       callback: () => {
@@ -312,7 +372,9 @@ const OPDBookingPage: React.FC = () => {
     },
   ];
 
-  // Initialize Speech Recognition with commands
+  /** ------------------------------
+   *  HOOKS: SPEECH RECOGNITION INIT
+   *  ------------------------------ */
   const {
     transcript,
     resetTranscript,
@@ -320,55 +382,135 @@ const OPDBookingPage: React.FC = () => {
     listening: micListening,
   } = useSpeechRecognition({ commands });
 
-  // Start listening automatically if desired
   useEffect(() => {
-    if (browserSupportsSpeechRecognition) {
-      // Optionally start listening automatically
-      // SpeechRecognition.startListening({ continuous: true });
-    } else {
+    if (!browserSupportsSpeechRecognition) {
       toast.error('Browser does not support speech recognition.');
     }
   }, [browserSupportsSpeechRecognition]);
 
-  // Fetch doctors from Firebase
+  /** ---------------
+   *   FETCH DOCTORS
+   *  --------------- */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const doctorsList = Object.keys(data).map(key => ({
+        const doctorsList = Object.keys(data).map((key) => ({
           label: data[key].name,
           value: key,
         }));
-        // Add 'No Doctor' option
         doctorsList.unshift({ label: 'No Doctor', value: 'no_doctor' });
         setDoctors(doctorsList);
       } else {
         setDoctors([{ label: 'No Doctor', value: 'no_doctor' }]);
       }
     });
-
     return () => unsubscribe();
   }, []);
 
-  // Watch doctor field to auto-fetch amount
-  const selectedDoctor = watch('doctor');
+  /** -----------------------------------
+   *  FETCH ALL PATIENTS (WITHOUT INDEX)
+   *  ----------------------------------- */
+  useEffect(() => {
+    const patientsRef = ref(db, 'patients');
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        setAllPatients([]);
+        return;
+      }
+      const loadedPatients: PatientRecord[] = [];
+      for (const key in data) {
+        loadedPatients.push({
+          id: key,
+          ...data[key]
+        });
+      }
+      setAllPatients(loadedPatients);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const fetchDoctorAmount = useCallback(async (doctorId: string) => {
-    try {
-      const doctorRef = ref(db, `doctors/${doctorId}`);
-      const snapshot = await get(doctorRef);
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        setValue('amount', data.amount);
-      } else {
+  /** ---------------------------------------
+   *  CLIENT-SIDE SUGGESTION FILTERING
+   *  --------------------------------------- */
+  const filterPatientSuggestions = (name: string) => {
+    if (name.length < 2) {
+      setPatientSuggestions([]);
+      return;
+    }
+    // Make it case-insensitive
+    const lowerName = name.toLowerCase();
+    // Filter local allPatients
+    const matched = allPatients.filter((p) =>
+      p.name.toLowerCase().includes(lowerName)
+    );
+
+    // Build suggestions with label = "Name - Phone"
+    const suggestions: { label: string; value: string }[] = matched.map((p) => ({
+      label: `${p.name} - ${p.phone}`,
+      value: p.id,
+    }));
+
+    setPatientSuggestions(suggestions);
+  };
+
+  // Whenever patientNameInput changes and we haven't locked onto a selected patient, filter suggestions
+  useEffect(() => {
+    if (!selectedPatient) {
+      filterPatientSuggestions(patientNameInput);
+    }
+  }, [patientNameInput, selectedPatient, allPatients]);
+
+  /** -------------------------------------------
+   *  SELECT PATIENT FROM DROPDOWN, AUTO-FILL FORM
+   *  ------------------------------------------- */
+  const handleSelectPatient = async (patientId: string) => {
+    const foundPatient = allPatients.find((p) => p.id === patientId);
+    if (!foundPatient) return; // Safety check
+
+    // Mark patient as selected
+    setSelectedPatient({ id: foundPatient.id, data: foundPatient });
+
+    // Auto-fill form fields
+    setValue('name', foundPatient.name);
+    setValue('phone', foundPatient.phone || '');
+    setValue('age', foundPatient.age || 0);
+
+    const genderOption = GenderOptions.find(
+      (opt) => opt.value === foundPatient.gender
+    );
+    setValue('gender', genderOption || null);
+
+    setValue('address', foundPatient.address || '');
+    setPatientNameInput(foundPatient.name);
+    setPatientSuggestions([]);
+    toast.info(`Patient ${foundPatient.name} selected.`);
+  };
+
+  /** --------------------------------------
+   *  WATCH DOCTOR FIELD TO AUTO-FETCH AMOUNT
+   *  -------------------------------------- */
+  const selectedDoctor = watch('doctor');
+  const fetchDoctorAmount = useCallback(
+    async (doctorId: string) => {
+      try {
+        const doctorRef = ref(db, `doctors/${doctorId}`);
+        const snapshot = await get(doctorRef);
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          setValue('amount', data.amount);
+        } else {
+          setValue('amount', 0);
+        }
+      } catch (error) {
+        console.error('Error fetching doctor amount:', error);
         setValue('amount', 0);
       }
-    } catch (error) {
-      console.error('Error fetching doctor amount:', error);
-      setValue('amount', 0);
-    }
-  }, [setValue]);
+    },
+    [setValue]
+  );
 
   useEffect(() => {
     if (selectedDoctor) {
@@ -382,44 +524,78 @@ const OPDBookingPage: React.FC = () => {
     }
   }, [selectedDoctor, setValue, fetchDoctorAmount]);
 
+  /** -----------------------------------------
+   *  SUBMISSION LOGIC
+   *  1. If an existing patient is selected,
+   *     push the OPD data under that patient.
+   *  2. Otherwise, create a new patient record,
+   *     then push OPD data.
+   *  ----------------------------------------- */
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
     try {
+      // OPD appointment data
       const appointmentData = {
-        name: data.name,
-        email: data.email || '',
-        phone: data.phone,
         date: data.date.toISOString(),
         time: data.time,
-        message: data.message || '',
         paymentMethod: data.paymentMethod?.value || '',
         amount: data.amount,
         serviceName: data.serviceName,
         doctor: data.doctor?.value || 'no_doctor',
+        message: data.message || '',
         createdAt: new Date().toISOString(),
       };
 
-      const bookingsRef = ref(db, 'bookings');
-      const newBookingRef = push(bookingsRef);
-      await update(newBookingRef, appointmentData);
+      let patientId = '';
+      if (selectedPatient) {
+        // Existing patient
+        patientId = selectedPatient.id;
+        // Optionally update patient’s info here if needed...
+      } else {
+        // Create a new patient record first
+        const newPatientData = {
+          name: data.name,
+          phone: data.phone,
+          age: data.age,
+          gender: data.gender?.value || '',
+          address: data.address || '',
+          createdAt: new Date().toISOString(),
+        };
+        const patientsRef = ref(db, 'patients');
+        const newPatientRef = push(patientsRef);
+        await update(newPatientRef, newPatientData);
+        patientId = newPatientRef.key!;
+      }
+
+      // Push appointment data under patients/{patientId}/opd/{unique_opd_key}
+      const opdRef = ref(db, `patients/${patientId}/opd`);
+      const newOpdRef = push(opdRef);
+      await update(newOpdRef, appointmentData);
 
       toast.success('Appointment booked successfully!', {
         position: "top-right",
         autoClose: 5000,
       });
 
+      // Reset form & states
       reset({
+        name: '',
+        phone: '',
+        age: 0,
+        gender: null,
+        address: '',
         date: new Date(),
         time: formatAMPM(new Date()),
         paymentMethod: null,
         amount: 0,
         message: '',
-        email: '',
-        doctor: null,
         serviceName: '',
+        doctor: null,
       });
       setPreviewData(null);
       resetTranscript();
+      setSelectedPatient(null);
+      setPatientNameInput('');
     } catch (error) {
       console.error('Error booking appointment:', error);
       toast.error('Failed to book appointment. Please try again.', {
@@ -431,21 +607,23 @@ const OPDBookingPage: React.FC = () => {
     }
   };
 
-  // Handle form preview
+  /** -------------
+   *  FORM PREVIEW
+   *  ------------- */
   const handlePreview = () => {
     setPreviewData(watch());
   };
 
-  // Start/Stop Listening
+  /** -------------------------------
+   *  TOGGLE START/STOP VOICE CONTROL
+   *  ------------------------------- */
   const toggleListening = () => {
     if (micListening) {
       SpeechRecognition.stopListening();
-      // setListening(false);
       toast.info('Voice recognition stopped.');
     } else {
       if (browserSupportsSpeechRecognition) {
         SpeechRecognition.startListening({ continuous: true });
-        // setListening(true);
         toast.info('Voice recognition started.');
       } else {
         toast.error('Browser does not support speech recognition.');
@@ -453,6 +631,9 @@ const OPDBookingPage: React.FC = () => {
     }
   };
 
+  /** -----------
+   *   RENDER UI
+   *  ----------- */
   return (
     <>
       <Head>
@@ -465,8 +646,10 @@ const OPDBookingPage: React.FC = () => {
 
       <main className="min-h-screen bg-gradient-to-r from-green-100 to-teal-200 flex items-center justify-center p-6">
         <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl p-10">
-          <h2 className="text-3xl font-bold text-center text-teal-600 mb-8">Book an Appointment</h2>
-          
+          <h2 className="text-3xl font-bold text-center text-teal-600 mb-8">
+            Book an Appointment
+          </h2>
+
           {/* Voice Control Buttons */}
           <div className="flex justify-center mb-6 space-x-4">
             <button
@@ -474,7 +657,11 @@ const OPDBookingPage: React.FC = () => {
               onClick={toggleListening}
               className="flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
             >
-              {micListening ? <FaMicrophoneSlash className="mr-2" /> : <FaMicrophone className="mr-2" />}
+              {micListening ? (
+                <FaMicrophoneSlash className="mr-2" />
+              ) : (
+                <FaMicrophone className="mr-2" />
+              )}
               {micListening ? 'Stop Listening' : 'Start Voice Control'}
             </button>
             <button
@@ -498,32 +685,42 @@ const OPDBookingPage: React.FC = () => {
           )}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Name Field */}
+            {/* Patient Name Field with Auto-Suggest */}
             <div className="relative">
               <FaUser className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('name', { required: 'Name is required' })}
+                value={patientNameInput}
+                onChange={(e) => {
+                  setPatientNameInput(e.target.value);
+                  setValue('name', e.target.value, { shouldValidate: true });
+                  setSelectedPatient(null);
+                }}
                 placeholder="Name"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.name ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
-              {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
-            </div>
+              {errors.name && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.name.message}
+                </p>
+              )}
 
-            {/* Email Field */}
-            <div className="relative">
-              <FaEnvelope className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="email"
-                {...register('email', { pattern: { value: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, message: 'Invalid email' } })}
-                placeholder="Email (Optional)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
-                  errors.email ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-              />
-              {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
+              {/* Suggestions Dropdown: now includes Name - Phone */}
+              {patientSuggestions.length > 0 && !selectedPatient && (
+                <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto">
+                  {patientSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.value}
+                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                      onClick={() => handleSelectPatient(suggestion.value)}
+                    >
+                      {suggestion.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             {/* Phone Field */}
@@ -533,14 +730,77 @@ const OPDBookingPage: React.FC = () => {
                 type="tel"
                 {...register('phone', {
                   required: 'Phone number is required',
-                  pattern: { value: /^[0-9]{10}$/, message: 'Phone number must be 10 digits' }
+                  pattern: {
+                    value: /^[0-9]{10}$/,
+                    message: 'Phone number must be 10 digits',
+                  },
                 })}
                 placeholder="Phone Number"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.phone ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
-              {errors.phone && <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>}
+              {errors.phone && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.phone.message}
+                </p>
+              )}
+            </div>
+
+            {/* Age Field */}
+            <div className="relative">
+              <FaBirthdayCake className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="number"
+                {...register('age', {
+                  required: 'Age is required',
+                  min: { value: 1, message: 'Age must be positive' },
+                })}
+                placeholder="Age"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                  errors.age ? 'border-red-500' : 'border-gray-300'
+                } transition duration-200`}
+              />
+              {errors.age && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.age.message}
+                </p>
+              )}
+            </div>
+
+            {/* Gender Field */}
+            <div>
+              <label className="block text-gray-700 mb-2">Gender</label>
+              <Controller
+                control={control}
+                name="gender"
+                rules={{ required: 'Gender is required' }}
+                render={({ field }) => (
+                  <Select
+                    {...field}
+                    options={GenderOptions}
+                    placeholder="Select Gender"
+                    classNamePrefix="react-select"
+                    onChange={(value) => field.onChange(value)}
+                  />
+                )}
+              />
+              {errors.gender && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.gender.message}
+                </p>
+              )}
+            </div>
+
+            {/* Address Field */}
+            <div className="relative">
+              <FaMapMarkerAlt className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="text"
+                {...register('address')}
+                placeholder="Address (Optional)"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 border-gray-300 transition duration-200"
+              />
             </div>
 
             {/* Date Field */}
@@ -553,7 +813,9 @@ const OPDBookingPage: React.FC = () => {
                 render={({ field }) => (
                   <DatePicker
                     selected={field.value}
-                    onChange={(date: Date | null) => date && field.onChange(date)}
+                    onChange={(date: Date | null) =>
+                      date && field.onChange(date)
+                    }
                     dateFormat="dd/MM/yyyy"
                     placeholderText="Select Date"
                     className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
@@ -562,7 +824,11 @@ const OPDBookingPage: React.FC = () => {
                   />
                 )}
               />
-              {errors.date && <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>}
+              {errors.date && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.date.message}
+                </p>
+              )}
             </div>
 
             {/* Time Field */}
@@ -577,7 +843,11 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
                 defaultValue={formatAMPM(new Date())}
               />
-              {errors.time && <p className="text-red-500 text-sm mt-1">{errors.time.message}</p>}
+              {errors.time && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.time.message}
+                </p>
+              )}
             </div>
 
             {/* Message Field */}
@@ -591,7 +861,11 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
                 rows={3}
               ></textarea>
-              {errors.message && <p className="text-red-500 text-sm mt-1">{errors.message.message}</p>}
+              {errors.message && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.message.message}
+                </p>
+              )}
             </div>
 
             {/* Payment Method Field */}
@@ -607,12 +881,18 @@ const OPDBookingPage: React.FC = () => {
                     options={PaymentOptions}
                     placeholder="Select Payment Method"
                     classNamePrefix="react-select"
-                    className={`${errors.paymentMethod ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`${
+                      errors.paymentMethod ? 'border-red-500' : 'border-gray-300'
+                    }`}
                     onChange={(value) => field.onChange(value)}
                   />
                 )}
               />
-              {errors.paymentMethod && <p className="text-red-500 text-sm mt-1">{errors.paymentMethod.message}</p>}
+              {errors.paymentMethod && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.paymentMethod.message}
+                </p>
+              )}
             </div>
 
             {/* Amount Field */}
@@ -620,9 +900,9 @@ const OPDBookingPage: React.FC = () => {
               <FaDollarSign className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
-                {...register('amount', { 
+                {...register('amount', {
                   required: 'Amount is required',
-                  min: { value: 0, message: 'Amount must be positive' } 
+                  min: { value: 0, message: 'Amount must be positive' },
                 })}
                 placeholder="Amount (Rs)"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
@@ -630,7 +910,11 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
                 min="0"
               />
-              {errors.amount && <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>}
+              {errors.amount && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.amount.message}
+                </p>
+              )}
             </div>
 
             {/* Service Name Field */}
@@ -638,13 +922,19 @@ const OPDBookingPage: React.FC = () => {
               <FaInfoCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
-                {...register('serviceName', { required: 'Service name is required' })}
+                {...register('serviceName', {
+                  required: 'Service name is required',
+                })}
                 placeholder="Service Name"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.serviceName ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
-              {errors.serviceName && <p className="text-red-500 text-sm mt-1">{errors.serviceName.message}</p>}
+              {errors.serviceName && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.serviceName.message}
+                </p>
+              )}
             </div>
 
             {/* Doctor Selection Field */}
@@ -660,7 +950,9 @@ const OPDBookingPage: React.FC = () => {
                     options={doctors}
                     placeholder="Select Doctor or No Doctor"
                     classNamePrefix="react-select"
-                    className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
+                    className={`${
+                      errors.doctor ? 'border-red-500' : 'border-gray-300'
+                    }`}
                     isClearable
                     onChange={(value) => field.onChange(value)}
                     menuIsOpen={doctorMenuIsOpen}
@@ -670,7 +962,11 @@ const OPDBookingPage: React.FC = () => {
                   />
                 )}
               />
-              {errors.doctor && <p className="text-red-500 text-sm mt-1">{errors.doctor.message}</p>}
+              {errors.doctor && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.doctor.message}
+                </p>
+              )}
             </div>
 
             {/* Preview Button */}
@@ -686,18 +982,52 @@ const OPDBookingPage: React.FC = () => {
             {previewData && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg">
-                  <h3 className="text-2xl font-semibold mb-4">Preview Appointment</h3>
+                  <h3 className="text-2xl font-semibold mb-4">
+                    Preview Appointment
+                  </h3>
                   <div className="space-y-2">
-                    <p><strong>Name:</strong> {previewData.name}</p>
-                    {previewData.email && <p><strong>Email:</strong> {previewData.email}</p>}
-                    <p><strong>Phone:</strong> {previewData.phone}</p>
-                    <p><strong>Date:</strong> {previewData.date.toLocaleDateString()}</p>
-                    <p><strong>Time:</strong> {previewData.time}</p>
-                    {previewData.message && <p><strong>Message:</strong> {previewData.message}</p>}
-                    <p><strong>Payment Method:</strong> {previewData.paymentMethod?.label}</p>
-                    <p><strong>Amount:</strong> Rs {previewData.amount}</p>
-                    <p><strong>Service Name:</strong> {previewData.serviceName}</p>
-                    <p><strong>Doctor:</strong> {previewData.doctor?.label}</p>
+                    <p>
+                      <strong>Name:</strong> {previewData.name}
+                    </p>
+                    <p>
+                      <strong>Phone:</strong> {previewData.phone}
+                    </p>
+                    <p>
+                      <strong>Age:</strong> {previewData.age}
+                    </p>
+                    <p>
+                      <strong>Gender:</strong> {previewData.gender?.label}
+                    </p>
+                    {previewData.address && (
+                      <p>
+                        <strong>Address:</strong> {previewData.address}
+                      </p>
+                    )}
+                    <p>
+                      <strong>Date:</strong>{' '}
+                      {previewData.date.toLocaleDateString()}
+                    </p>
+                    <p>
+                      <strong>Time:</strong> {previewData.time}
+                    </p>
+                    {previewData.message && (
+                      <p>
+                        <strong>Message:</strong> {previewData.message}
+                      </p>
+                    )}
+                    <p>
+                      <strong>Payment Method:</strong>{' '}
+                      {previewData.paymentMethod?.label}
+                    </p>
+                    <p>
+                      <strong>Amount:</strong> Rs {previewData.amount}
+                    </p>
+                    <p>
+                      <strong>Service Name:</strong> {previewData.serviceName}
+                    </p>
+                    <p>
+                      <strong>Doctor:</strong> {previewData.doctor?.label}
+                    </p>
                   </div>
                   <div className="mt-6 flex justify-end space-x-4">
                     <button

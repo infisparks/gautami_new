@@ -13,13 +13,13 @@ import {
   Menu,
   X,
 } from "lucide-react";
-import { auth } from "../lib/firebase"; // Adjust the import path as necessary
+import { auth } from "../lib/firebase"; // Adjust path as necessary
 import { signOut } from "firebase/auth";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { toast } from "react-toastify";
 import Image from "next/image";
-import logo from "./logo.png"; // Ensure the path is correct
+import logo from "./logo.png"; // Ensure the path to your logo is correct
 
 interface NavItemProps {
   title: string;
@@ -28,60 +28,11 @@ interface NavItemProps {
   submenu?: NavItemProps[];
 }
 
-const navItems: NavItemProps[] = [
-  {
-    title: "Dashboard",
-    icon: <LayoutDashboard size={20} />,
-    href: "/dashboard",
-  },
-  {
-    title: "Manage Admin",
-    icon: <Users size={20} />,
-    submenu: [
-      { title: "OPD Admin", icon: <ClipboardList size={20} />, href: "/opdadmin" },
-      { title: "IPD Admin", icon: <ClipboardList size={20} />, href: "/ipdadmin" },
-      { title: "Patient Admin", icon: <BedDouble size={20} />, href: "/patientadmin" },
-      { title: "Pathology Admin", icon: <BedDouble size={20} />, href: "/bloodadmin" },
-      { title: "Mortality Report", icon: <BedDouble size={20} />, href: "/mortalityadmin" },
-      { title: "Surgery Report", icon: <BedDouble size={20} />, href: "/surgeryadmin" },
-      { title: "DPR ", icon: <BedDouble size={20} />, href: "/dr" },
-    ],
-  },
-  {
-    title: "OPD",
-    icon: <Users size={20} />,
-    submenu: [
-      { title: "Appointment", icon: <ClipboardList size={20} />, href: "/opd" },
-      { title: "Add Doctor", icon: <UserPlus size={20} />, href: "/addDoctor" },
-    ],
-  },
-  {
-    title: "IPD",
-    icon: <Users size={20} />,
-    submenu: [
-      { title: "IPD Appointment", icon: <ClipboardList size={20} />, href: "/ipd" },
-      { title: "IPD Billing", icon: <ClipboardList size={20} />, href: "/billing" },
-      { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
-    ],
-  },
-  {
-    title: "Pathology",
-    icon: <LayoutDashboard size={20} />,
-    href: "/bloodtest",
-  },
-  {
-    title: "Mortality",
-    icon: <LayoutDashboard size={20} />,
-    href: "/mortality",
-  },
-  {
-    title: "Surgery",
-    icon: <LayoutDashboard size={20} />,
-    href: "/surgery",
-  },
-];
+interface SidebarProps {
+  userType: string | null; // "admin" or "staff" or null
+}
 
-const Sidebar: React.FC = () => {
+const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [openSubmenus, setOpenSubmenus] = useState<{ [key: string]: boolean }>({});
   const router = useRouter();
@@ -128,6 +79,68 @@ const Sidebar: React.FC = () => {
     closed: { x: "-100%", transition: { type: "spring", stiffness: 300, damping: 30 } },
   };
 
+  // Define your navigation items
+  let navItems: NavItemProps[] = [
+    {
+      title: "Dashboard",
+      icon: <LayoutDashboard size={20} />,
+      href: "/dashboard",
+    },
+    {
+      title: "Manage Admin",
+      icon: <Users size={20} />,
+      submenu: [
+        { title: "OPD Admin", icon: <ClipboardList size={20} />, href: "/opdadmin" },
+        { title: "IPD Admin", icon: <ClipboardList size={20} />, href: "/ipdadmin" },
+        { title: "Patient Admin", icon: <BedDouble size={20} />, href: "/patientadmin" },
+        { title: "Pathology Admin", icon: <BedDouble size={20} />, href: "/bloodadmin" },
+        { title: "Mortality Report", icon: <BedDouble size={20} />, href: "/mortalityadmin" },
+        { title: "Surgery Report", icon: <BedDouble size={20} />, href: "/surgeryadmin" },
+        { title: "DPR ", icon: <BedDouble size={20} />, href: "/dr" },
+      ],
+    },
+    {
+      title: "OPD",
+      icon: <Users size={20} />,
+      submenu: [
+        { title: "Appointment", icon: <ClipboardList size={20} />, href: "/opd" },
+        { title: "Add Doctor", icon: <UserPlus size={20} />, href: "/addDoctor" },
+      ],
+    },
+    {
+      title: "IPD",
+      icon: <Users size={20} />,
+      submenu: [
+        { title: "IPD Appointment", icon: <ClipboardList size={20} />, href: "/ipd" },
+        { title: "IPD Billing", icon: <ClipboardList size={20} />, href: "/billing" },
+        { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
+      ],
+    },
+    {
+      title: "Pathology",
+      icon: <LayoutDashboard size={20} />,
+      href: "/bloodtest",
+    },
+    {
+      title: "Mortality",
+      icon: <LayoutDashboard size={20} />,
+      href: "/mortality",
+    },
+    {
+      title: "Surgery",
+      icon: <LayoutDashboard size={20} />,
+      href: "/surgery",
+    },
+  ];
+
+  // Hide "Dashboard" and "Manage Admin" if userType is "staff"
+  if (userType === "staff") {
+    navItems = navItems.filter(
+      (item) => item.title !== "Dashboard" && item.title !== "Manage Admin"
+    );
+  }
+
+  // Renders the menu and submenus
   const renderNavItems = (items: NavItemProps[]) => {
     return items.map((item) => {
       const isActive = pathname === item.href;
@@ -234,7 +247,7 @@ const Sidebar: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
+      {/* Sidebar itself */}
       <motion.aside
         variants={sidebarVariants}
         initial="closed"
@@ -283,13 +296,13 @@ const Sidebar: React.FC = () => {
             className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden"
             onClick={toggleSidebar}
             aria-hidden="true"
-          ></motion.div>
+          />
         )}
       </AnimatePresence>
 
-      {/* Main Content */}
+      {/* Main Content (to the right of the sidebar) */}
       <div className="flex-1 ml-0 md:ml-64">
-        {/* The rest of your page content goes here */}
+        {/* Your main content goes here */}
       </div>
     </div>
   );
