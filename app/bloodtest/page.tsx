@@ -1,10 +1,7 @@
-// app/admin/pathology/page.tsx
-
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-import { db } from "../../lib/firebase";
 import { ref, push, set, onValue, update } from "firebase/database";
 import Head from "next/head";
 import {
@@ -13,8 +10,13 @@ import {
   AiOutlineFieldBinary,
   AiOutlineDollarCircle,
 } from "react-icons/ai";
+import { FaCheckCircle, FaTimesCircle } from "react-icons/fa";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+
+// Import the main (Gautami) Firebase database and the Medford one
+import { db as dbGautami } from "../../lib/firebase";
+import { db as dbMedford } from "../../lib/firebaseMedford";
 
 interface IPatientFormInput {
   name: string;
@@ -25,23 +27,37 @@ interface IPatientFormInput {
   bloodTestName: string;
   amount: number;
   paymentId?: string;
+  doctor?: string;
+}
+
+// Patient record in Gautami (full details)
+
+// Minimal record in Medford Family (only minimal details)
+interface MedfordPatient {
+  patientId: string;
+  name: string;
+  contact: string;
+  dob: string;
+  gender: string;
+  hospitalName: string;
+}
+
+// Combined type for auto‑complete suggestions
+interface CombinedPatient {
+  id: string;
+  name: string;
+  phone?: string;
+  source: "gautami" | "medford";
+  data: any;
 }
 
 interface IBloodTestEntry {
   bloodTestName: string;
-  // Add other fields if necessary
 }
 
-interface PatientRecord {
-  uhid: string;
+interface Doctor {
+  id: string;
   name: string;
-  phone: string;
-  address: string;
-  age?: number;
-  gender: string;
-  createdAt: number;
-  ipd?: any;
-  pathology?: any;
 }
 
 function generatePatientId(): string {
@@ -70,33 +86,41 @@ const PathologyEntryPage: React.FC = () => {
       bloodTestName: "",
       amount: 0,
       paymentId: "",
+      doctor: "",
     },
   });
 
   const [loading, setLoading] = useState(false);
 
-  // State for blood test suggestions (kept from your original code)
+  // Blood test suggestions
   const [bloodTestOptions, setBloodTestOptions] = useState<string[]>([]);
   const [filteredBloodTests, setFilteredBloodTests] = useState<string[]>([]);
   const [showBloodTestSuggestions, setShowBloodTestSuggestions] =
     useState(false);
   const bloodTestSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
-  // State for patient auto-complete
-  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+  // Patient auto-complete state (from both databases)
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
   const [patientNameInput, setPatientNameInput] = useState("");
   const [patientSuggestions, setPatientSuggestions] = useState<
-    { label: string; value: string }[]
+    CombinedPatient[]
   >([]);
-  const [selectedPatient, setSelectedPatient] = useState<{
-    id: string;
-    data: PatientRecord;
-  } | null>(null);
+  const [selectedPatient, setSelectedPatient] =
+    useState<CombinedPatient | null>(null);
   const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
-  // Fetch available blood tests
+  // Doctor auto-complete state
+  const [doctorOptions, setDoctorOptions] = useState<Doctor[]>([]);
+  const [doctorReferInput, setDoctorReferInput] = useState("");
+  const [filteredDoctors, setFilteredDoctors] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const doctorSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
+  // Fetch available blood tests from Gautami DB
   useEffect(() => {
-    const bloodTestsRef = ref(db, "bloodTests");
+    const bloodTestsRef = ref(dbGautami, "bloodTests");
     const unsubscribe = onValue(bloodTestsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
@@ -110,11 +134,86 @@ const PathologyEntryPage: React.FC = () => {
         setBloodTestOptions([]);
       }
     });
-
     return () => unsubscribe();
   }, []);
 
-  // Filter blood test suggestions based on input
+  // Fetch doctors from Gautami DB
+  useEffect(() => {
+    const doctorsRef = ref(dbGautami, "doctors");
+    const unsubscribe = onValue(doctorsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const docsArray = Object.values(data) as Doctor[];
+        setDoctorOptions(docsArray);
+      } else {
+        setDoctorOptions([]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch patients from Gautami DB
+  useEffect(() => {
+    const patientsRef = ref(dbGautami, "patients");
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val();
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          loaded.push({
+            id: key,
+            name: data[key].name,
+            phone: data[key].phone,
+            source: "gautami",
+            data: data[key],
+          });
+        }
+      }
+      setGautamiPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch patients from Medford Family DB
+  useEffect(() => {
+    const medfordPatientsRef = ref(dbMedford, "patients");
+    const unsubscribe = onValue(medfordPatientsRef, (snapshot) => {
+      const data = snapshot.val();
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          const rec: MedfordPatient = data[key];
+          loaded.push({
+            id: rec.patientId,
+            name: rec.name,
+            phone: rec.contact,
+            source: "medford",
+            data: rec,
+          });
+        }
+      }
+      setMedfordPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Combine patients from both databases for suggestions
+  const allCombinedPatients = [...gautamiPatients, ...medfordPatients];
+
+  // Filter patient suggestions when name input changes
+  useEffect(() => {
+    if (patientNameInput.length >= 2) {
+      const lower = patientNameInput.toLowerCase();
+      const suggestions = allCombinedPatients.filter((p) =>
+        p.name.toLowerCase().includes(lower)
+      );
+      setPatientSuggestions(suggestions);
+    } else {
+      setPatientSuggestions([]);
+    }
+  }, [patientNameInput, allCombinedPatients]);
+
+  // Filter blood test suggestions
   const handleBloodTestInputChange = (value: string) => {
     if (value) {
       const filtered = bloodTestOptions.filter((test) =>
@@ -128,54 +227,50 @@ const PathologyEntryPage: React.FC = () => {
     }
   };
 
-  // Fetch all patients for auto-complete
-  useEffect(() => {
-    const patientsRef = ref(db, "patients");
-    const unsubscribe = onValue(patientsRef, (snapshot) => {
-      const data = snapshot.val();
-      const loaded: PatientRecord[] = [];
-      if (data) {
-        for (const key in data) {
-          loaded.push({ uhid: key, ...data[key] });
-        }
-      }
-      setAllPatients(loaded);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Filter patient suggestions when name input changes
-  useEffect(() => {
-    if (patientNameInput.length >= 2) {
-      const lower = patientNameInput.toLowerCase();
-      const suggestions = allPatients
-        .filter((p) => p.name.toLowerCase().includes(lower))
-        .map((p) => ({
-          label: `${p.name} - ${p.phone}`,
-          value: p.uhid,
-        }));
-      setPatientSuggestions(suggestions);
+  // Filter doctor suggestions
+  const handleDoctorReferInputChange = (value: string) => {
+    setDoctorReferInput(value);
+    if (value) {
+      const filtered = doctorOptions.filter((doc) =>
+        doc.name.toLowerCase().includes(value.toLowerCase())
+      );
+      const suggestions = filtered.map((doc) => ({
+        label: doc.name,
+        value: doc.id,
+      }));
+      setFilteredDoctors(suggestions);
     } else {
-      setPatientSuggestions([]);
+      setFilteredDoctors([]);
     }
-  }, [patientNameInput, allPatients]);
-
-  // Handle clicking a patient suggestion
-  const handlePatientSuggestionClick = (uhid: string) => {
-    const found = allPatients.find((p) => p.uhid === uhid);
-    if (!found) return;
-    setSelectedPatient({ id: found.uhid, data: found });
-    setValue("name", found.name);
-    setValue("phone", found.phone);
-    setValue("age", found.age);
-    setValue("address", found.address);
-    setValue("gender", found.gender);
-    setPatientNameInput(found.name);
-    setPatientSuggestions([]);
-    toast.info(`Patient ${found.name} selected.`);
   };
 
-  // Hide patient suggestion box when clicking outside
+  // When a patient suggestion is clicked, populate the form
+  const handlePatientSuggestionClick = (patient: CombinedPatient) => {
+    setSelectedPatient(patient);
+    setValue("name", patient.name);
+    setValue("phone", patient.phone || "");
+    if (patient.source === "gautami") {
+      setValue("address", patient.data.address);
+      setValue("age", patient.data.age);
+      setValue("gender", patient.data.gender);
+    } else {
+      setValue("gender", patient.data.gender);
+    }
+    setPatientNameInput(patient.name);
+    setPatientSuggestions([]);
+    toast.info(
+      `Patient ${patient.name} selected from ${patient.source.toUpperCase()}!`
+    );
+  };
+
+  // When a doctor suggestion is clicked
+  const handleDoctorSuggestionClick = (id: string, name: string) => {
+    setDoctorReferInput(name);
+    setValue("doctor", id, { shouldValidate: true });
+    setFilteredDoctors([]);
+  };
+
+  // Hide suggestion boxes on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -184,21 +279,17 @@ const PathologyEntryPage: React.FC = () => {
       ) {
         setPatientSuggestions([]);
       }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
-  // Hide blood test suggestion box when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
       if (
         bloodTestSuggestionBoxRef.current &&
         !bloodTestSuggestionBoxRef.current.contains(event.target as Node)
       ) {
         setShowBloodTestSuggestions(false);
+      }
+      if (
+        doctorSuggestionBoxRef.current &&
+        !doctorSuggestionBoxRef.current.contains(event.target as Node)
+      ) {
+        setFilteredDoctors([]);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -206,16 +297,15 @@ const PathologyEntryPage: React.FC = () => {
       document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // onSubmit handler: create/update patient record and add pathology entry
+  // onSubmit handler
   const onSubmit: SubmitHandler<IPatientFormInput> = async (data) => {
     setLoading(true);
     try {
-      let uhid: string;
+      let patientId: string;
+      // If a patient is selected, update the full details in the Gautami database
       if (selectedPatient) {
-        // Existing patient: update details and add new pathology entry
-        uhid = selectedPatient.id;
-        const patientRef = ref(db, `patients/${uhid}`);
-        // Update patient basic details (keeping createdAt intact)
+        patientId = selectedPatient.id;
+        const patientRef = ref(dbGautami, `patients/${patientId}`);
         await update(patientRef, {
           name: data.name,
           phone: data.phone,
@@ -224,27 +314,38 @@ const PathologyEntryPage: React.FC = () => {
           gender: data.gender,
         });
       } else {
-        // New patient: generate a new UHID and create a patient record
-        uhid = generatePatientId();
-        await set(ref(db, `patients/${uhid}`), {
+        // New patient: create full record in Gautami DB and minimal record in Medford DB
+        patientId = generatePatientId();
+        // Save full details in Gautami
+        await set(ref(dbGautami, `patients/${patientId}`), {
           name: data.name,
           phone: data.phone,
           address: data.address,
           age: data.age,
           gender: data.gender,
-          createdAt: Date.now(),
-          uhid: uhid,
+          createdAt: new Date().toISOString(),
+          uhid: patientId,
           ipd: {},
         });
+        // Save minimal details in Medford (only contact, dob, gender, name, patientId)
+        await set(ref(dbMedford, `patients/${patientId}`), {
+          name: data.name,
+          contact: data.phone,
+          gender: data.gender,
+          dob: "", // Use empty string or set a proper value if available
+          patientId: patientId,
+          hospitalName: "MEDFORD",
+        });
       }
-      // Save pathology entry under the patient's record (using push so multiple entries can exist)
-      const pathologyRef = ref(db, `patients/${uhid}/pathology`);
+      // Save pathology entry under the patient record in Gautami DB
+      const pathologyRef = ref(dbGautami, `patients/${patientId}/pathology`);
       const newPathologyRef = push(pathologyRef);
       await set(newPathologyRef, {
         bloodTestName: data.bloodTestName,
         amount: data.amount,
         paymentId: data.paymentId || null,
-        timestamp: Date.now(),
+        createdAt: new Date().toISOString(),
+        doctor: data.doctor || "",
       });
 
       toast.success("Patient pathology entry saved successfully!", {
@@ -261,8 +362,10 @@ const PathologyEntryPage: React.FC = () => {
         bloodTestName: "",
         amount: 0,
         paymentId: "",
+        doctor: "",
       });
       setPatientNameInput("");
+      setDoctorReferInput("");
       setSelectedPatient(null);
       setPatientSuggestions([]);
     } catch (error) {
@@ -280,7 +383,10 @@ const PathologyEntryPage: React.FC = () => {
     <>
       <Head>
         <title>Admin - Pathology Entry</title>
-        <meta name="description" content="Add patient details and blood tests" />
+        <meta
+          name="description"
+          content="Add patient details and blood tests"
+        />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
@@ -316,15 +422,20 @@ const PathologyEntryPage: React.FC = () => {
                   ref={patientSuggestionBoxRef}
                   className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
                 >
-                  {patientSuggestions.map((suggestion) => (
+                  {patientSuggestions.map((patient) => (
                     <li
-                      key={suggestion.value}
-                      onClick={() =>
-                        handlePatientSuggestionClick(suggestion.value)
-                      }
-                      className="px-4 py-2 hover:bg-green-100 cursor-pointer"
+                      key={patient.id}
+                      onClick={() => handlePatientSuggestionClick(patient)}
+                      className="px-4 py-2 hover:bg-green-100 cursor-pointer flex justify-between items-center"
                     >
-                      {suggestion.label}
+                      <span>{`${patient.name} - ${
+                        patient.phone || ""
+                      }`}</span>
+                      {patient.source === "gautami" ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -468,6 +579,50 @@ const PathologyEntryPage: React.FC = () => {
               {errors.paymentId && (
                 <p className="text-red-500 text-sm mt-1">
                   {errors.paymentId.message}
+                </p>
+              )}
+            </div>
+
+            {/* Doctor Refer with Auto-Complete */}
+            <div className="relative">
+              <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="text"
+                value={doctorReferInput}
+                onChange={(e) => {
+                  handleDoctorReferInputChange(e.target.value);
+                  setValue("doctor", "", { shouldValidate: true });
+                }}
+                placeholder="Doctor Refer"
+                autoComplete="off"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                  errors.doctor ? "border-red-500" : "border-gray-300"
+                } transition duration-200`}
+              />
+              {filteredDoctors.length > 0 && (
+                <ul
+                  ref={doctorSuggestionBoxRef}
+                  className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
+                >
+                  {filteredDoctors.map((suggestion) => (
+                    <li
+                      key={suggestion.value}
+                      onClick={() =>
+                        handleDoctorSuggestionClick(
+                          suggestion.value,
+                          suggestion.label
+                        )
+                      }
+                      className="px-4 py-2 hover:bg-green-100 cursor-pointer"
+                    >
+                      {suggestion.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {errors.doctor && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.doctor.message}
                 </p>
               )}
             </div>

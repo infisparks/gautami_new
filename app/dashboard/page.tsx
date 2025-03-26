@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../../lib/firebase';
 import { ref, onValue, DataSnapshot } from 'firebase/database';
 import Head from 'next/head';
@@ -19,7 +19,6 @@ import {
   AiOutlineCalendar,
   AiOutlineFileText,
   AiOutlineSearch,
-  AiOutlinePhone,
 } from 'react-icons/ai';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -241,7 +240,7 @@ const DashboardPage: React.FC = () => {
     const patientsRef = ref(db, 'patients');
     const unsubscribePatients = onValue(patientsRef, (snapshot) => {
       const data = snapshot.val();
-      let allAppointments: Appointment[] = [];
+      const allAppointments: Appointment[] = [];
       if (data) {
         Object.entries(data).forEach(([uhid, patientData]: [string, any]) => {
           const patient: PatientRecord = { uhid, ...patientData };
@@ -538,7 +537,7 @@ const DashboardPage: React.FC = () => {
                   isTodayFilter ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600'
                 } focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200`}
               >
-                Today's Appointments
+                Today Appointments
               </button>
             </div>
           </div>
@@ -600,7 +599,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today's Appointments</p>
+                <p className="text-gray-600">Today Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>

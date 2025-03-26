@@ -1,5 +1,3 @@
-// app/admin/surgery/page.tsx
-
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -58,7 +56,6 @@ const SurgeryEntryPage: React.FC = () => {
   const {
     register,
     handleSubmit,
-    formState: { errors },
     reset,
     setValue,
   } = useForm<ISurgeryFormInput>({

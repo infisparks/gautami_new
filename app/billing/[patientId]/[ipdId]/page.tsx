@@ -11,7 +11,7 @@ import { yupResolver } from "@hookform/resolvers/yup";
 import * as yup from "yup";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search,
+  
   Plus,
   ArrowLeft,
   AlertTriangle,

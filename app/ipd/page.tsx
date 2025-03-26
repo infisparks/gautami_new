@@ -1,8 +1,9 @@
 "use client";
 import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import { db } from '../../lib/firebase'; // <-- adjust path as needed
-import { ref, push, update, onValue, set } from 'firebase/database';
+import { db } from '../../lib/firebase'; // Gautami DB
+import { db as dbMedford } from '../../lib/firebaseMedford'; // Medford Family DB
+import { ref, push, update, onValue, set} from 'firebase/database';
 import Head from 'next/head';
 import {
   FaUser,
@@ -13,14 +14,15 @@ import {
   FaHome,
   FaUserFriends,
   FaStethoscope,
+  FaCheckCircle,
+  FaTimesCircle
 } from 'react-icons/fa';
-
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
-import IPDSignaturePDF from './ipdsignaturepdf'; // <-- import the separate PDF component
+import IPDSignaturePDF from './ipdsignaturepdf'; // PDF component for signature/letter
 
 /** ---------------------------
  *   TYPE & CONSTANT DEFINITIONS
@@ -63,9 +65,9 @@ const AdmissionTypeOptions = [
 ];
 
 const RoomTypeOptions = [
-  { value: 'female_ward', label: 'Female Ward ' },
+  { value: 'female_ward', label: 'Female Ward' },
   { value: 'icu', label: 'ICU' },
-  { value: 'male_ward', label: 'Male Ward ' },
+  { value: 'male_ward', label: 'Male Ward' },
   { value: 'deluxe', label: 'Deluxe' },
   { value: 'nicu', label: 'NICU' },
 ];
@@ -83,7 +85,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-/** Helper function to generate an 8-character alphanumeric ID */
+/** Helper function to generate a 10-character alphanumeric UHID */
 function generatePatientId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -93,7 +95,7 @@ function generatePatientId(): string {
   return result;
 }
 
-/** Representation of local patient data */
+/** Representation of a patient from the Gautami database (full details) */
 interface PatientRecord {
   id: string;
   name: string;
@@ -101,6 +103,33 @@ interface PatientRecord {
   gender?: string;
   age?: number;
   address?: string;
+  createdAt?: string;
+}
+
+/** Representation of a minimal patient record from Medford Family */
+interface MedfordPatient {
+  patientId: string;
+  name: string;
+  contact: string;
+  dob: string;
+  gender: string;
+  hospitalName: string;
+}
+
+/** Combined patient type for auto-suggest */
+interface CombinedPatient {
+  id: string;
+  name: string;
+  phone?: string;
+  source: "gautami" | "medford";
+  data: PatientRecord | MedfordPatient;
+}
+
+/** For suggestions, we include source as well */
+interface PatientSuggestion {
+  label: string;
+  value: string;
+  source: "gautami" | "medford";
 }
 
 /** ---------------
@@ -136,33 +165,31 @@ const IPDBookingPage: React.FC = () => {
     },
   });
 
-  // State for loading, preview, doctors, beds, and local patient data
+  // State for loading, preview, doctors, beds, and patient auto-suggest
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IPDFormInput | null>(null);
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
   const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
-  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+  // Instead of allPatients, we fetch from two databases:
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
   const [patientNameInput, setPatientNameInput] = useState('');
-  const [patientSuggestions, setPatientSuggestions] = useState<
-    { label: string; value: string }[]
-  >([]);
-  const [selectedPatient, setSelectedPatient] = useState<{
-    id: string;
-    data: PatientRecord;
-  } | null>(null);
+  const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<{ id: string; data: PatientRecord } | null>(null);
 
   // Watch for changes in room type to load available beds
   const selectedRoomType = watch('roomType');
 
-  /** -------------
-   *   FETCH DOCTORS
-   *  -------------
+  /** -----------------
+   *  FETCH DOCTORS
+   * -----------------
    */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
+        // Filter doctors for IPD or both
         const doctorsList = Object.keys(data)
           .filter((key) => {
             const department = String(data[key].department || '').toLowerCase();
@@ -181,36 +208,60 @@ const IPDBookingPage: React.FC = () => {
   }, []);
 
   /** ---------------------------
-   *  FETCH ALL PATIENTS AT START
-   *  ---------------------------
+   *  FETCH PATIENTS FROM BOTH DBs
+   * ---------------------------
    */
+  // Fetch from Gautami DB
   useEffect(() => {
     const patientsRef = ref(db, 'patients');
     const unsubscribe = onValue(patientsRef, (snapshot) => {
       const data = snapshot.val();
-      if (!data) {
-        setAllPatients([]);
-        return;
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          loaded.push({
+            id: key,
+            name: data[key].name,
+            phone: data[key].phone,
+            source: 'gautami',
+            data: { ...data[key], id: key },
+          });
+        }
       }
-      const loaded: PatientRecord[] = [];
-      for (const key in data) {
-        loaded.push({
-          id: key,
-          name: data[key].name,
-          phone: data[key].phone,
-          gender: data[key].gender,
-          age: data[key].age,
-          address: data[key].address,
-        });
-      }
-      setAllPatients(loaded);
+      setGautamiPatients(loaded);
     });
     return () => unsubscribe();
   }, []);
 
-  /** --------------------------------
-   *  CLIENT-SIDE FILTER FOR SUGGESTIONS
-   *  --------------------------------
+  // Fetch from Medford Family DB
+  useEffect(() => {
+    const medfordRef = ref(dbMedford, 'patients');
+    const unsubscribe = onValue(medfordRef, (snapshot) => {
+      const data = snapshot.val();
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          const rec: MedfordPatient = data[key];
+          loaded.push({
+            id: rec.patientId,
+            name: rec.name,
+            phone: rec.contact,
+            source: 'medford',
+            data: rec,
+          });
+        }
+      }
+      setMedfordPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Combined suggestions from both sources
+  const combinedPatients = [...gautamiPatients, ...medfordPatients];
+
+  /** ---------------------------------
+   *  CLIENT-SIDE PATIENT SUGGESTIONS
+   * ---------------------------------
    */
   const filterPatientSuggestions = (name: string) => {
     if (name.length < 2) {
@@ -218,12 +269,13 @@ const IPDBookingPage: React.FC = () => {
       return;
     }
     const lower = name.toLowerCase();
-    const matched = allPatients.filter((p) =>
+    const matched = combinedPatients.filter((p) =>
       p.name.toLowerCase().includes(lower)
     );
-    const suggestions = matched.map((p) => ({
-      label: `${p.name} - ${p.phone}`,
+    const suggestions: PatientSuggestion[] = matched.map((p) => ({
+      label: `${p.name} - ${p.phone || ''}`,
       value: p.id,
+      source: p.source,
     }));
     setPatientSuggestions(suggestions);
   };
@@ -232,36 +284,48 @@ const IPDBookingPage: React.FC = () => {
     if (!selectedPatient) {
       filterPatientSuggestions(patientNameInput);
     }
-  }, [patientNameInput, selectedPatient, allPatients]);
+    // If the input exactly matches the selected patient's name, hide suggestions.
+    if (selectedPatient && patientNameInput === selectedPatient.data.name) {
+      setPatientSuggestions([]);
+    }
+  }, [patientNameInput, selectedPatient, combinedPatients]);
 
-  /** -------------------------
-   *  AUTO-FILL ON PATIENT SELECT
-   *  -------------------------
+  /** --------------------------------------------------
+   *  SELECT PATIENT FROM DROPDOWN, AUTO-FILL FORM FIELDS
+   * --------------------------------------------------
    */
   const handleSelectPatient = (patientId: string) => {
-    const found = allPatients.find((p) => p.id === patientId);
+    const found = combinedPatients.find((p) => p.id === patientId);
     if (!found) return;
-    setSelectedPatient({ id: found.id, data: found });
-    setValue('name', found.name);
-    setValue('phone', found.phone || '');
-    setValue('age', found.age || 0);
-    if (found.gender) {
+    // Mark as selected (if from Gautami, we expect full details)
+    if (found.source === 'gautami') {
+      setSelectedPatient({ id: found.id, data: found.data as PatientRecord });
+      setValue('name', found.name);
+      setValue('phone', found.phone || '');
+      setValue('age', (found.data as PatientRecord).age || 0);
       const g = GenderOptions.find(
-        (opt) => opt.value?.toLowerCase() === found.gender?.toLowerCase()
+        (opt) => opt.value.toLowerCase() === ((found.data as PatientRecord).gender || '').toLowerCase()
       );
       setValue('gender', g || null);
+      setValue('address', (found.data as PatientRecord).address || '');
     } else {
-      setValue('gender', null);
+      // For Medford records, we might have minimal info so fill what we have.
+      setSelectedPatient({ id: found.id, data: { ...found.data, id: found.id, phone: found.phone } as PatientRecord });
+      setValue('name', found.name);
+      setValue('phone', found.phone || '');
+      const g = GenderOptions.find(
+        (opt) => opt.value.toLowerCase() === ((found.data as PatientRecord).gender || '').toLowerCase()
+      );
+      setValue('gender', g || null);
     }
-    setValue('address', found.address || '');
     setPatientNameInput(found.name);
     setPatientSuggestions([]);
-    toast.info(`Patient ${found.name} selected.`);
+    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`);
   };
 
   /** ---------------------
    *   LOAD AVAILABLE BEDS
-   *  ---------------------
+   * ---------------------
    */
   useEffect(() => {
     if (selectedRoomType?.value) {
@@ -292,39 +356,13 @@ const IPDBookingPage: React.FC = () => {
   }, [selectedRoomType, setValue]);
 
   /** -----------------------------
-   *  HELPER: SEND WHATSAPP MESSAGE
+   *   SUBMISSION LOGIC & NEW REGISTRATION
    * -----------------------------
    */
-  const sendWhatsAppMessage = async (phone: string, message: string) => {
-    // Ensure the phone number starts with "91"
-    const formattedNumber = phone.startsWith('91') ? phone : `91${phone}`;
-    try {
-      const response = await fetch('https://wa.medblisss.com/send-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: '99583991572',
-          number: formattedNumber,
-          message: message,
-        }),
-      });
-      if (!response.ok) {
-        throw new Error('Error sending WhatsApp message');
-      }
-      const data = await response.json();
-      console.log('WhatsApp message sent:', data);
-    } catch (error) {
-      console.error('WhatsApp API error:', error);
-    }
-  };
-
-  /** --------
-   *   SUBMIT
-   *  -------- */
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true);
     try {
-      // 1) Occupy the bed if selected
+      // 1) Occupy the selected bed
       if (data.roomType?.value && data.bed?.value) {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
         await update(bedRef, { status: 'Occupied' });
@@ -350,49 +388,56 @@ const IPDBookingPage: React.FC = () => {
         createdAt: new Date().toISOString(),
       };
 
-      // 3) Check if patient exists or create a new patient record with an 8-digit alphanumeric id.
-      //    Also save the generated patient id as a UHID.
+      // 3) Check if patient exists; if not, create a new record.
+      // When creating a new patient, store full details in Gautami DB and minimal record in Medford Family DB.
       let patientId: string;
       if (selectedPatient) {
         patientId = selectedPatient.id;
+        // Optionally update patient details in Gautami DB.
+        await update(ref(db, `patients/${patientId}`), {
+          name: data.name,
+          phone: data.phone,
+          gender: data.gender?.value || '',
+          age: data.age,
+          address: data.address || '',
+        });
       } else {
         const newPatientId = generatePatientId();
-        await set(ref(db, `patients/${newPatientId}`), {
+        const newPatientData = {
           name: data.name,
           phone: data.phone,
           gender: data.gender?.value || '',
           age: data.age,
           address: data.address || '',
           createdAt: new Date().toISOString(),
-          uhid: newPatientId, // Save the generated patient id as UHID
+          uhid: newPatientId,
+        };
+        await set(ref(db, `patients/${newPatientId}`), newPatientData);
+        // Save minimal details in Medford Family DB
+        await set(ref(dbMedford, `patients/${newPatientId}`), {
+          name: data.name,
+          contact: data.phone,
+          gender: data.gender?.value || '',
+          dob: '', // Update if DOB available
+          patientId: newPatientId,
+          hospitalName: "MEDFORD",
         });
         patientId = newPatientId;
       }
 
-      // 4) Push the IPD record under the patient
+      // 4) Push the IPD record under the patient's record in Gautami DB.
       const ipdRef = ref(db, `patients/${patientId}/ipd`);
       const newIpdRef = push(ipdRef);
       await update(newIpdRef, ipdData);
 
-      // 5) Construct professional messages for patient and relative
-      const patientMessage = `Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${
-        data.bed?.label || 'N/A'
-      } in ${data.roomType?.label || 'N/A'} has been allocated. Thank you for choosing our hospital.`;
-      
-      const relativeMessage = `Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${
-        data.bed?.label || 'N/A'
-      } in ${data.roomType?.label || 'N/A'}. Please contact us for further details.`;
-
-      // 6) Send WhatsApp messages to both patient and relative
-      await sendWhatsAppMessage(data.phone, patientMessage);
-      await sendWhatsAppMessage(data.relativePhone, relativeMessage);
+      // Optionally, send notifications (e.g., WhatsApp messages) here.
 
       toast.success('IPD Admission created successfully!', {
         position: 'top-right',
         autoClose: 5000,
       });
 
-      // 7) Reset form and state
+      // 5) Reset the form and state
       reset({
         name: '',
         phone: '',
@@ -424,14 +469,19 @@ const IPDBookingPage: React.FC = () => {
     }
   };
 
-  /** --------
+  /** -----------
    *   PREVIEW
-   *  -------- */
+   *  -----------
+   */
   const handlePreview = () => {
     setPreviewData(watch());
   };
 
-  const bedsAvailable = beds.length > 0;
+  /** -------------------------------
+   *  VOICE RECOGNITION (omitted for brevity)
+   *  -------------------------------
+   */
+  // (Voice recognition commands and hooks can be added here if needed)
 
   return (
     <>
@@ -470,17 +520,21 @@ const IPDBookingPage: React.FC = () => {
                   {errors.name.message}
                 </p>
               )}
-
               {/* Suggestions Dropdown */}
               {patientSuggestions.length > 0 && !selectedPatient && (
                 <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto">
                   {patientSuggestions.map((sug) => (
                     <li
                       key={sug.value}
-                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
+                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
                       onClick={() => handleSelectPatient(sug.value)}
                     >
-                      {sug.label}
+                      <span>{sug.label}</span>
+                      {sug.source === 'gautami' ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -524,7 +578,6 @@ const IPDBookingPage: React.FC = () => {
                     options={GenderOptions}
                     placeholder="Select Gender"
                     classNamePrefix="react-select"
-                    className={`${errors.gender ? 'border-red-500' : ''}`}
                     onChange={(val) => field.onChange(val)}
                   />
                 )}
@@ -653,9 +706,7 @@ const IPDBookingPage: React.FC = () => {
                 <FaClock className="absolute top-3 left-3 text-gray-400" />
                 <input
                   type="text"
-                  {...register('time', {
-                    required: 'Time is required',
-                  })}
+                  {...register('time', { required: 'Time is required' })}
                   placeholder="Time"
                   className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                     errors.time ? 'border-red-500' : 'border-gray-300'
@@ -705,9 +756,7 @@ const IPDBookingPage: React.FC = () => {
                     <Select
                       {...field}
                       options={beds}
-                      placeholder={
-                        beds.length > 0 ? 'Select Bed' : 'No Beds Available'
-                      }
+                      placeholder={beds.length > 0 ? 'Select Bed' : 'No Beds Available'}
                       classNamePrefix="react-select"
                       className={errors.bed ? 'border-red-500' : ''}
                       onChange={(val) => field.onChange(val)}
@@ -791,7 +840,6 @@ const IPDBookingPage: React.FC = () => {
               type="button"
               onClick={handlePreview}
               className="w-full py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
-              disabled={!bedsAvailable}
             >
               Preview
             </button>
@@ -804,73 +852,36 @@ const IPDBookingPage: React.FC = () => {
                     Preview IPD Admission
                   </h3>
                   <div className="space-y-2">
-                    <p>
-                      <strong>Patient Name:</strong> {previewData.name}
-                    </p>
-                    <p>
-                      <strong>Phone:</strong> {previewData.phone}
-                    </p>
-                    <p>
-                      <strong>Gender:</strong> {previewData.gender?.label}
-                    </p>
-                    <p>
-                      <strong>Age:</strong> {previewData.age}
-                    </p>
+                    <p><strong>Patient Name:</strong> {previewData.name}</p>
+                    <p><strong>Phone:</strong> {previewData.phone}</p>
+                    <p><strong>Gender:</strong> {previewData.gender?.label}</p>
+                    <p><strong>Age:</strong> {previewData.age}</p>
                     {previewData.address && (
-                      <p>
-                        <strong>Address:</strong> {previewData.address}
-                      </p>
+                      <p><strong>Address:</strong> {previewData.address}</p>
                     )}
-                    <p>
-                      <strong>Relative Name:</strong> {previewData.relativeName}
-                    </p>
-                    <p>
-                      <strong>Relative Phone:</strong> {previewData.relativePhone}
-                    </p>
+                    <p><strong>Relative Name:</strong> {previewData.relativeName}</p>
+                    <p><strong>Relative Phone:</strong> {previewData.relativePhone}</p>
                     {previewData.relativeAddress && (
-                      <p>
-                        <strong>Relative Address:</strong>{' '}
-                        {previewData.relativeAddress}
-                      </p>
+                      <p><strong>Relative Address:</strong> {previewData.relativeAddress}</p>
                     )}
-                    <p>
-                      <strong>Admission Date:</strong>{' '}
-                      {previewData.date.toLocaleDateString()}
-                    </p>
-                    <p>
-                      <strong>Admission Time:</strong> {previewData.time}
-                    </p>
+                    <p><strong>Admission Date:</strong> {previewData.date.toLocaleDateString()}</p>
+                    <p><strong>Admission Time:</strong> {previewData.time}</p>
                     {previewData.roomType && (
-                      <p>
-                        <strong>Room Type:</strong> {previewData.roomType.label}
-                      </p>
+                      <p><strong>Room Type:</strong> {previewData.roomType.label}</p>
                     )}
                     {previewData.bed && (
-                      <p>
-                        <strong>Bed:</strong> {previewData.bed.label}
-                      </p>
+                      <p><strong>Bed:</strong> {previewData.bed.label}</p>
                     )}
                     {previewData.doctor && (
-                      <p>
-                        <strong>Under Care of Doctor:</strong>{' '}
-                        {previewData.doctor.label}
-                      </p>
+                      <p><strong>Under Care of Doctor:</strong> {previewData.doctor.label}</p>
                     )}
                     {previewData.referDoctor && (
-                      <p>
-                        <strong>Referral Doctor:</strong>{' '}
-                        {previewData.referDoctor}
-                      </p>
+                      <p><strong>Referral Doctor:</strong> {previewData.referDoctor}</p>
                     )}
                     {previewData.admissionType && (
-                      <p>
-                        <strong>Admission Type:</strong>{' '}
-                        {previewData.admissionType.label}
-                      </p>
+                      <p><strong>Admission Type:</strong> {previewData.admissionType.label}</p>
                     )}
                   </div>
-
-                  {/* Action Buttons */}
                   <div className="mt-6 flex flex-wrap gap-4 justify-end">
                     <button
                       type="button"
@@ -879,10 +890,7 @@ const IPDBookingPage: React.FC = () => {
                     >
                       Cancel
                     </button>
-
-                    {/* Download Letter Button using separate component */}
                     {previewData && <IPDSignaturePDF data={previewData} />}
-
                     <button
                       type="submit"
                       className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 ${
@@ -900,20 +908,13 @@ const IPDBookingPage: React.FC = () => {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={loading || !bedsAvailable}
+              disabled={loading}
               className={`w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                loading || !bedsAvailable ? 'opacity-50 cursor-not-allowed' : ''
+                loading ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
               {loading ? 'Submitting...' : 'Submit Admission'}
             </button>
-
-            {/* No Beds Available Warning */}
-            {!bedsAvailable && (
-              <p className="text-red-500 text-center mt-4">
-                No beds are available for the selected room type. Please choose a different room type.
-              </p>
-            )}
           </form>
         </div>
       </main>

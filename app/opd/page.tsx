@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
-import { db } from '../../lib/firebase'; // <-- Adjust if needed
+import { db } from '../../lib/firebase'; // Gautami DB
+import { db as dbMedford } from '../../lib/firebaseMedford'; // Medford Family DB
 import {
   ref,
   push,
@@ -23,7 +24,9 @@ import {
   FaDollarSign,
   FaInfoCircle,
   FaMicrophone,
-  FaMicrophoneSlash
+  FaMicrophoneSlash,
+  FaCheckCircle,
+  FaTimesCircle
 } from 'react-icons/fa';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -62,6 +65,25 @@ interface PatientRecord {
   opd?: any; // Extra subfields
 }
 
+// Minimal patient record from Medford Family
+interface MedfordPatient {
+  patientId: string;
+  name: string;
+  contact: string;
+  dob: string;
+  gender: string;
+  hospitalName: string;
+}
+
+// Combined patient type for auto‑suggestions
+interface CombinedPatient {
+  id: string;
+  name: string;
+  phone?: string;
+  source: "gautami" | "medford";
+  data: PatientRecord | MedfordPatient;
+}
+
 const PaymentOptions = [
   { value: 'cash', label: 'Cash' },
   { value: 'online', label: 'Online' },
@@ -86,7 +108,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-/** Helper function to generate an 8-character alphanumeric UHID */
+/** Helper function to generate a 10-character alphanumeric UHID */
 function generatePatientId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -133,17 +155,14 @@ const OPDBookingPage: React.FC = () => {
   const [doctorMenuIsOpen, setDoctorMenuIsOpen] = useState(false);
   const doctorSelectRef = useRef<any>(null);
 
-  // States for patient auto-suggest & selection
+  // States for patient auto-suggest & selection using combined data from both databases
   const [patientNameInput, setPatientNameInput] = useState('');
-  const [patientSuggestions, setPatientSuggestions] = useState<
-    { label: string; value: string }[]
-  >([]);
-  const [selectedPatient, setSelectedPatient] = useState<
-    { id: string; data: PatientRecord } | null
-  >(null);
+  const [patientSuggestions, setPatientSuggestions] = useState<CombinedPatient[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
 
-  // We'll store all patients locally and filter them in memory
-  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+  // We'll store patients from both databases separately
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
 
   /** ---------------------------
    *  SPEECH RECOGNITION COMMANDS
@@ -175,7 +194,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info(`Name set to: ${name.trim()}`);
       },
     },
-
     // Phone Commands
     {
       command: 'number *',
@@ -201,7 +219,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info(`Phone number set to: ${sanitizedPhone}`);
       },
     },
-
     // Age Command
     {
       command: 'age *',
@@ -215,7 +232,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Gender Command
     {
       command: 'gender *',
@@ -232,7 +248,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Address Command
     {
       command: 'address *',
@@ -242,7 +257,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info('Address set.');
       },
     },
-
     // Date Commands
     {
       command: 'set date to *',
@@ -256,7 +270,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Time Commands
     {
       command: 'set time to *',
@@ -265,7 +278,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info(`Time set to: ${time.trim()}`);
       },
     },
-
     // Message Commands
     {
       command: 'message *',
@@ -275,7 +287,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info('Message set.');
       },
     },
-
     // Payment Method Commands
     {
       command: 'payment method *',
@@ -291,7 +302,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Amount Commands
     {
       command: 'amount *',
@@ -305,7 +315,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Service Name Commands
     {
       command: 'service *',
@@ -331,7 +340,6 @@ const OPDBookingPage: React.FC = () => {
         toast.info(`Service name set to: ${trimmedServiceName}`);
       },
     },
-
     // Doctor Commands
     {
       command: 'drop down',
@@ -361,7 +369,6 @@ const OPDBookingPage: React.FC = () => {
         }
       },
     },
-
     // Preview & Submit Commands
     {
       command: 'preview',
@@ -401,9 +408,9 @@ const OPDBookingPage: React.FC = () => {
     }
   }, [browserSupportsSpeechRecognition]);
 
-  /** ---------------
+  /** ----------------
    *   FETCH DOCTORS
-   *  ---------------
+   *  ----------------
    */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
@@ -423,89 +430,98 @@ const OPDBookingPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  /** -----------------------------------
-   *  FETCH ALL PATIENTS (WITHOUT INDEX)
-   *  ----------------------------------- */
+  /** -------------------------------
+   *  FETCH PATIENTS FROM BOTH DATABASES
+   *  -------------------------------
+   */
+  // Fetch patients from Gautami DB
   useEffect(() => {
     const patientsRef = ref(db, 'patients');
     const unsubscribe = onValue(patientsRef, (snapshot) => {
       const data = snapshot.val();
-      if (!data) {
-        setAllPatients([]);
-        return;
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          loaded.push({
+            id: key,
+            name: data[key].name,
+            phone: data[key].phone,
+            source: 'gautami',
+            data: { ...data[key], id: key }
+          });
+        }
       }
-      const loadedPatients: PatientRecord[] = [];
-      for (const key in data) {
-        loadedPatients.push({
-          id: key,
-          ...data[key]
-        });
-      }
-      setAllPatients(loadedPatients);
+      setGautamiPatients(loaded);
     });
     return () => unsubscribe();
   }, []);
 
-  /** ---------------------------------------
-   *  CLIENT-SIDE SUGGESTION FILTERING
-   *  --------------------------------------- */
-  const filterPatientSuggestions = (name: string) => {
-    if (name.length < 2) {
-      setPatientSuggestions([]);
-      return;
-    }
-    // Make it case-insensitive
-    const lowerName = name.toLowerCase();
-    // Filter local allPatients
-    const matched = allPatients.filter((p) =>
-      p.name.toLowerCase().includes(lowerName)
-    );
-
-    // Build suggestions with label = "Name - Phone"
-    const suggestions: { label: string; value: string }[] = matched.map((p) => ({
-      label: `${p.name} - ${p.phone}`,
-      value: p.id,
-    }));
-
-    setPatientSuggestions(suggestions);
-  };
-
-  // Whenever patientNameInput changes and we haven't locked onto a selected patient, filter suggestions
+  // Fetch patients from Medford Family DB
   useEffect(() => {
-    if (!selectedPatient) {
-      filterPatientSuggestions(patientNameInput);
+    const medfordRef = ref(dbMedford, 'patients');
+    const unsubscribe = onValue(medfordRef, (snapshot) => {
+      const data = snapshot.val();
+      const loaded: CombinedPatient[] = [];
+      if (data) {
+        for (const key in data) {
+          const rec: MedfordPatient = data[key];
+          loaded.push({
+            id: rec.patientId,
+            name: rec.name,
+            phone: rec.contact,
+            source: 'medford',
+            data: rec,
+          });
+        }
+      }
+      setMedfordPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Combined suggestions from both sources
+  useEffect(() => {
+    const allCombined = [...gautamiPatients, ...medfordPatients];
+    if (patientNameInput.length >= 2) {
+      // If a patient is selected and the input exactly matches, clear suggestions.
+      if (selectedPatient && patientNameInput === selectedPatient.name) {
+        setPatientSuggestions([]);
+      } else {
+        const lower = patientNameInput.toLowerCase();
+        const suggestions = allCombined.filter((p) =>
+          p.name.toLowerCase().includes(lower)
+        );
+        setPatientSuggestions(suggestions);
+      }
+    } else {
+      setPatientSuggestions([]);
     }
-  }, [patientNameInput, selectedPatient, allPatients]);
+  }, [patientNameInput, gautamiPatients, medfordPatients, selectedPatient]);
 
   /** -------------------------------------------
    *  SELECT PATIENT FROM DROPDOWN, AUTO-FILL FORM
    *  ------------------------------------------- */
-  const handleSelectPatient = async (patientId: string) => {
-    const foundPatient = allPatients.find((p) => p.id === patientId);
-    if (!foundPatient) return; // Safety check
-
-    // Mark patient as selected
-    setSelectedPatient({ id: foundPatient.id, data: foundPatient });
-
-    // Auto-fill form fields
-    setValue('name', foundPatient.name);
-    setValue('phone', foundPatient.phone || '');
-    setValue('age', foundPatient.age || 0);
-
-    const genderOption = GenderOptions.find(
-      (opt) => opt.value === foundPatient.gender
-    );
-    setValue('gender', genderOption || null);
-
-    setValue('address', foundPatient.address || '');
-    setPatientNameInput(foundPatient.name);
+  const handlePatientSuggestionClick = (patient: CombinedPatient) => {
+    setSelectedPatient(patient);
+    setValue('name', patient.name);
+    setValue('phone', patient.phone || '');
+    // For gender and address, populate if available (from Gautami)
+    if (patient.source === 'gautami') {
+      setValue('address', (patient.data as PatientRecord).address);
+      setValue('age', (patient.data as PatientRecord).age || 0);
+      setValue('gender', GenderOptions.find(opt => opt.value === (patient.data as PatientRecord).gender) || null);
+    } else {
+      // For Medford, we may have only gender available
+      setValue('gender', GenderOptions.find(opt => opt.value === (patient.data as MedfordPatient).gender) || null);
+    }
+    setPatientNameInput(patient.name);
     setPatientSuggestions([]);
-    toast.info(`Patient ${foundPatient.name} selected.`);
+    toast.info(`Patient ${patient.name} selected from ${patient.source.toUpperCase()}!`);
   };
 
-  /** --------------------------------------
-   *  WATCH DOCTOR FIELD TO AUTO-FETCH AMOUNT
-   *  -------------------------------------- */
+  /** -----------------------------------------
+   *  FETCH DOCTOR AMOUNT WHEN DOCTOR CHANGES
+   *  ----------------------------------------- */
   const selectedDoctor = watch('doctor');
   const fetchDoctorAmount = useCallback(
     async (doctorId: string) => {
@@ -538,13 +554,12 @@ const OPDBookingPage: React.FC = () => {
     }
   }, [selectedDoctor, setValue, fetchDoctorAmount]);
 
-  /** -----------------------------------------
-   *  SUBMISSION LOGIC
-   *  1. If an existing patient is selected,
-   *     push the OPD data under that patient.
-   *  2. Otherwise, create a new patient record,
-   *     generate a UHID, and push OPD data.
-   *  ----------------------------------------- */
+  /** ---------------------------------------------------------
+   *  SUBMISSION LOGIC:
+   *  1. If an existing patient is selected, push OPD data.
+   *  2. Otherwise, create a new patient record in Gautami DB (full details)
+   *     and a minimal record in Medford DB, then push OPD data.
+   *  --------------------------------------------------------- */
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
     try {
@@ -564,9 +579,17 @@ const OPDBookingPage: React.FC = () => {
       if (selectedPatient) {
         // Existing patient
         patientId = selectedPatient.id;
-        // Optionally update patient’s info here if needed...
+        // Optionally update patient info in Gautami DB here if needed...
+        const patientRef = ref(db, `patients/${patientId}`);
+        await update(patientRef, {
+          name: data.name,
+          phone: data.phone,
+          age: data.age,
+          address: data.address,
+          gender: data.gender?.value || ''
+        });
       } else {
-        // Create a new patient record with a generated UHID
+        // New patient: create full record in Gautami and minimal record in Medford
         const newPatientId = generatePatientId();
         const newPatientData = {
           name: data.name,
@@ -575,9 +598,18 @@ const OPDBookingPage: React.FC = () => {
           gender: data.gender?.value || '',
           address: data.address || '',
           createdAt: new Date().toISOString(),
-          uhid: newPatientId, // Save the generated patient id as UHID
+          uhid: newPatientId,
         };
         await set(ref(db, `patients/${newPatientId}`), newPatientData);
+        // Minimal record for Medford Family DB
+        await set(ref(dbMedford, `patients/${newPatientId}`), {
+          name: data.name,
+          contact: data.phone,
+          gender: data.gender?.value || '',
+          dob: "", // Set to empty or update with proper value if available
+          patientId: newPatientId,
+          hospitalName: "MEDFORD",
+        });
         patientId = newPatientId;
       }
 
@@ -623,7 +655,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** -------------
    *  FORM PREVIEW
-   *  ------------- */
+   *  -------------
+   */
   const handlePreview = () => {
     setPreviewData(watch());
   };
@@ -721,17 +754,21 @@ const OPDBookingPage: React.FC = () => {
                   {errors.name.message}
                 </p>
               )}
-
-              {/* Suggestions Dropdown: now includes Name - Phone */}
+              {/* Suggestions Dropdown with Tick Icons */}
               {patientSuggestions.length > 0 && !selectedPatient && (
                 <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto">
                   {patientSuggestions.map((suggestion) => (
                     <li
-                      key={suggestion.value}
-                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                      onClick={() => handleSelectPatient(suggestion.value)}
+                      key={suggestion.id}
+                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
+                      onClick={() => handlePatientSuggestionClick(suggestion)}
                     >
-                      {suggestion.label}
+                      <span>{`${suggestion.name} - ${suggestion.phone || ""}`}</span>
+                      {suggestion.source === "gautami" ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
                     </li>
                   ))}
                 </ul>
