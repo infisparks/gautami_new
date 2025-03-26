@@ -1,9 +1,8 @@
 "use client";
-
 import React, { useState, useEffect } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { db } from '../../lib/firebase'; // <-- adjust path as needed
-import { ref, push, update, onValue } from 'firebase/database';
+import { ref, push, update, onValue, set } from 'firebase/database';
 import Head from 'next/head';
 import {
   FaUser,
@@ -21,12 +20,13 @@ import 'react-toastify/dist/ReactToastify.css';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
+import IPDSignaturePDF from './ipdsignaturepdf'; // <-- import the separate PDF component
 
 /** ---------------------------
  *   TYPE & CONSTANT DEFINITIONS
  *  ---------------------------
  */
-interface IPDFormInput {
+export interface IPDFormInput {
   /** Basic Patient Info */
   name: string;
   phone: string;
@@ -81,6 +81,16 @@ function formatAMPM(date: Date): string {
   hours = hours ? hours : 12; // the hour '0' should be '12'
   minutes = minutes < 10 ? '0' + minutes : minutes;
   return `${hours}:${minutes} ${ampm}`;
+}
+
+/** Helper function to generate an 8-character alphanumeric ID */
+function generatePatientId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 10; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 /** Representation of local patient data */
@@ -146,7 +156,8 @@ const IPDBookingPage: React.FC = () => {
 
   /** -------------
    *   FETCH DOCTORS
-   *  ------------- */
+   *  -------------
+   */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
@@ -339,21 +350,23 @@ const IPDBookingPage: React.FC = () => {
         createdAt: new Date().toISOString(),
       };
 
-      // 3) Check if patient exists or create a new patient record
+      // 3) Check if patient exists or create a new patient record with an 8-digit alphanumeric id.
+      //    Also save the generated patient id as a UHID.
       let patientId: string;
       if (selectedPatient) {
         patientId = selectedPatient.id;
       } else {
-        const newPatientRef = push(ref(db, 'patients'));
-        await update(newPatientRef, {
+        const newPatientId = generatePatientId();
+        await set(ref(db, `patients/${newPatientId}`), {
           name: data.name,
           phone: data.phone,
           gender: data.gender?.value || '',
           age: data.age,
           address: data.address || '',
           createdAt: new Date().toISOString(),
+          uhid: newPatientId, // Save the generated patient id as UHID
         });
-        patientId = newPatientRef.key as string;
+        patientId = newPatientId;
       }
 
       // 4) Push the IPD record under the patient
@@ -692,7 +705,9 @@ const IPDBookingPage: React.FC = () => {
                     <Select
                       {...field}
                       options={beds}
-                      placeholder={beds.length > 0 ? 'Select Bed' : 'No Beds Available'}
+                      placeholder={
+                        beds.length > 0 ? 'Select Bed' : 'No Beds Available'
+                      }
                       classNamePrefix="react-select"
                       className={errors.bed ? 'border-red-500' : ''}
                       onChange={(val) => field.onChange(val)}
@@ -814,11 +829,13 @@ const IPDBookingPage: React.FC = () => {
                     </p>
                     {previewData.relativeAddress && (
                       <p>
-                        <strong>Relative Address:</strong> {previewData.relativeAddress}
+                        <strong>Relative Address:</strong>{' '}
+                        {previewData.relativeAddress}
                       </p>
                     )}
                     <p>
-                      <strong>Admission Date:</strong> {previewData.date.toLocaleDateString()}
+                      <strong>Admission Date:</strong>{' '}
+                      {previewData.date.toLocaleDateString()}
                     </p>
                     <p>
                       <strong>Admission Time:</strong> {previewData.time}
@@ -835,21 +852,26 @@ const IPDBookingPage: React.FC = () => {
                     )}
                     {previewData.doctor && (
                       <p>
-                        <strong>Under Care of Doctor:</strong> {previewData.doctor.label}
+                        <strong>Under Care of Doctor:</strong>{' '}
+                        {previewData.doctor.label}
                       </p>
                     )}
                     {previewData.referDoctor && (
                       <p>
-                        <strong>Referral Doctor:</strong> {previewData.referDoctor}
+                        <strong>Referral Doctor:</strong>{' '}
+                        {previewData.referDoctor}
                       </p>
                     )}
                     {previewData.admissionType && (
                       <p>
-                        <strong>Admission Type:</strong> {previewData.admissionType.label}
+                        <strong>Admission Type:</strong>{' '}
+                        {previewData.admissionType.label}
                       </p>
                     )}
                   </div>
-                  <div className="mt-6 flex justify-end space-x-4">
+
+                  {/* Action Buttons */}
+                  <div className="mt-6 flex flex-wrap gap-4 justify-end">
                     <button
                       type="button"
                       onClick={() => setPreviewData(null)}
@@ -857,6 +879,10 @@ const IPDBookingPage: React.FC = () => {
                     >
                       Cancel
                     </button>
+
+                    {/* Download Letter Button using separate component */}
+                    {previewData && <IPDSignaturePDF data={previewData} />}
+
                     <button
                       type="submit"
                       className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 ${

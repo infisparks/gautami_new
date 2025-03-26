@@ -2,67 +2,68 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-// import { yupResolver } from "@hookform/resolvers/yup"; // Ensure this import is present
+// import { yupResolver } from "@hookform/resolvers/yup";
 // import * as yup from "yup";
 import { db } from "../../lib/firebase";
-import { ref, push, set } from "firebase/database";
+import { ref, push, set, onValue, update } from "firebase/database";
 import Head from "next/head";
 import {
   AiOutlineUser,
-  AiOutlineCalendar,
+  AiOutlinePhone,
   AiOutlineFieldBinary,
+  AiOutlineCalendar,
   AiOutlineFileText,
 } from "react-icons/ai";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-// TypeScript Interface for Form Inputs
+// Interfaces for form inputs and Firebase storage
+
 interface IMortalityReportInput {
+  // Personal Details
   name: string;
+  phone: string;
+  age?: number;
+  address: string;
+  gender: string;
+  // Mortality-specific Details
   admissionDate: string;
-  age: number;
   dateOfDeath: string;
   medicalFindings: string;
 }
 
-// TypeScript Interface for Data to be Stored in Firebase
-interface IFirebaseMortalityReport extends IMortalityReportInput {
+interface IFirebaseMortalityReport {
+  admissionDate: string;
+  dateOfDeath: string;
+  medicalFindings: string;
   timeSpanDays: number;
   timestamp: number;
 }
 
-// Yup Validation Schema
-// const mortalityReportSchema = yup
-//   .object({
-//     name: yup
-//       .string()
-//       .required("Patient name is required")
-//       .matches(/^[A-Za-z\s]+$/, "Name can only contain letters and spaces"),
-//     admissionDate: yup
-//       .date()
-//       .typeError("Admission date must be a valid date")
-//       .max(new Date(), "Admission date cannot be in the future")
-//       .required("Admission date is required"),
-//     age: yup
-//       .number()
-//       .typeError("Age must be a number")
-//       .positive("Age must be positive")
-//       .integer("Age must be an integer")
-//       .required("Age is required"),
-//     dateOfDeath: yup
-//       .date()
-//       .typeError("Date of death must be a valid date")
-//       .min(yup.ref("admissionDate"), "Date of death cannot be before admission date")
-//       .max(new Date(), "Date of death cannot be in the future")
-//       .required("Date of death is required"),
-//     medicalFindings: yup
-//       .string()
-//       .required("Medical findings are required")
-//       .min(10, "Medical findings must be at least 10 characters"),
-//   })
-//   .required();
+// Patient record interface – personal details stored outside mortality node
+interface PatientRecord {
+  uhid: string;
+  name: string;
+  phone: string;
+  age?: number;
+  address: string;
+  gender: string;
+  createdAt: number;
+  ipd?: any;
+  mortality?: Record<string, IFirebaseMortalityReport>;
+}
+
+// Helper function to generate a 10-character alphanumeric UHID
+function generatePatientId(): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let result = "";
+  for (let i = 0; i < 10; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
 
 const MortalityReportPage: React.FC = () => {
   const {
@@ -70,59 +71,170 @@ const MortalityReportPage: React.FC = () => {
     handleSubmit,
     formState: { errors },
     reset,
+    setValue,
   } = useForm<IMortalityReportInput>({
-    // resolver: yupResolver(mortalityReportSchema), // ✅ Added resolver here
+    // resolver: yupResolver(mortalityReportSchema),
     defaultValues: {
       name: "",
-      admissionDate: "",
+      phone: "",
       age: undefined,
-      dateOfDeath: new Date().toISOString().split("T")[0], // Current date
+      address: "",
+      gender: "",
+      admissionDate: "",
+      dateOfDeath: new Date().toISOString().split("T")[0],
       medicalFindings: "",
     },
   });
 
   const [loading, setLoading] = useState(false);
 
+  // --- Auto-Complete for Patient Name ---
+  const [allPatients, setAllPatients] = useState<PatientRecord[]>([]);
+  const [patientNameInput, setPatientNameInput] = useState("");
+  const [patientSuggestions, setPatientSuggestions] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const [selectedPatient, setSelectedPatient] = useState<{
+    id: string;
+    data: PatientRecord;
+  } | null>(null);
+  const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
+  // Load existing patient records from Firebase
+  useEffect(() => {
+    const patientsRef = ref(db, "patients");
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val();
+      const loaded: PatientRecord[] = [];
+      if (data) {
+        for (const key in data) {
+          loaded.push({ uhid: key, ...data[key] });
+        }
+      }
+      setAllPatients(loaded);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Filter suggestions based on patient name input (min. 2 characters)
+  useEffect(() => {
+    if (patientNameInput.length >= 2) {
+      const lower = patientNameInput.toLowerCase();
+      const suggestions = allPatients
+        .filter((p) => p.name.toLowerCase().includes(lower))
+        .map((p) => ({
+          label: `${p.name} - ${p.phone}`,
+          value: p.uhid,
+        }));
+      setPatientSuggestions(suggestions);
+    } else {
+      setPatientSuggestions([]);
+    }
+  }, [patientNameInput, allPatients]);
+
+  // When a suggestion is clicked, auto-fill the personal details
+  const handlePatientSuggestionClick = (uhid: string) => {
+    const found = allPatients.find((p) => p.uhid === uhid);
+    if (!found) return;
+    setSelectedPatient({ id: found.uhid, data: found });
+    setValue("name", found.name);
+    setValue("phone", found.phone);
+    setValue("age", found.age);
+    setValue("address", found.address);
+    setValue("gender", found.gender);
+    setPatientNameInput(found.name);
+    setPatientSuggestions([]);
+    toast.info(`Patient ${found.name} selected.`);
+  };
+
+  // Close suggestion dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        patientSuggestionBoxRef.current &&
+        !patientSuggestionBoxRef.current.contains(event.target as Node)
+      ) {
+        setPatientSuggestions([]);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // --- onSubmit Handler ---
   const onSubmit: SubmitHandler<IMortalityReportInput> = async (data) => {
     setLoading(true);
     try {
-      // Parse dates
-      const admissionDate = new Date(data.admissionDate);
-      const dateOfDeath = new Date(data.dateOfDeath);
-
-      // Calculate time span in days
-      const timeSpanMs = dateOfDeath.getTime() - admissionDate.getTime();
+      // Parse the admission and death dates
+      const admissionDateObj = new Date(data.admissionDate);
+      const dateOfDeathObj = new Date(data.dateOfDeath);
+      const timeSpanMs = dateOfDeathObj.getTime() - admissionDateObj.getTime();
       const timeSpanDays = Math.floor(timeSpanMs / (1000 * 60 * 60 * 24));
 
-      // Prepare data to store
-      const reportData: IFirebaseMortalityReport = {
-        ...data,
+      const mortalityData: IFirebaseMortalityReport = {
+        admissionDate: data.admissionDate,
+        dateOfDeath: data.dateOfDeath,
+        medicalFindings: data.medicalFindings,
         timeSpanDays,
         timestamp: Date.now(),
       };
 
-      // Push data to Firebase
-      const mortalityReportsRef = ref(db, "mortalityReports");
-      const newReportRef = push(mortalityReportsRef);
-      await set(newReportRef, reportData);
+      let uhid: string;
+      if (selectedPatient) {
+        // Update existing patient record with personal details
+        uhid = selectedPatient.id;
+        const patientRef = ref(db, `patients/${uhid}`);
+        await update(patientRef, {
+          name: data.name,
+          phone: data.phone,
+          age: data.age,
+          address: data.address,
+          gender: data.gender,
+        });
+      } else {
+        // Create new patient record with generated UHID
+        uhid = generatePatientId();
+        await set(ref(db, `patients/${uhid}`), {
+          name: data.name,
+          phone: data.phone,
+          age: data.age,
+          address: data.address,
+          gender: data.gender,
+          createdAt: Date.now(),
+          uhid: uhid,
+          ipd: {},
+        });
+      }
 
-      // Success notification
-      toast.success("Mortality report submitted successfully!", {
+      // Save mortality details under the patient's record
+      const mortalityRef = ref(db, `patients/${uhid}/mortality`);
+      const newMortalityRef = push(mortalityRef);
+      await set(newMortalityRef, mortalityData);
+
+      toast.success("Mortality report saved successfully!", {
         position: "top-right",
         autoClose: 5000,
       });
 
-      // Reset form with default date of death as current date
+      // Reset the form; dateOfDeath resets to current date
       reset({
         name: "",
-        admissionDate: "",
+        phone: "",
         age: undefined,
+        address: "",
+        gender: "",
+        admissionDate: "",
         dateOfDeath: new Date().toISOString().split("T")[0],
         medicalFindings: "",
       });
+      setPatientNameInput("");
+      setSelectedPatient(null);
+      setPatientSuggestions([]);
     } catch (error) {
-      console.error("Error submitting mortality report:", error);
-      toast.error("Failed to submit mortality report. Please try again.", {
+      console.error("Error saving mortality report:", error);
+      toast.error("Failed to save report. Please try again.", {
         position: "top-right",
         autoClose: 5000,
       });
@@ -150,54 +262,71 @@ const MortalityReportPage: React.FC = () => {
             {new Date().toLocaleString()}
           </div>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Patient Name */}
+            {/* Patient Name with Auto-Complete */}
             <div className="relative">
-              <label htmlFor="name" className="block text-gray-700 font-medium mb-1">
+              <label
+                htmlFor="name"
+                className="block text-gray-700 font-medium mb-1"
+              >
                 Patient Name <span className="text-red-500">*</span>
               </label>
               <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
               <input
                 id="name"
                 type="text"
-                {...register("name")}
+                value={patientNameInput}
+                onChange={(e) => {
+                  setPatientNameInput(e.target.value);
+                  setValue("name", e.target.value, { shouldValidate: true });
+                  setSelectedPatient(null);
+                }}
                 placeholder="Patient Name"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                  errors.name ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
               />
-              {errors.name && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.name.message}
-                </p>
+              {patientSuggestions.length > 0 && (
+                <ul
+                  ref={patientSuggestionBoxRef}
+                  className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
+                >
+                  {patientSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.value}
+                      onClick={() =>
+                        handlePatientSuggestionClick(suggestion.value)
+                      }
+                      className="px-4 py-2 hover:bg-red-100 cursor-pointer"
+                    >
+                      {suggestion.label}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
-            {/* Admission Date with Label */}
+            {/* Patient Phone */}
             <div className="relative">
-              <label htmlFor="admissionDate" className="block text-gray-700 font-medium mb-1">
-                Admission Date <span className="text-red-500">*</span>
+              <label
+                htmlFor="phone"
+                className="block text-gray-700 font-medium mb-1"
+              >
+                Phone <span className="text-red-500">*</span>
               </label>
-              <AiOutlineCalendar className="absolute top-9 left-3 text-gray-400" />
+              <AiOutlinePhone className="absolute top-9 left-3 text-gray-400" />
               <input
-                id="admissionDate"
-                type="date"
-                {...register("admissionDate")}
-                placeholder="Admission Date"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                  errors.admissionDate ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
-                max={new Date().toISOString().split("T")[0]} // Prevent future dates
+                id="phone"
+                type="text"
+                {...register("phone")}
+                placeholder="Patient Phone Number"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
               />
-              {errors.admissionDate && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.admissionDate.message}
-                </p>
-              )}
             </div>
 
             {/* Age */}
             <div className="relative">
-              <label htmlFor="age" className="block text-gray-700 font-medium mb-1">
+              <label
+                htmlFor="age"
+                className="block text-gray-700 font-medium mb-1"
+              >
                 Age <span className="text-red-500">*</span>
               </label>
               <AiOutlineFieldBinary className="absolute top-9 left-3 text-gray-400" />
@@ -206,21 +335,75 @@ const MortalityReportPage: React.FC = () => {
                 type="number"
                 {...register("age", { valueAsNumber: true })}
                 placeholder="Age"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                  errors.age ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
                 min="0"
               />
-              {errors.age && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.age.message}
-                </p>
-              )}
             </div>
 
-            {/* Date of Death with Label */}
+            {/* Address */}
             <div className="relative">
-              <label htmlFor="dateOfDeath" className="block text-gray-700 font-medium mb-1">
+              <label
+                htmlFor="address"
+                className="block text-gray-700 font-medium mb-1"
+              >
+                Address <span className="text-red-500">*</span>
+              </label>
+              <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
+              <input
+                id="address"
+                type="text"
+                {...register("address")}
+                placeholder="Address"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+              />
+            </div>
+
+            {/* Gender (Drop-Down) */}
+            <div className="relative">
+              <label
+                htmlFor="gender"
+                className="block text-gray-700 font-medium mb-1"
+              >
+                Gender <span className="text-red-500">*</span>
+              </label>
+              <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
+              <select
+                id="gender"
+                {...register("gender")}
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+              >
+                <option value="">Select Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {/* Admission Date */}
+            <div className="relative">
+              <label
+                htmlFor="admissionDate"
+                className="block text-gray-700 font-medium mb-1"
+              >
+                Admission Date <span className="text-red-500">*</span>
+              </label>
+              <AiOutlineCalendar className="absolute top-9 left-3 text-gray-400" />
+              <input
+                id="admissionDate"
+                type="date"
+                {...register("admissionDate")}
+                placeholder="Admission Date"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                max={new Date().toISOString().split("T")[0]}
+              />
+            </div>
+
+            {/* Date of Death */}
+            <div className="relative">
+              <label
+                htmlFor="dateOfDeath"
+                className="block text-gray-700 font-medium mb-1"
+              >
                 Date of Death <span className="text-red-500">*</span>
               </label>
               <AiOutlineCalendar className="absolute top-9 left-3 text-gray-400" />
@@ -229,21 +412,17 @@ const MortalityReportPage: React.FC = () => {
                 type="date"
                 {...register("dateOfDeath")}
                 placeholder="Date of Death"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                  errors.dateOfDeath ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
-                max={new Date().toISOString().split("T")[0]} // Prevent future dates
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                max={new Date().toISOString().split("T")[0]}
               />
-              {errors.dateOfDeath && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.dateOfDeath.message}
-                </p>
-              )}
             </div>
 
             {/* Medical Findings */}
             <div className="relative">
-              <label htmlFor="medicalFindings" className="block text-gray-700 font-medium mb-1">
+              <label
+                htmlFor="medicalFindings"
+                className="block text-gray-700 font-medium mb-1"
+              >
                 Medical Findings <span className="text-red-500">*</span>
               </label>
               <AiOutlineFileText className="absolute top-9 left-3 text-gray-400" />
@@ -251,15 +430,8 @@ const MortalityReportPage: React.FC = () => {
                 id="medicalFindings"
                 {...register("medicalFindings")}
                 placeholder="Medical Findings"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 h-32 resize-none ${
-                  errors.medicalFindings ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
+                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 h-32 resize-none transition duration-200"
               />
-              {errors.medicalFindings && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.medicalFindings.message}
-                </p>
-              )}
             </div>
 
             {/* Submit Button */}

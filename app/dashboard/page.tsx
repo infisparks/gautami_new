@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { db } from '../../lib/firebase';
 import { ref, onValue, DataSnapshot } from 'firebase/database';
 import Head from 'next/head';
-import { format, isToday, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -19,6 +19,7 @@ import {
   AiOutlineCalendar,
   AiOutlineFileText,
   AiOutlineSearch,
+  AiOutlinePhone,
 } from 'react-icons/ai';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -28,6 +29,8 @@ import { Dialog } from '@headlessui/react';
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
+// ----- Type Definitions -----
+
 // Doctor Interface
 interface Doctor {
   name: string;
@@ -36,15 +39,36 @@ interface Doctor {
   specialist?: string;
 }
 
-// OPD Data Structure
+// OPD Appointment Data Structure (from nested patient.opd)
 interface OPDData {
-  name: string;
-  phone: string;
-  date: string;
-  time: string;
-  doctor: string; // doctor ID
   amount?: number;
+  createdAt?: string;
+  date?: string;
+  time?: string;
+  doctor?: string; // doctor id
   serviceName?: string;
+}
+
+// IPD Appointment Data Structure (from patient.ipd)
+interface IPDData {
+  admissionType?: string;
+  age?: number | string;
+  bloodGroup?: string;
+  date?: string;
+  time?: string;
+  doctor?: string; // doctor id
+  dateOfBirth?: string;
+  dischargeDate?: string;
+  emergencyMobileNumber?: string;
+  gender?: string;
+  membershipType?: string;
+  paymentMode?: string;
+  paymentType?: string;
+  referralDoctor?: string;
+  roomType?: string;
+  amount?: number;
+  services?: IPDService[];
+  address?: string;
 }
 
 // IPD Service Structure
@@ -55,50 +79,48 @@ interface IPDService {
   status: string;
 }
 
-// IPD Data Structure
-interface IPDData {
-  name: string;
-  mobileNumber?: string;
-  emergencyMobileNumber?: string;
-  date: string;
-  time: string;
-  doctor: string; // doctor ID
-  admissionType: string;
-  age: number;
-  bloodGroup: string;
-  dateOfBirth: string;
-  dischargeDate: string;
-  gender: string;
-  membershipType: string;
-  paymentMode: string;
-  paymentType: string;
-  referralDoctor?: string;
-  roomType: string;
-  amount: number; // Assuming this includes services
-  services?: IPDService[];
+// Pathology Appointment Data Structure (from patient.pathology)
+interface PathologyData {
+  amount?: number;
+  bloodTestName?: string;
+  timestamp?: number;
 }
 
-// Pathology (Blood Test) Data Structure
-interface PathologyData {
+// Surgery Appointment Data Structure (from patient.surgery)
+interface SurgeryData {
+  finalDiagnosis?: string;
+  surgeryDate?: string;
+  surgeryTitle?: string;
+  timestamp?: number;
+}
+
+// Patient Record stored under "patients"
+interface PatientRecord {
+  uhid: string;
   name: string;
   phone: string;
-  bloodTestName: string;
-  amount: number;
-  timestamp: number;
-  age: number;
+  age?: number;
+  address: string;
+  gender: string;
+  createdAt: number | string;
+  opd?: Record<string, OPDData>;
+  ipd?: Record<string, IPDData>;
+  pathology?: Record<string, PathologyData>;
+  surgery?: Record<string, SurgeryData>;
 }
 
-// Unified Appointment Types
+// Base Appointment for unified view
 interface BaseAppointment {
   id: string;
   name: string;
   phone: string;
-  date: string;
+  date: string; // ISO string
   time: string;
-  doctor: string; // Resolved to Doctor name
-  appointmentType: 'OPD' | 'IPD' | 'Pathology';
+  doctor: string; // resolved doctor name (or N/A)
+  appointmentType: 'OPD' | 'IPD' | 'Pathology' | 'Surgery';
 }
 
+// Extended types
 interface OPDAppointment extends BaseAppointment {
   appointmentType: 'OPD';
   amount: number;
@@ -119,7 +141,7 @@ interface IPDAppointment extends BaseAppointment {
   paymentType: string;
   referralDoctor: string;
   roomType: string;
-  amount: number; // Assuming this includes services
+  amount: number;
   services: IPDService[];
 }
 
@@ -130,9 +152,16 @@ interface PathologyAppointment extends BaseAppointment {
   age: number;
 }
 
-type Appointment = OPDAppointment | IPDAppointment | PathologyAppointment;
+interface SurgeryAppointment extends BaseAppointment {
+  appointmentType: 'Surgery';
+  surgeryTitle: string;
+  finalDiagnosis: string;
+}
 
-// Helper function for currency formatting
+type Appointment = OPDAppointment | IPDAppointment | PathologyAppointment | SurgeryAppointment;
+
+// ----- Helper Functions -----
+
 const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
@@ -141,18 +170,44 @@ const formatCurrency = (amount: number): string => {
   }).format(amount);
 };
 
+const getDoctorName = (doctorId?: string, doctors?: { [key: string]: Doctor }): string => {
+  if (!doctorId || !doctors) return 'Unknown';
+  return doctors[doctorId]?.name || 'Unknown';
+};
+
+// Calculate total amounts from a given set of appointments (ignoring date filtering)
+const calculateTotalAmounts = (apps: Appointment[]) => {
+  let ipdTotal = 0;
+  let opdTotal = 0;
+  let pathologyTotal = 0;
+
+  apps.forEach((appointment) => {
+    if (appointment.appointmentType === 'IPD') {
+      ipdTotal += (appointment as IPDAppointment).amount;
+    } else if (appointment.appointmentType === 'OPD') {
+      opdTotal += (appointment as OPDAppointment).amount;
+    } else if (appointment.appointmentType === 'Pathology') {
+      pathologyTotal += (appointment as PathologyAppointment).amount;
+    }
+  });
+
+  return { ipdTotal, opdTotal, pathologyTotal };
+};
+
+// ----- Dashboard Component -----
+
 const DashboardPage: React.FC = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [filteredAppointments, setFilteredAppointments] = useState<Appointment[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isTodayFilter, setIsTodayFilter] = useState<boolean>(false);
+  const [selectedDate, setSelectedDate] = useState<string>('');
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
-  const [todayAmountIPD, setTodayAmountIPD] = useState<number>(0);
-  const [todayAmountOPD, setTodayAmountOPD] = useState<number>(0);
-  const [todayAmountPathology, setTodayAmountPathology] = useState<number>(0);
-  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
+  const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
+  const [totalAmountPathology, setTotalAmountPathology] = useState<number>(0);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -160,12 +215,6 @@ const DashboardPage: React.FC = () => {
 
   // Doctors data
   const [doctors, setDoctors] = useState<{ [key: string]: Doctor }>({});
-
-  // Helper function to get Doctor name from ID
-  const getDoctorName = (doctorId?: string): string => {
-    if (!doctorId) return 'Unknown';
-    return doctors[doctorId]?.name || 'Unknown';
-  };
 
   // Fetch doctors
   useEffect(() => {
@@ -182,99 +231,125 @@ const DashboardPage: React.FC = () => {
         : {};
       setDoctors(doctorsData);
     });
-
     return () => {
       unsubscribeDoctors();
     };
   }, []);
 
-  // Fetch all appointments once doctors are loaded
+  // Fetch all appointments from "patients" node and flatten nested appointments
   useEffect(() => {
-    if (Object.keys(doctors).length === 0) return;
+    const patientsRef = ref(db, 'patients');
+    const unsubscribePatients = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val();
+      let allAppointments: Appointment[] = [];
+      if (data) {
+        Object.entries(data).forEach(([uhid, patientData]: [string, any]) => {
+          const patient: PatientRecord = { uhid, ...patientData };
 
-    const bookingsRef = ref(db, 'bookings');
-    const ipdBookingsRef = ref(db, 'ipd_bookings');
-    const bloodTestsRef = ref(db, 'bloodTests');
-
-    let allAppointments: Appointment[] = [];
-
-    onValue(bookingsRef, (bookingsSnapshot) => {
-      const opdData = bookingsSnapshot.val() as Record<string, OPDData | undefined>;
-      const opdAppointments: OPDAppointment[] = opdData
-        ? Object.entries(opdData).map(([id, val]) => ({
-            id,
-            name: val?.name ?? '',
-            phone: val?.phone ?? '',
-            date: val?.date ?? '',
-            time: val?.time ?? '',
-            doctor: getDoctorName(val?.doctor),
-            appointmentType: 'OPD',
-            amount: val?.amount || 0,
-            serviceName: val?.serviceName,
-          }))
-        : [];
-
-      onValue(ipdBookingsRef, (ipdSnapshot) => {
-        const ipdData = ipdSnapshot.val() as Record<string, IPDData | undefined>;
-        const ipdAppointments: IPDAppointment[] = ipdData
-          ? Object.entries(ipdData).map(([id, val]) => ({
-              id,
-              name: val?.name ?? '',
-              phone: val?.mobileNumber || val?.emergencyMobileNumber || '',
-              date: val?.date ?? '',
-              time: val?.time ?? '',
-              doctor: getDoctorName(val?.doctor),
-              appointmentType: 'IPD',
-              admissionType: val?.admissionType ?? '',
-              age: val?.age ?? 0,
-              bloodGroup: val?.bloodGroup ?? '',
-              dateOfBirth: val?.dateOfBirth ?? '',
-              dischargeDate: val?.dischargeDate ?? '',
-              emergencyMobileNumber: val?.emergencyMobileNumber ?? '',
-              gender: val?.gender ?? '',
-              membershipType: val?.membershipType ?? '',
-              paymentMode: val?.paymentMode ?? '',
-              paymentType: val?.paymentType ?? '',
-              referralDoctor: val?.referralDoctor ?? '',
-              roomType: val?.roomType ?? '',
-              amount: val?.amount || 0, // Assuming 'amount' includes services
-              services: Array.isArray(val?.services) ? val?.services : [],
-            }))
-          : [];
-
-        onValue(bloodTestsRef, (bloodSnapshot) => {
-          const bloodData = bloodSnapshot.val() as Record<string, PathologyData | undefined>;
-          const pathologyAppointments: PathologyAppointment[] = bloodData
-            ? Object.entries(bloodData).map(([id, val]) => ({
-                id,
-                name: val?.name ?? '',
-                phone: val?.phone ?? '',
-                date: val?.timestamp ? new Date(val.timestamp).toISOString() : new Date().toISOString(),
-                time: '', // No time in pathology data
-                doctor: 'N/A', // If there's no doctor assigned in bloodTests
+          // OPD Appointments
+          if (patient.opd) {
+            Object.entries(patient.opd).forEach(([id, opdEntry]) => {
+              const appointment: OPDAppointment = {
+                id: `${uhid}_opd_${id}`,
+                name: patient.name,
+                phone: patient.phone,
+                date: opdEntry.date || '',
+                time: opdEntry.time || '-',
+                doctor: getDoctorName(opdEntry.doctor, doctors),
+                appointmentType: 'OPD',
+                amount: Number(opdEntry.amount) || 0,
+                serviceName: opdEntry.serviceName || '',
+              };
+              allAppointments.push(appointment);
+            });
+          }
+          // IPD Appointments
+          if (patient.ipd) {
+            Object.entries(patient.ipd).forEach(([id, ipdEntry]) => {
+              const appointment: IPDAppointment = {
+                id: `${uhid}_ipd_${id}`,
+                name: patient.name,
+                phone: patient.phone,
+                date: ipdEntry.date || '',
+                time: ipdEntry.time || '-',
+                doctor: getDoctorName(ipdEntry.doctor, doctors),
+                appointmentType: 'IPD',
+                admissionType: ipdEntry.admissionType || '',
+                age: Number(ipdEntry.age) || 0,
+                bloodGroup: ipdEntry.bloodGroup || '',
+                dateOfBirth: ipdEntry.dateOfBirth || '',
+                dischargeDate: ipdEntry.dischargeDate || '',
+                emergencyMobileNumber: ipdEntry.emergencyMobileNumber || '',
+                gender: ipdEntry.gender || '',
+                membershipType: ipdEntry.membershipType || '',
+                paymentMode: ipdEntry.paymentMode || '',
+                paymentType: ipdEntry.paymentType || '',
+                referralDoctor: ipdEntry.referralDoctor || '',
+                roomType: ipdEntry.roomType || '',
+                amount: Number(ipdEntry.amount) || 0,
+                services: Array.isArray(ipdEntry.services) ? ipdEntry.services : [],
+              };
+              allAppointments.push(appointment);
+            });
+          }
+          // Pathology Appointments
+          if (patient.pathology) {
+            Object.entries(patient.pathology).forEach(([id, pathologyEntry]) => {
+              const appointment: PathologyAppointment = {
+                id: `${uhid}_path_${id}`,
+                name: patient.name,
+                phone: patient.phone,
+                date: pathologyEntry.timestamp
+                  ? new Date(pathologyEntry.timestamp).toISOString()
+                  : new Date().toISOString(),
+                time: '',
+                doctor: 'N/A',
                 appointmentType: 'Pathology',
-                bloodTestName: val?.bloodTestName ?? '',
-                amount: val?.amount ?? 0,
-                age: val?.age ?? 0,
-              }))
-            : [];
-
-          allAppointments = [...opdAppointments, ...ipdAppointments, ...pathologyAppointments];
-          setAppointments(allAppointments);
-          setFilteredAppointments(allAppointments);
-          generateMonthsData(allAppointments);
-          calculateTodayAmounts(allAppointments); // Updated function
+                bloodTestName: pathologyEntry.bloodTestName || '',
+                amount: Number(pathologyEntry.amount) || 0,
+                age: Number(patient.age) || 0,
+              };
+              allAppointments.push(appointment);
+            });
+          }
+          // Surgery Appointments (optional)
+          if (patient.surgery) {
+            Object.entries(patient.surgery).forEach(([id, surgeryEntry]) => {
+              const appointment: SurgeryAppointment = {
+                id: `${uhid}_surg_${id}`,
+                name: patient.name,
+                phone: patient.phone,
+                date: surgeryEntry.surgeryDate || '',
+                time: '',
+                doctor: 'N/A',
+                appointmentType: 'Surgery',
+                surgeryTitle: surgeryEntry.surgeryTitle || '',
+                finalDiagnosis: surgeryEntry.finalDiagnosis || '',
+              };
+              allAppointments.push(appointment);
+            });
+          }
         });
-      });
+      }
+      setAppointments(allAppointments);
+      setFilteredAppointments(allAppointments);
+      generateMonthsData(allAppointments);
+      const totals = calculateTotalAmounts(allAppointments);
+      setTotalAmountIPD(totals.ipdTotal);
+      setTotalAmountOPD(totals.opdTotal);
+      setTotalAmountPathology(totals.pathologyTotal);
     });
+    return () => {
+      unsubscribePatients();
+    };
   }, [doctors]);
 
-  // Generate monthly data for charts
-  const generateMonthsData = (appointments: Appointment[]) => {
+  // Generate monthly data for charts (OPD & IPD)
+  const generateMonthsData = (apps: Appointment[]) => {
     const dataOPD: { [key: string]: number } = {};
     const dataIPD: { [key: string]: number } = {};
-
-    appointments.forEach((appointment) => {
+    apps.forEach((appointment) => {
+      if (!appointment.date) return;
       const parsedDate = parseISO(appointment.date);
       const month = format(parsedDate, 'MMMM');
       if (appointment.appointmentType === 'OPD') {
@@ -283,88 +358,56 @@ const DashboardPage: React.FC = () => {
         dataIPD[month] = (dataIPD[month] || 0) + 1;
       }
     });
-
     setMonthsDataOPD(dataOPD);
     setMonthsDataIPD(dataIPD);
   };
 
-  // Calculate today's amounts for IPD, OPD, and Pathology
-  const calculateTodayAmounts = (appointments: Appointment[]) => {
-    let ipdTotal = 0;
-    let opdTotal = 0;
-    let pathologyTotal = 0;
-
-    const todayDate = new Date();
-    const todayDateString = format(todayDate, 'yyyy-MM-dd');
-
-    appointments.forEach((appointment) => {
-      const appointmentDate = parseISO(appointment.date);
-      const appointmentDateFormatted = format(appointmentDate, 'yyyy-MM-dd');
-
-      if (appointmentDateFormatted === todayDateString) {
-        if (appointment.appointmentType === 'IPD') {
-          const ipd = appointment as IPDAppointment;
-          ipdTotal += ipd.amount; // Assuming 'amount' includes services
-        } else if (appointment.appointmentType === 'OPD') {
-          const opd = appointment as OPDAppointment;
-          opdTotal += opd.amount;
-        } else if (appointment.appointmentType === 'Pathology') {
-          const pathology = appointment as PathologyAppointment;
-          pathologyTotal += pathology.amount;
-        }
-      }
-    });
-
-    setTodayAmountIPD(ipdTotal);
-    setTodayAmountOPD(opdTotal);
-    setTodayAmountPathology(pathologyTotal);
-  };
-
-  // Apply all filters
+  // Apply filters
   const applyFilters = useCallback(
     (query: string, month: string, today: boolean, date: string) => {
-      let tempAppointments = [...appointments];
-
+      let temp = [...appointments];
       if (query) {
         const lowerQuery = query.toLowerCase();
-        tempAppointments = tempAppointments.filter(
-          (appointment) =>
-            appointment.name.toLowerCase().includes(lowerQuery) ||
-            appointment.phone.includes(query)
+        temp = temp.filter(
+          (app) =>
+            app.name.toLowerCase().includes(lowerQuery) ||
+            app.phone.includes(query)
         );
       }
-
       if (month !== 'All') {
-        tempAppointments = tempAppointments.filter((appointment) => {
-          const appointmentMonth = format(parseISO(appointment.date), 'MMMM');
-          return appointmentMonth === month;
+        temp = temp.filter((app) => {
+          const appMonth = format(parseISO(app.date), 'MMMM');
+          return appMonth === month;
         });
       }
-
-      if (today) {
-        tempAppointments = tempAppointments.filter((appointment) =>
-          isToday(parseISO(appointment.date))
+      if (today && date === '') {
+        // If "today" filter is applied without a specific date,
+        // we compare with the current system date.
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        temp = temp.filter(
+          (app) => format(parseISO(app.date), 'yyyy-MM-dd') === todayStr
         );
       }
-
       if (date) {
-        tempAppointments = tempAppointments.filter(
-          (appointment) => format(parseISO(appointment.date), 'yyyy-MM-dd') === date
+        temp = temp.filter(
+          (app) => format(parseISO(app.date), 'yyyy-MM-dd') === date
         );
       }
-
-      setFilteredAppointments(tempAppointments);
-      generateMonthsData(tempAppointments);
-      calculateTodayAmounts(tempAppointments);
+      setFilteredAppointments(temp);
+      generateMonthsData(temp);
+      const totals = calculateTotalAmounts(temp);
+      setTotalAmountIPD(totals.ipdTotal);
+      setTotalAmountOPD(totals.opdTotal);
+      setTotalAmountPathology(totals.pathologyTotal);
     },
     [appointments]
   );
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const query = e.target.value;
-      setSearchQuery(query);
-      applyFilters(query, selectedMonth, isTodayFilter, selectedDate);
+      const q = e.target.value;
+      setSearchQuery(q);
+      applyFilters(q, selectedMonth, isTodayFilter, selectedDate);
     },
     [selectedMonth, isTodayFilter, selectedDate, applyFilters]
   );
@@ -387,23 +430,27 @@ const DashboardPage: React.FC = () => {
   };
 
   const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const date = e.target.value;
-    setSelectedDate(date);
+    const d = e.target.value;
+    setSelectedDate(d);
     setIsTodayFilter(false);
     setSelectedMonth('All');
-    applyFilters(searchQuery, 'All', false, date);
+    applyFilters(searchQuery, 'All', false, d);
   };
 
-  const todayAppointments = appointments.filter((appointment) =>
-    isToday(parseISO(appointment.date))
-  );
+  // For "today" appointments display, we use current system date
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayAppointments = useMemo(() => {
+    return appointments.filter(
+      (app) => format(parseISO(app.date), 'yyyy-MM-dd') === todayStr
+    );
+  }, [appointments, todayStr]);
 
-  // Charts data
+  // Chart data for OPD and IPD
   const chartDataOPD = {
     labels: Object.keys(monthsDataOPD),
     datasets: [
       {
-        label: 'Number of OPD Appointments',
+        label: 'OPD Appointments',
         data: Object.values(monthsDataOPD),
         backgroundColor: 'rgba(79, 70, 229, 0.6)',
         borderColor: 'rgba(79, 70, 229, 1)',
@@ -416,7 +463,7 @@ const DashboardPage: React.FC = () => {
     labels: Object.keys(monthsDataIPD),
     datasets: [
       {
-        label: 'Number of IPD Appointments',
+        label: 'IPD Appointments',
         data: Object.values(monthsDataIPD),
         backgroundColor: 'rgba(229, 115, 115, 0.6)',
         borderColor: 'rgba(229, 115, 115, 1)',
@@ -440,7 +487,7 @@ const DashboardPage: React.FC = () => {
     <>
       <Head>
         <title>Dashboard - Hospital Appointments</title>
-        <meta name="description" content="View and manage all OPD, IPD, and Pathology appointments" />
+        <meta name="description" content="View and manage all OPD, IPD, Pathology, and Surgery appointments" />
       </Head>
 
       <ToastContainer />
@@ -472,7 +519,10 @@ const DashboardPage: React.FC = () => {
                   setSearchQuery('');
                   setFilteredAppointments(appointments);
                   generateMonthsData(appointments);
-                  calculateTodayAmounts(appointments);
+                  const totals = calculateTotalAmounts(appointments);
+                  setTotalAmountIPD(totals.ipdTotal);
+                  setTotalAmountOPD(totals.opdTotal);
+                  setTotalAmountPathology(totals.pathologyTotal);
                 }}
                 className={`px-4 py-2 rounded-lg border ${
                   !isTodayFilter && selectedMonth === 'All' && !selectedDate
@@ -488,7 +538,7 @@ const DashboardPage: React.FC = () => {
                   isTodayFilter ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600'
                 } focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200`}
               >
-                Today&apos;s Appointments
+                Today's Appointments
               </button>
             </div>
           </div>
@@ -550,7 +600,7 @@ const DashboardPage: React.FC = () => {
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today Appointments</p>
+                <p className="text-gray-600">Today's Appointments</p>
                 <p className="text-2xl font-bold text-indigo-600">{todayAppointments.length}</p>
               </div>
             </div>
@@ -566,39 +616,36 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Today's IPD Amount */}
+            {/* Total IPD Amount */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-green-100 rounded-full mr-4">
-                {/* You can choose a different icon for IPD */}
                 <AiOutlineFileText className="text-green-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today IPD Amount</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(todayAmountIPD)}</p>
+                <p className="text-gray-600">Total IPD Amount</p>
+                <p className="text-2xl font-bold text-green-600">{formatCurrency(totalAmountIPD)}</p>
               </div>
             </div>
 
-            {/* Today's OPD Amount */}
+            {/* Total OPD Amount */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-blue-100 rounded-full mr-4">
-                {/* You can choose a different icon for OPD */}
                 <AiOutlineFileText className="text-blue-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today OPD Amount</p>
-                <p className="text-2xl font-bold text-blue-600">{formatCurrency(todayAmountOPD)}</p>
+                <p className="text-gray-600">Total OPD Amount</p>
+                <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalAmountOPD)}</p>
               </div>
             </div>
 
-            {/* Today's Pathology Amount */}
+            {/* Total Pathology Amount */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-yellow-100 rounded-full mr-4">
-                {/* You can choose a different icon for Pathology */}
                 <AiOutlineFileText className="text-yellow-600 text-2xl" />
               </div>
               <div>
-                <p className="text-gray-600">Today Pathology Amount</p>
-                <p className="text-2xl font-bold text-yellow-600">{formatCurrency(todayAmountPathology)}</p>
+                <p className="text-gray-600">Total Pathology Amount</p>
+                <p className="text-2xl font-bold text-yellow-600">{formatCurrency(totalAmountPathology)}</p>
               </div>
             </div>
           </div>
@@ -628,7 +675,7 @@ const DashboardPage: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.time || '-'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {appointment.doctor.replace(/_/g, ' ').toUpperCase()}
+                        {appointment.doctor.toUpperCase()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.appointmentType}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -662,7 +709,7 @@ const DashboardPage: React.FC = () => {
                   responsive: true,
                   plugins: {
                     legend: {
-                      position: 'top' as const,
+                      position: 'top',
                     },
                     title: {
                       display: false,
@@ -685,7 +732,7 @@ const DashboardPage: React.FC = () => {
                   responsive: true,
                   plugins: {
                     legend: {
-                      position: 'top' as const,
+                      position: 'top',
                     },
                     title: {
                       display: false,
@@ -739,12 +786,12 @@ const DashboardPage: React.FC = () => {
                             </div>
                             <div className="mt-4 space-y-2">
                               <p><strong>Room Type:</strong> {ipd.roomType}</p>
-                              <p><strong>Service Amount:</strong> ₹{formatCurrency(ipd.amount)}</p>
+                              <p><strong>Service Amount:</strong> {formatCurrency(ipd.amount)}</p>
                               <strong>Services:</strong>
                               <ul className="list-disc list-inside space-y-1">
                                 {ipd.services.map((service, index) => (
                                   <li key={index} className="text-gray-700">
-                                    {service.serviceName} - ₹{service.amount} - {service.status}
+                                    {service.serviceName} - {formatCurrency(service.amount)} - {service.status}
                                   </li>
                                 ))}
                               </ul>
@@ -767,7 +814,7 @@ const DashboardPage: React.FC = () => {
                             <p><strong>Date:</strong> {format(parseISO(opd.date), 'dd MMM yyyy')}</p>
                             <p><strong>Time:</strong> {opd.time || '-'}</p>
                             <p><strong>Doctor:</strong> {opd.doctor.toUpperCase()}</p>
-                            <p><strong>Amount:</strong> ₹{formatCurrency(opd.amount)}</p>
+                            <p><strong>Amount:</strong> {formatCurrency(opd.amount)}</p>
                             <p><strong>Service Name:</strong> {opd.serviceName || '-'}</p>
                           </div>
                         );
@@ -786,8 +833,26 @@ const DashboardPage: React.FC = () => {
                             <p><strong>Phone:</strong> {path.phone}</p>
                             <p><strong>Date:</strong> {format(parseISO(path.date), 'dd MMM yyyy')}</p>
                             <p><strong>Blood Test Name:</strong> {path.bloodTestName}</p>
-                            <p><strong>Amount:</strong> ₹{formatCurrency(path.amount)}</p>
+                            <p><strong>Amount:</strong> {formatCurrency(path.amount)}</p>
                             <p><strong>Age:</strong> {path.age}</p>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
+
+                  {selectedAppointment.appointmentType === 'Surgery' && (
+                    <>
+                      <Dialog.Title className="text-2xl font-bold mb-4 text-gray-800">Surgery Appointment Details</Dialog.Title>
+                      {(() => {
+                        const surg = selectedAppointment as SurgeryAppointment;
+                        return (
+                          <div className="space-y-2">
+                            <p><strong>Name:</strong> {surg.name}</p>
+                            <p><strong>Phone:</strong> {surg.phone}</p>
+                            <p><strong>Date:</strong> {format(parseISO(surg.date), 'dd MMM yyyy')}</p>
+                            <p><strong>Surgery Title:</strong> {surg.surgeryTitle}</p>
+                            <p><strong>Final Diagnosis:</strong> {surg.finalDiagnosis}</p>
                           </div>
                         );
                       })()}
@@ -810,4 +875,3 @@ const DashboardPageWithProtection: React.FC = () => (
 );
 
 export default DashboardPageWithProtection;
-

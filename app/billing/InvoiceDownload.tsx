@@ -4,10 +4,8 @@ import React, { useRef } from "react";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas";
 import { Download } from "lucide-react";
-// Replace with your actual image import:
 import letterhead from "@/public/letterhead.png";
 
-// Firebase Storage imports (ensure Firebase is initialized in your project)
 import {
   getStorage,
   ref as storageRef,
@@ -40,10 +38,12 @@ interface BillingRecord {
   amount: number;
   roomType?: string;
   bed?: string;
-  createdAt?: string; // Registration Date/Time
+  // The key for displaying "Admit Date":
+  admitDate?: string;   // <--- We'll read this
+  createdAt?: string;   // fallback if needed
   services: ServiceItem[];
   payments: Payment[];
-  discount?: number; // discount in Rs
+  discount?: number;
 }
 
 /** ========== Component Props ========== **/
@@ -53,37 +53,48 @@ type InvoiceDownloadProps = {
 
 /**
  * InvoiceDownload
- * 
- * Renders buttons for downloading the invoice as a PDF and sending the invoice PDF on WhatsApp.
- * The WhatsApp button generates the PDF using jsPDF (by capturing a hidden invoice layout),
- * uploads it to Firebase Storage, retrieves the download URL, and posts that URL to the provided API.
+ *
+ * Generates and downloads (or sends via WhatsApp) an invoice PDF
+ * using a hidden off-screen layout.
  */
 export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   const invoiceRef = useRef<HTMLDivElement>(null);
 
-  // Generate PDF from the hidden invoice layout and return the jsPDF instance
+  // Helper function to format ISO date strings into a readable format.
+  const formatDate = (dateString: string) => {
+    const options: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    };
+    return new Date(dateString).toLocaleDateString(undefined, options);
+  };
+
+  // Capture the bill date when rendering the invoice
+  const billDate = new Date().toISOString();
+
+  /**
+   * generatePDF
+   *
+   * Renders the hidden invoice content into a PDF.
+   */
   const generatePDF = async (): Promise<jsPDF> => {
     if (!invoiceRef.current) throw new Error("Invoice element not found.");
-
-    // Wait briefly to ensure fonts and images are loaded
     await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Render the invoice layout to a canvas
     const canvas = await html2canvas(invoiceRef.current, {
       scale: 3,
       useCORS: true,
-      backgroundColor: null, // transparent background
+      backgroundColor: null,
     });
 
-    // Set up jsPDF (portrait, A4)
     const pdf = new jsPDF({
       orientation: "p",
       unit: "pt",
       format: "a4",
     });
 
-    const pdfWidth = 595; // A4 width in points
-    const pdfHeight = 842; // A4 height in points
+    const pdfWidth = 595;
+    const pdfHeight = 842;
     const topMargin = 120;
     const bottomMargin = 80;
     const sideMargin = 20;
@@ -93,17 +104,9 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
 
     let currentPos = 0;
     let pageCount = 0;
-
-    // Slice the tall canvas into chunks to fit on multiple PDF pages if necessary
     while (currentPos < fullContentHeightPts) {
       pageCount += 1;
-
-      // Add a new page if it's not the first one
-      if (pageCount > 1) {
-        pdf.addPage();
-      }
-
-      // OPTIONAL: Add your letterhead/watermark in the background
+      if (pageCount > 1) pdf.addPage();
       pdf.addImage(
         letterhead.src,
         "PNG",
@@ -114,12 +117,8 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
         "",
         "FAST"
       );
-
-      // Determine the portion of the canvas to capture
       const sourceY = Math.floor(currentPos / scaleRatio);
       const sourceHeight = Math.floor(contentHeight / scaleRatio);
-
-      // Create a temporary canvas to capture the chunk
       const pageCanvas = document.createElement("canvas");
       pageCanvas.width = canvas.width;
       pageCanvas.height = sourceHeight;
@@ -137,30 +136,24 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           sourceHeight
         );
       }
-
-      // Convert the chunk to a PNG data URL
       const chunkImgData = pageCanvas.toDataURL("image/png");
       const chunkHeightPts = sourceHeight * scaleRatio;
-
-      // Add the chunk to the PDF with side margins
       pdf.addImage(
         chunkImgData,
         "PNG",
-        sideMargin, // x
-        topMargin, // y
-        pdfWidth - 2 * sideMargin, // width
-        chunkHeightPts, // height
+        sideMargin,
+        topMargin,
+        pdfWidth - 2 * sideMargin,
+        chunkHeightPts,
         "",
         "FAST"
       );
-
       currentPos += contentHeight;
     }
-
     return pdf;
   };
 
-  // Handler for downloading the PDF locally
+  // Download as PDF
   const handleDownloadInvoice = async () => {
     try {
       const pdf = await generatePDF();
@@ -174,54 +167,38 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     }
   };
 
-  // Handler for sending the PDF on WhatsApp
+  // Send PDF on WhatsApp
   const handleSendPdfOnWhatsapp = async () => {
     try {
       const pdf = await generatePDF();
-
-      // Get the PDF as a Blob
       const pdfBlob = pdf.output("blob");
       if (!pdfBlob) throw new Error("Failed to generate PDF blob.");
-
-      // Upload the PDF blob to Firebase Storage
       const storage = getStorage();
       const storagePath = `invoices/invoice-${record.ipdId}-${Date.now()}.pdf`;
       const fileRef = storageRef(storage, storagePath);
       await uploadBytes(fileRef, pdfBlob);
-
-      // Retrieve the download URL for the uploaded PDF
       const downloadUrl = await getDownloadURL(fileRef);
-
-      // Format the mobile number (ensure it starts with "91")
       const formattedNumber = record.mobileNumber.startsWith("91")
         ? record.mobileNumber
         : `91${record.mobileNumber}`;
-
-      // Prepare the payload for the API call
       const payload = {
         token: "99583991572",
         number: formattedNumber,
-        imageUrl: downloadUrl, // field name remains as "imageUrl"
+        imageUrl: downloadUrl,
         caption:
           "Dear Patient, please find attached your invoice PDF for your recent visit. Thank you for choosing our services.",
       };
-
-      // Post the payload to the WhatsApp API endpoint
       const response = await fetch(
         "https://wa.medblisss.com/send-image-url",
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         }
       );
-
       if (!response.ok) {
         throw new Error("Failed to send the invoice on WhatsApp.");
       }
-
       alert("Invoice PDF sent successfully on WhatsApp!");
     } catch (error) {
       console.error(error);
@@ -229,7 +206,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     }
   };
 
-  // ========== Data & Layout Logic ==========
+  /** ========== Data & Layout Logic ========== **/
 
   // Group Hospital Services
   const groupedHospitalServices = Object.values(
@@ -297,23 +274,24 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     .reduce((sum, s) => sum + s.amount, 0);
 
   const discount = record.discount || 0;
-  const totalBill = hospitalServiceTotal + consultantChargeTotal - discount;
+  const subtotal = hospitalServiceTotal + consultantChargeTotal;
+  const netTotal = subtotal - discount;
+  const deposit = record.amount;
+  const dueAmount = netTotal > deposit ? netTotal - deposit : 0;
 
-  // ========== Render ==========
+  /** ========== Render ========== **/
   return (
     <div className="flex flex-col items-center">
-      {/* Button to send invoice PDF on WhatsApp */}
       <button
         onClick={handleSendPdfOnWhatsapp}
-        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition duration-300 flex items-center mb-4 text-[10px]"
+        className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition duration-300 flex items-center mb-4 text-xs"
       >
         Send Invoice PDF on WhatsApp
       </button>
 
-      {/* Button to download invoice as PDF */}
       <button
         onClick={handleDownloadInvoice}
-        className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition duration-300 flex items-center mb-4 text-[10px]"
+        className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition duration-300 flex items-center mb-4 text-xs"
       >
         <Download size={16} className="mr-1" />
         {record.dischargeDate
@@ -321,127 +299,68 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           : "Download Provisional Invoice"}
       </button>
 
-      {/* Hidden container for invoice (off-screen) */}
       <div
         ref={invoiceRef}
         style={{
           position: "absolute",
           left: "-9999px",
           top: 0,
-          width: "595px", // A4 width
+          width: "595px",
           backgroundColor: "transparent",
         }}
       >
-        {/* Invoice content */}
-        <div className="text-[10px] text-gray-800 p-4 bg-transparent">
-          {/* Combined Patient & Billing Info + Totals Card */}
-          <div className="my-2 p-2 rounded shadow-sm border border-gray-200">
-            <div className="flex justify-between">
-              <div>
-                <p>
-                  <strong>Patient Name:</strong> {record.name}
-                </p>
-                <p>
-                  <strong>Mobile No.:</strong> {record.mobileNumber}
-                </p>
-                <p>
-                  <strong>IPD ID:</strong> {record.ipdId}
-                </p>
-              </div>
-              <div>
-                <p>
-                  <strong>Deposit Amount:</strong> Rs.{" "}
-                  {record.amount.toLocaleString()}
-                </p>
-                <p>
-                  <strong>Bill Date:</strong> {new Date().toLocaleString()}
-                </p>
-                <p>
-                  <strong>Registration Date:</strong>{" "}
-                  {record.createdAt
-                    ? new Date(record.createdAt).toLocaleString()
-                    : new Date().toLocaleString()}
-                </p>
-                {record.dischargeDate && (
-                  <p>
-                    <strong>Discharge Date:</strong>{" "}
-                    {new Date(record.dischargeDate).toLocaleString()}
-                  </p>
-                )}
-              </div>
+        <div className="text-xs text-gray-800 p-4 bg-transparent">
+          {/* Invoice Header: Patient Details & Dates */}
+          <div className="flex justify-between mb-2">
+            <div>
+              <p>
+                <strong>Patient Name:</strong> {record.name}
+              </p>
+              <p>
+                <strong>Mobile No.:</strong> {record.mobileNumber}
+              </p>
+              <p>
+                <strong>IPD ID:</strong> {record.ipdId}
+              </p>
             </div>
-            {/* Totals in same card */}
-            <div className="mt-2 p-2 bg-gray-100 rounded">
-              <p className="flex justify-between">
-                <span>Hospital Services:</span>
-                <span>Rs. {hospitalServiceTotal.toLocaleString()}</span>
+            <div className="text-right">
+              <p>
+                <strong>Admit Date:</strong>{" "}
+                {record.admitDate
+                  ? formatDate(record.admitDate)
+                  : record.createdAt
+                  ? formatDate(record.createdAt)
+                  : "N/A"}
               </p>
-              <p className="flex justify-between">
-                <span>Consultant Charges:</span>
-                <span>Rs. {consultantChargeTotal.toLocaleString()}</span>
-              </p>
-              {discount > 0 && (
-                <p className="flex justify-between">
-                  <span>Discount:</span>
-                  <span>- Rs. {discount.toLocaleString()}</span>
+              {record.dischargeDate && (
+                <p>
+                  <strong>Discharge Date:</strong>{" "}
+                  {formatDate(record.dischargeDate)}
                 </p>
               )}
-              <hr className="my-1" />
-              <p className="flex justify-between font-semibold">
-                <span>Total Bill:</span>
-                <span>Rs. {totalBill.toLocaleString()}</span>
+              <p>
+                <strong>Bill Date:</strong> {formatDate(billDate)}
               </p>
             </div>
-          </div>
-
-          {/* Hospital Service Charges Table */}
-          <div className="my-2 align-middle justify-center">
-            <h3 className="font-semibold mb-2 text-[10px]">
-              Hospital Service Charges
-            </h3>
-            <table className="w-full text-[8px] justify-center align-middle">
-              <thead>
-                <tr className="bg-green-100 justify-center align-middle">
-                  <th className="p-1 text-left align-middle">Service</th>
-                  <th className="p-1 text-center align-middle">Qnty</th>
-                  <th className="p-1 text-right align-middle">Amount (Rs)</th>
-                  <th className="p-1 text-right align-middle">Total (Rs)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedHospitalServices.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="p-1">{item.serviceName}</td>
-                    <td className="p-1 text-center">{item.quantity}</td>
-                    <td className="p-1 text-right">
-                      {item.unitAmount.toLocaleString()}
-                    </td>
-                    <td className="p-1 text-right">
-                      {item.totalAmount.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
 
           {/* Consultant Charges Table */}
           <div className="my-4">
-            <h3 className="font-semibold mb-2 text-[10px]">
+            <h3 className="font-semibold mb-2 text-xs">
               Consultant Charges
             </h3>
             <table className="w-full text-[8px]">
               <thead>
                 <tr className="bg-green-100">
-                  <th className="p-1 text-left align-middle">Doctor Name</th>
-                  <th className="p-1 text-center align-middle">Visited</th>
-                  <th className="p-1 text-right align-middle">Amount (Rs)</th>
-                  <th className="p-1 text-right align-middle">Total (Rs)</th>
+                  <th className="p-1 text-left">Doctor Name</th>
+                  <th className="p-1 text-center">Visited</th>
+                  <th className="p-1 text-right">Unit (Rs)</th>
+                  <th className="p-1 text-right">Total (Rs)</th>
                 </tr>
               </thead>
               <tbody>
                 {groupedConsultantServices.map((item, idx) => (
-                  <tr key={idx}>
+                  <tr key={idx} className="border-t">
                     <td className="p-1">{item.doctorName}</td>
                     <td className="p-1 text-center">{item.quantity}</td>
                     <td className="p-1 text-right">
@@ -454,8 +373,73 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
                 ))}
               </tbody>
             </table>
+            <div className="mt-1 text-right font-semibold text-xs">
+              Consultant Charges Total: Rs.{" "}
+              {consultantChargeTotal.toLocaleString()}
+            </div>
           </div>
-          {/* ... Add more sections if needed ... */}
+
+          {/* Hospital Service Charges Table */}
+          <div className="my-2">
+            <h3 className="font-semibold mb-2 text-xs">
+              Hospital Service Charges
+            </h3>
+            <table className="w-full text-[8px]">
+              <thead>
+                <tr className="bg-green-100">
+                  <th className="p-1 text-left">Service</th>
+                  <th className="p-1 text-center">Qnty</th>
+                  <th className="p-1 text-right">Unit (Rs)</th>
+                  <th className="p-1 text-right">Total (Rs)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupedHospitalServices.map((item, idx) => (
+                  <tr key={idx} className="border-t">
+                    <td className="p-1">{item.serviceName}</td>
+                    <td className="p-1 text-center">{item.quantity}</td>
+                    <td className="p-1 text-right">
+                      {item.unitAmount.toLocaleString()}
+                    </td>
+                    <td className="p-1 text-right">
+                      {item.totalAmount.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-1 text-right font-semibold text-xs">
+              Hospital Services Total: Rs.{" "}
+              {hospitalServiceTotal.toLocaleString()}
+            </div>
+          </div>
+
+          {/* Final Summary Section */}
+          <div className="mt-4 p-2 bg-gray-100 rounded text-[9px]">
+            <p className="flex justify-between">
+              <span>Subtotal:</span>
+              <span>Rs. {subtotal.toLocaleString()}</span>
+            </p>
+            {discount > 0 && (
+              <p className="flex justify-between text-green-600 font-bold">
+                <span>Discount:</span>
+                <span>- Rs. {discount.toLocaleString()}</span>
+              </p>
+            )}
+            <hr className="my-1" />
+            <p className="flex justify-between font-bold">
+              <span>Net Total:</span>
+              <span>Rs. {netTotal.toLocaleString()}</span>
+            </p>
+            <p className="flex justify-between">
+              <span>Deposit Amount:</span>
+              <span>Rs. {deposit.toLocaleString()}</span>
+            </p>
+            <p className="flex justify-between text-red-600 font-bold">
+              <span>Due Amount:</span>
+              <span>Rs. {dueAmount.toLocaleString()}</span>
+            </p>
+          </div>
         </div>
       </div>
     </div>

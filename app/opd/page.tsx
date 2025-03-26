@@ -8,7 +8,8 @@ import {
   push,
   update,
   get,
-  onValue
+  onValue,
+  set
 } from 'firebase/database';
 import Head from 'next/head';
 import {
@@ -85,9 +86,20 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+/** Helper function to generate an 8-character alphanumeric UHID */
+function generatePatientId(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 10; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 /** ---------------
  *    MAIN COMPONENT
- *  --------------- */
+ *  ---------------
+ */
 const OPDBookingPage: React.FC = () => {
   const {
     register,
@@ -135,7 +147,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** ---------------------------
    *  SPEECH RECOGNITION COMMANDS
-   *  --------------------------- */
+   *  ---------------------------
+   */
   const commands = [
     // Name Commands
     {
@@ -390,7 +403,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** ---------------
    *   FETCH DOCTORS
-   *  --------------- */
+   *  ---------------
+   */
   useEffect(() => {
     const doctorsRef = ref(db, 'doctors');
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
@@ -529,7 +543,7 @@ const OPDBookingPage: React.FC = () => {
    *  1. If an existing patient is selected,
    *     push the OPD data under that patient.
    *  2. Otherwise, create a new patient record,
-   *     then push OPD data.
+   *     generate a UHID, and push OPD data.
    *  ----------------------------------------- */
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
@@ -552,7 +566,8 @@ const OPDBookingPage: React.FC = () => {
         patientId = selectedPatient.id;
         // Optionally update patient’s info here if needed...
       } else {
-        // Create a new patient record first
+        // Create a new patient record with a generated UHID
+        const newPatientId = generatePatientId();
         const newPatientData = {
           name: data.name,
           phone: data.phone,
@@ -560,11 +575,10 @@ const OPDBookingPage: React.FC = () => {
           gender: data.gender?.value || '',
           address: data.address || '',
           createdAt: new Date().toISOString(),
+          uhid: newPatientId, // Save the generated patient id as UHID
         };
-        const patientsRef = ref(db, 'patients');
-        const newPatientRef = push(patientsRef);
-        await update(newPatientRef, newPatientData);
-        patientId = newPatientRef.key!;
+        await set(ref(db, `patients/${newPatientId}`), newPatientData);
+        patientId = newPatientId;
       }
 
       // Push appointment data under patients/{patientId}/opd/{unique_opd_key}
@@ -633,7 +647,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** -----------
    *   RENDER UI
-   *  ----------- */
+   *  -----------
+   */
   return (
     <>
       <Head>
