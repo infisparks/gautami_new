@@ -1,6 +1,7 @@
 // lib/firebaseMedford.ts
 import { initializeApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
+import { getAuth } from "firebase/auth";
 
 const medfordFirebaseConfig = {
   apiKey: "AIzaSyAq6iz-1HFHk6EKxHkdt8c_2suJ91jJ5N8",
@@ -15,6 +16,9 @@ const medfordFirebaseConfig = {
 
 // Initialize a separate Firebase app instance for Medford Family
 const medfordApp = initializeApp(medfordFirebaseConfig, "Medford");
-const db = getDatabase(medfordApp);
 
-export { db };
+// Set up Database and Auth
+const db = getDatabase(medfordApp);
+const auth = getAuth(medfordApp);
+
+export { db, auth };

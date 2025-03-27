@@ -46,6 +46,7 @@ interface OPDData {
   time?: string;
   doctor?: string; // doctor id
   serviceName?: string;
+  paymentMethod?: string;
 }
 
 // IPD Appointment Data Structure (from patient.ipd)
@@ -66,6 +67,7 @@ interface IPDData {
   referralDoctor?: string;
   roomType?: string;
   amount?: number;
+  payments?: Record<string, { amount: number; paymentType: string; date?: string }>;
   services?: IPDService[];
   address?: string;
 }
@@ -83,6 +85,7 @@ interface PathologyData {
   amount?: number;
   bloodTestName?: string;
   timestamp?: number;
+  // (Assuming pathology payments do not have a breakdown)
 }
 
 // Surgery Appointment Data Structure (from patient.surgery)
@@ -124,6 +127,7 @@ interface OPDAppointment extends BaseAppointment {
   appointmentType: 'OPD';
   amount: number;
   serviceName?: string;
+  paymentMethod?: string;
 }
 
 interface IPDAppointment extends BaseAppointment {
@@ -141,6 +145,7 @@ interface IPDAppointment extends BaseAppointment {
   referralDoctor: string;
   roomType: string;
   amount: number;
+  payments?: Record<string, { amount: number; paymentType: string; date?: string }>;
   services: IPDService[];
 }
 
@@ -174,23 +179,72 @@ const getDoctorName = (doctorId?: string, doctors?: { [key: string]: Doctor }): 
   return doctors[doctorId]?.name || 'Unknown';
 };
 
-// Calculate total amounts from a given set of appointments (ignoring date filtering)
-const calculateTotalAmounts = (apps: Appointment[]) => {
-  let ipdTotal = 0;
-  let opdTotal = 0;
-  let pathologyTotal = 0;
+// Get the paid amount for an appointment (for IPD, sum payments if available)
+const getPaidAmount = (appointment: Appointment): number => {
+  if (appointment.appointmentType === 'IPD') {
+    const ipdApp = appointment as IPDAppointment;
+    if (ipdApp.payments) {
+      return Object.values(ipdApp.payments).reduce((sum, p) => sum + Number(p.amount), 0);
+    }
+    return ipdApp.amount || 0;
+  }
+  if (appointment.appointmentType === 'OPD' || appointment.appointmentType === 'Pathology') {
+    return appointment.amount || 0;
+  }
+  return 0;
+};
 
+// Calculate total amounts (sums) and counts from a set of appointments
+const calculateTotals = (apps: Appointment[]) => {
+  let totalOpdCount = 0,
+    totalOpdAmount = 0;
+  let totalIpdCount = 0,
+    totalIpdAmount = 0;
+  let totalPathologyCount = 0,
+    totalPathologyAmount = 0;
   apps.forEach((appointment) => {
-    if (appointment.appointmentType === 'IPD') {
-      ipdTotal += (appointment as IPDAppointment).amount;
-    } else if (appointment.appointmentType === 'OPD') {
-      opdTotal += (appointment as OPDAppointment).amount;
+    if (appointment.appointmentType === 'OPD') {
+      totalOpdCount++;
+      totalOpdAmount += appointment.amount || 0;
+    } else if (appointment.appointmentType === 'IPD') {
+      totalIpdCount++;
+      totalIpdAmount += getPaidAmount(appointment);
     } else if (appointment.appointmentType === 'Pathology') {
-      pathologyTotal += (appointment as PathologyAppointment).amount;
+      totalPathologyCount++;
+      totalPathologyAmount += appointment.amount || 0;
     }
   });
+  return { totalOpdCount, totalOpdAmount, totalIpdCount, totalIpdAmount, totalPathologyCount, totalPathologyAmount };
+};
 
-  return { ipdTotal, opdTotal, pathologyTotal };
+// Calculate payment breakdown (cash and online) for OPD and IPD appointments
+const calculatePaymentBreakdowns = (apps: Appointment[]) => {
+  let opdCash = 0,
+    opdOnline = 0,
+    ipdCash = 0,
+    ipdOnline = 0;
+  apps.forEach((appointment) => {
+    if (appointment.appointmentType === 'OPD') {
+      const opdApp = appointment as OPDAppointment;
+      if (opdApp.paymentMethod?.toLowerCase() === 'cash') {
+        opdCash += opdApp.amount;
+      } else if (opdApp.paymentMethod?.toLowerCase() === 'online') {
+        opdOnline += opdApp.amount;
+      }
+    } else if (appointment.appointmentType === 'IPD') {
+      const ipdApp = appointment as IPDAppointment;
+      if (ipdApp.payments) {
+        Object.values(ipdApp.payments).forEach((p) => {
+          if (p.paymentType.toLowerCase() === 'cash') {
+            ipdCash += Number(p.amount);
+          } else if (p.paymentType.toLowerCase() === 'online') {
+            ipdOnline += Number(p.amount);
+          }
+        });
+      }
+    }
+  });
+  return { opdCash, opdOnline, ipdCash, ipdOnline };
 };
 
 // ----- Dashboard Component -----
@@ -204,9 +258,20 @@ const DashboardPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
+  
+  // Totals for amounts (from calculateTotalAmounts are kept for backwards compatibility)
   const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
   const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
   const [totalAmountPathology, setTotalAmountPathology] = useState<number>(0);
+
+  // New state for counts and payment breakdowns
+  const [opdCount, setOpdCount] = useState<number>(0);
+  const [ipdCount, setIpdCount] = useState<number>(0);
+  const [pathologyCount, setPathologyCount] = useState<number>(0);
+  const [opdCash, setOpdCash] = useState<number>(0);
+  const [opdOnline, setOpdOnline] = useState<number>(0);
+  const [ipdCash, setIpdCash] = useState<number>(0);
+  const [ipdOnline, setIpdOnline] = useState<number>(0);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -258,6 +323,7 @@ const DashboardPage: React.FC = () => {
                 appointmentType: 'OPD',
                 amount: Number(opdEntry.amount) || 0,
                 serviceName: opdEntry.serviceName || '',
+                paymentMethod: opdEntry.paymentMethod || 'cash',
               };
               allAppointments.push(appointment);
             });
@@ -286,6 +352,7 @@ const DashboardPage: React.FC = () => {
                 referralDoctor: ipdEntry.referralDoctor || '',
                 roomType: ipdEntry.roomType || '',
                 amount: Number(ipdEntry.amount) || 0,
+                payments: ipdEntry.payments || {},
                 services: Array.isArray(ipdEntry.services) ? ipdEntry.services : [],
               };
               allAppointments.push(appointment);
@@ -333,10 +400,19 @@ const DashboardPage: React.FC = () => {
       setAppointments(allAppointments);
       setFilteredAppointments(allAppointments);
       generateMonthsData(allAppointments);
-      const totals = calculateTotalAmounts(allAppointments);
-      setTotalAmountIPD(totals.ipdTotal);
-      setTotalAmountOPD(totals.opdTotal);
-      setTotalAmountPathology(totals.pathologyTotal);
+      const totals = calculateTotals(allAppointments);
+      setTotalAmountIPD(totals.totalIpdAmount);
+      setTotalAmountOPD(totals.totalOpdAmount);
+      setTotalAmountPathology(totals.totalPathologyAmount);
+      setOpdCount(totals.totalOpdCount);
+      setIpdCount(totals.totalIpdCount);
+      setPathologyCount(totals.totalPathologyCount);
+      
+      const paymentBreakdown = calculatePaymentBreakdowns(allAppointments);
+      setOpdCash(paymentBreakdown.opdCash);
+      setOpdOnline(paymentBreakdown.opdOnline);
+      setIpdCash(paymentBreakdown.ipdCash);
+      setIpdOnline(paymentBreakdown.ipdOnline);
     });
     return () => {
       unsubscribePatients();
@@ -394,10 +470,18 @@ const DashboardPage: React.FC = () => {
       }
       setFilteredAppointments(temp);
       generateMonthsData(temp);
-      const totals = calculateTotalAmounts(temp);
-      setTotalAmountIPD(totals.ipdTotal);
-      setTotalAmountOPD(totals.opdTotal);
-      setTotalAmountPathology(totals.pathologyTotal);
+      const totals = calculateTotals(temp);
+      setTotalAmountIPD(totals.totalIpdAmount);
+      setTotalAmountOPD(totals.totalOpdAmount);
+      setTotalAmountPathology(totals.totalPathologyAmount);
+      setOpdCount(totals.totalOpdCount);
+      setIpdCount(totals.totalIpdCount);
+      setPathologyCount(totals.totalPathologyCount);
+      const paymentBreakdown = calculatePaymentBreakdowns(temp);
+      setOpdCash(paymentBreakdown.opdCash);
+      setOpdOnline(paymentBreakdown.opdOnline);
+      setIpdCash(paymentBreakdown.ipdCash);
+      setIpdOnline(paymentBreakdown.ipdOnline);
     },
     [appointments]
   );
@@ -518,10 +602,18 @@ const DashboardPage: React.FC = () => {
                   setSearchQuery('');
                   setFilteredAppointments(appointments);
                   generateMonthsData(appointments);
-                  const totals = calculateTotalAmounts(appointments);
-                  setTotalAmountIPD(totals.ipdTotal);
-                  setTotalAmountOPD(totals.opdTotal);
-                  setTotalAmountPathology(totals.pathologyTotal);
+                  const totals = calculateTotals(appointments);
+                  setTotalAmountIPD(totals.totalIpdAmount);
+                  setTotalAmountOPD(totals.totalOpdAmount);
+                  setTotalAmountPathology(totals.totalPathologyAmount);
+                  setOpdCount(totals.totalOpdCount);
+                  setIpdCount(totals.totalIpdCount);
+                  setPathologyCount(totals.totalPathologyCount);
+                  const paymentBreakdown = calculatePaymentBreakdowns(appointments);
+                  setOpdCash(paymentBreakdown.opdCash);
+                  setOpdOnline(paymentBreakdown.opdOnline);
+                  setIpdCash(paymentBreakdown.ipdCash);
+                  setIpdOnline(paymentBreakdown.ipdOnline);
                 }}
                 className={`px-4 py-2 rounded-lg border ${
                   !isTodayFilter && selectedMonth === 'All' && !selectedDate
@@ -593,7 +685,7 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Today's Appointments Count */}
+            {/* Today's Appointments */}
             <div className="bg-white shadow rounded-lg p-6 flex items-center">
               <div className="p-3 bg-indigo-100 rounded-full mr-4">
                 <AiOutlineCalendar className="text-indigo-600 text-2xl" />
@@ -615,37 +707,29 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Total IPD Amount */}
-            <div className="bg-white shadow rounded-lg p-6 flex items-center">
-              <div className="p-3 bg-green-100 rounded-full mr-4">
-                <AiOutlineFileText className="text-green-600 text-2xl" />
-              </div>
-              <div>
-                <p className="text-gray-600">Total IPD Amount</p>
-                <p className="text-2xl font-bold text-green-600">{formatCurrency(totalAmountIPD)}</p>
-              </div>
+            {/* OPD Appointments Card */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">OPD Appointments</h2>
+              <p className="text-gray-600">Total Count: <span className="font-bold">{opdCount}</span></p>
+              <p className="text-gray-600">Total Amount: <span className="font-bold text-indigo-600">{formatCurrency(totalAmountOPD)}</span></p>
+              <p className="text-gray-600">Cash: <span className="font-bold">{formatCurrency(opdCash)}</span></p>
+              <p className="text-gray-600">Online: <span className="font-bold">{formatCurrency(opdOnline)}</span></p>
             </div>
 
-            {/* Total OPD Amount */}
-            <div className="bg-white shadow rounded-lg p-6 flex items-center">
-              <div className="p-3 bg-blue-100 rounded-full mr-4">
-                <AiOutlineFileText className="text-blue-600 text-2xl" />
-              </div>
-              <div>
-                <p className="text-gray-600">Total OPD Amount</p>
-                <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalAmountOPD)}</p>
-              </div>
+            {/* IPD Appointments Card */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">IPD Appointments</h2>
+              <p className="text-gray-600">Total Count: <span className="font-bold">{ipdCount}</span></p>
+              <p className="text-gray-600">Total Amount: <span className="font-bold text-green-600">{formatCurrency(totalAmountIPD)}</span></p>
+              <p className="text-gray-600">Cash: <span className="font-bold">{formatCurrency(ipdCash)}</span></p>
+              <p className="text-gray-600">Online: <span className="font-bold">{formatCurrency(ipdOnline)}</span></p>
             </div>
 
-            {/* Total Pathology Amount */}
-            <div className="bg-white shadow rounded-lg p-6 flex items-center">
-              <div className="p-3 bg-yellow-100 rounded-full mr-4">
-                <AiOutlineFileText className="text-yellow-600 text-2xl" />
-              </div>
-              <div>
-                <p className="text-gray-600">Total Pathology Amount</p>
-                <p className="text-2xl font-bold text-yellow-600">{formatCurrency(totalAmountPathology)}</p>
-              </div>
+            {/* Pathology Appointments Card */}
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">Pathology Tests</h2>
+              <p className="text-gray-600">Total Count: <span className="font-bold">{pathologyCount}</span></p>
+              <p className="text-gray-600">Total Amount: <span className="font-bold text-yellow-600">{formatCurrency(totalAmountPathology)}</span></p>
             </div>
           </div>
 
@@ -660,6 +744,7 @@ const DashboardPage: React.FC = () => {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doctor</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                 </tr>
               </thead>
@@ -678,6 +763,9 @@ const DashboardPage: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appointment.appointmentType}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {formatCurrency(getPaidAmount(appointment))}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         <button
                           onClick={() => openModal(appointment)}
                           className="text-indigo-600 hover:text-indigo-900 underline"
@@ -689,7 +777,7 @@ const DashboardPage: React.FC = () => {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                    <td colSpan={8} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                       No appointments found.
                     </td>
                   </tr>
@@ -785,7 +873,19 @@ const DashboardPage: React.FC = () => {
                             </div>
                             <div className="mt-4 space-y-2">
                               <p><strong>Room Type:</strong> {ipd.roomType}</p>
-                              <p><strong>Service Amount:</strong> {formatCurrency(ipd.amount)}</p>
+                              <p><strong>Total Amount Paid:</strong> {formatCurrency(getPaidAmount(ipd))}</p>
+                              {ipd.payments && (
+                                <>
+                                  <strong>Payment Breakdown:</strong>
+                                  <ul className="list-disc list-inside space-y-1">
+                                    {Object.values(ipd.payments).map((p, index) => (
+                                      <li key={index} className="text-gray-700">
+                                        {p.paymentType}: {formatCurrency(p.amount)}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </>
+                              )}
                               <strong>Services:</strong>
                               <ul className="list-disc list-inside space-y-1">
                                 {ipd.services.map((service, index) => (
@@ -813,8 +913,9 @@ const DashboardPage: React.FC = () => {
                             <p><strong>Date:</strong> {format(parseISO(opd.date), 'dd MMM yyyy')}</p>
                             <p><strong>Time:</strong> {opd.time || '-'}</p>
                             <p><strong>Doctor:</strong> {opd.doctor.toUpperCase()}</p>
-                            <p><strong>Amount:</strong> {formatCurrency(opd.amount)}</p>
                             <p><strong>Service Name:</strong> {opd.serviceName || '-'}</p>
+                            <p><strong>Payment Method:</strong> {opd.paymentMethod}</p>
+                            <p><strong>Amount Paid:</strong> {formatCurrency(opd.amount)}</p>
                           </div>
                         );
                       })()}
@@ -832,7 +933,7 @@ const DashboardPage: React.FC = () => {
                             <p><strong>Phone:</strong> {path.phone}</p>
                             <p><strong>Date:</strong> {format(parseISO(path.date), 'dd MMM yyyy')}</p>
                             <p><strong>Blood Test Name:</strong> {path.bloodTestName}</p>
-                            <p><strong>Amount:</strong> {formatCurrency(path.amount)}</p>
+                            <p><strong>Amount Paid:</strong> {formatCurrency(path.amount)}</p>
                             <p><strong>Age:</strong> {path.age}</p>
                           </div>
                         );

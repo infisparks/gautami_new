@@ -5,245 +5,253 @@ import { db } from "../../lib/firebase";
 import { ref, onValue } from "firebase/database";
 import Head from "next/head";
 import { format, isSameDay, parseISO } from "date-fns";
-import { Search, Download, FileText, Calendar, User, Activity,  Users } from 'lucide-react';
+import {
+  Search,
+  Download,
+  FileText,
+  Calendar,
+  User,
+  Activity,
+  Users,
+} from "lucide-react";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
+import { Dialog } from "@headlessui/react";
 
-// Interfaces remain unchanged
-interface IBooking {
+// ----- INTERFACES -----
+
+interface IDoctorEntry {
+  department: string;
+  id: string;
+  ipdCharges?: Record<string, number>;
+  name: string;
+  opdCharge?: number;
+  specialist?: string;
+}
+
+export interface IAppointment {
   id: string;
   name: string;
   phone: string;
-  serviceName: string;
-  amount: number;
-  date: string;
-  doctor: string;
+  type: "OPD" | "IPD" | "Pathology" | "Surgery" | "Mortality";
+  date: string; // ISO date string (or parseable by date-fns)
+  doctor: string; // doctor's ID
 }
 
-interface IIPDBooking {
-  id: string;
-  name: string;
-  phone: string;
-  admissionType: string;
-  amount: number;
-  date: string;
-  doctor: string;
-}
-
-interface IBloodTest {
-  id: string;
-  name: string;
-  phone: string;
-  bloodTestName: string;
-  amount: number;
-  date: string;
-  doctor: string;
-}
-
-interface IDoctor {
-  id: string;
-  name: string;
-}
-
-interface IPatient {
-  id: string;
-  name: string;
-  phone: string;
-  type: string;
-  date: string;
-  doctor: string;
+interface IPatientRecord {
+  address?: string;
+  age?: number;
+  createdAt?: string | number;
+  gender?: string;
+  name?: string;
+  phone?: string;
+  uhid?: string;
+  opd?: Record<string, any>;
+  ipd?: Record<string, any>;
+  pathology?: Record<string, any>;
+  surgery?: Record<string, any>;
+  mortality?: Record<string, any>;
 }
 
 const PatientManagement: React.FC = () => {
-  const [bookings, setBookings] = useState<IBooking[]>([]);
-  const [ipdBookings, setIPDBookings] = useState<IIPDBooking[]>([]);
-  const [bloodTests, setBloodTests] = useState<IBloodTest[]>([]);
-  const [doctors, setDoctors] = useState<IDoctor[]>([]);
-  const [patients, setPatients] = useState<IPatient[]>([]);
-  const [filteredPatients, setFilteredPatients] = useState<IPatient[]>([]);
+  const [doctors, setDoctors] = useState<IDoctorEntry[]>([]);
+  const [appointments, setAppointments] = useState<IAppointment[]>([]);
+  const [filteredAppointments, setFilteredAppointments] = useState<IAppointment[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // Filter states
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedType, setSelectedType] = useState<string>("all");
   const [selectedDate, setSelectedDate] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(true);
 
-  // Fetch doctors
+  // Raw patient data keyed by uhid for full detail
+  const [rawPatients, setRawPatients] = useState<{ [uhid: string]: IPatientRecord }>({});
+
+  // Modal states
+  const [selectedPatientRecord, setSelectedPatientRecord] = useState<IPatientRecord | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+
+  // Doctor map
+  const doctorMap = useRef<{ [doctorId: string]: string }>({});
+
+  // ----- FETCH DOCTORS -----
   useEffect(() => {
     const doctorsRef = ref(db, "doctors");
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
-      const doctorsList: IDoctor[] = [];
       if (data) {
-        Object.keys(data).forEach((key) => {
-          doctorsList.push({
-            id: key,
-            name: data[key].name,
-          });
-        });
+        const docs: IDoctorEntry[] = Object.entries(data).map(([key, value]) => ({
+          ...(value as IDoctorEntry),
+          id: key,
+        }));
+        setDoctors(docs);
+      } else {
+        setDoctors([]);
       }
-      setDoctors(doctorsList);
     });
     return () => unsubscribe();
   }, []);
 
-  // Fetch bookings
+  // Build doctor map
   useEffect(() => {
-    const bookingsRef = ref(db, "bookings");
-    const unsubscribe = onValue(bookingsRef, (snapshot) => {
+    doctorMap.current = doctors.reduce((acc, doc) => {
+      acc[doc.id] = doc.name;
+      return acc;
+    }, {} as { [key: string]: string });
+  }, [doctors]);
+
+  // ----- FETCH PATIENTS & FLATTEN APPOINTMENTS -----
+  useEffect(() => {
+    const patientsRef = ref(db, "patients");
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
       const data = snapshot.val();
-      const bookingsList: IBooking[] = [];
+      const allAppointments: IAppointment[] = [];
+      const raw: { [uhid: string]: IPatientRecord } = {};
+
       if (data) {
-        Object.keys(data).forEach((key) => {
-          bookingsList.push({
-            id: key,
-            name: data[key].name,
-            phone: data[key].phone,
-            serviceName: data[key].serviceName,
-            amount: data[key].amount,
-            date: data[key].date,
-            doctor: data[key].doctor,
-          });
+        Object.entries(data).forEach(([uhid, patientDataRaw]) => {
+          const patientData = patientDataRaw as IPatientRecord;
+          raw[uhid] = patientData;
+
+          const name = patientData.name || "Unknown";
+          const phone = patientData.phone || "";
+
+          // Flatten OPD
+          if (patientData.opd) {
+            Object.entries(patientData.opd).forEach(([opdKey, opdVal]) => {
+              allAppointments.push({
+                id: `${uhid}_${opdKey}`,
+                name,
+                phone,
+                type: "OPD",
+                date: opdVal.date || new Date().toISOString(),
+                doctor: opdVal.doctor || "",
+              });
+            });
+          }
+
+          // Flatten IPD
+          if (patientData.ipd) {
+            Object.entries(patientData.ipd).forEach(([ipdKey, ipdVal]) => {
+              allAppointments.push({
+                id: `${uhid}_${ipdKey}`,
+                name,
+                phone,
+                type: "IPD",
+                date: ipdVal.date || new Date().toISOString(),
+                doctor: ipdVal.doctor || "",
+              });
+            });
+          }
+
+          // Flatten Pathology
+          if (patientData.pathology) {
+            Object.entries(patientData.pathology).forEach(([pathKey, pathVal]) => {
+              const dateVal = pathVal.createdAt || pathVal.timestamp || new Date().toISOString();
+              const finalDate =
+                typeof dateVal === "number" ? new Date(dateVal).toISOString() : dateVal;
+
+              allAppointments.push({
+                id: `${uhid}_${pathKey}`,
+                name,
+                phone,
+                type: "Pathology",
+                date: finalDate,
+                doctor: pathVal.doctor || "",
+              });
+            });
+          }
+
+          // Flatten Surgery
+          if (patientData.surgery) {
+            Object.entries(patientData.surgery).forEach(([surgKey, surgVal]) => {
+              const dateStr = surgVal.surgeryDate
+                ? `${surgVal.surgeryDate}T00:00:00`
+                : new Date().toISOString();
+
+              allAppointments.push({
+                id: `${uhid}_${surgKey}`,
+                name,
+                phone,
+                type: "Surgery",
+                date: dateStr,
+                doctor: surgVal.doctor || "",
+              });
+            });
+          }
+
+          // Flatten Mortality
+          if (patientData.mortality) {
+            Object.entries(patientData.mortality).forEach(([mortKey, mortVal]) => {
+              const dateStr = mortVal.dateOfDeath
+                ? new Date(mortVal.dateOfDeath).toISOString()
+                : new Date().toISOString();
+
+              allAppointments.push({
+                id: `${uhid}_${mortKey}`,
+                name,
+                phone,
+                type: "Mortality",
+                date: dateStr,
+                doctor: mortVal.doctor || "",
+              });
+            });
+          }
         });
       }
-      setBookings(bookingsList);
+
+      setRawPatients(raw);
+      setAppointments(allAppointments);
+      setFilteredAppointments(allAppointments);
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  // Fetch IPD bookings
+  // ----- FILTER LOGIC -----
   useEffect(() => {
-    const ipdRef = ref(db, "ipd_bookings");
-    const unsubscribe = onValue(ipdRef, (snapshot) => {
-      const data = snapshot.val();
-      const ipdList: IIPDBooking[] = [];
-      if (data) {
-        Object.keys(data).forEach((key) => {
-          ipdList.push({
-            id: key,
-            name: data[key].name,
-            phone: data[key].mobileNumber,
-            admissionType: data[key].admissionType,
-            amount: parseFloat(data[key].amount),
-            date: data[key].date,
-            doctor: data[key].doctor,
-          });
-        });
-      }
-      setIPDBookings(ipdList);
-    });
-    return () => unsubscribe();
-  }, []);
+    let temp = [...appointments];
 
-  // Fetch Blood Tests
-  useEffect(() => {
-    const bloodTestsRef = ref(db, "bloodTests");
-    const unsubscribe = onValue(bloodTestsRef, (snapshot) => {
-      const data = snapshot.val();
-      const bloodTestList: IBloodTest[] = [];
-      if (data) {
-        Object.keys(data).forEach((key) => {
-          bloodTestList.push({
-            id: key,
-            name: data[key].name,
-            phone: data[key].phone,
-            bloodTestName: data[key].bloodTestName,
-            amount: data[key].amount,
-            date: data[key].date || new Date().toISOString(),
-            doctor: data[key].doctor,
-          });
-        });
-      }
-      setBloodTests(bloodTestList);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Merge all patients
-  useEffect(() => {
-    const mergedPatients: IPatient[] = [
-      ...bookings.map((booking) => ({
-        id: booking.id,
-        name: booking.name,
-        phone: booking.phone,
-        type: "OPD",
-        date: booking.date,
-        doctor: booking.doctor,
-      })),
-      ...ipdBookings.map((ipd) => ({
-        id: ipd.id,
-        name: ipd.name,
-        phone: ipd.phone,
-        type: "IPD",
-        date: ipd.date,
-        doctor: ipd.doctor,
-      })),
-      ...bloodTests.map((bt) => ({
-        id: bt.id,
-        name: bt.name,
-        phone: bt.phone,
-        type: "Pathology",
-        date: bt.date,
-        doctor: bt.doctor,
-      })),
-    ];
-
-    setPatients(mergedPatients);
-    setFilteredPatients(mergedPatients);
-  }, [bookings, ipdBookings, bloodTests]);
-
-  // Create doctor map
-  const doctorMap = useRef<{ [key: string]: string }>({});
-
-  useEffect(() => {
-    doctorMap.current = doctors.reduce((acc, doctor) => {
-      acc[doctor.id] = doctor.name;
-      return acc;
-    }, {} as { [key: string]: string });
-  }, [doctors]);
-
-  // Handle search and filters
-  useEffect(() => {
-    let tempPatients = patients;
-
+    // Type filter
     if (selectedType !== "all") {
-      tempPatients = tempPatients.filter(
-        (patient) => patient.type.toLowerCase() === selectedType
-      );
+      temp = temp.filter((appt) => appt.type.toLowerCase() === selectedType);
     }
 
+    // Date filter
     if (selectedDate) {
       const parsedDate = parseISO(selectedDate);
-      tempPatients = tempPatients.filter((patient) =>
-        isSameDay(new Date(patient.date), parsedDate)
-      );
+      temp = temp.filter((appt) => isSameDay(new Date(appt.date), parsedDate));
     }
 
+    // Search filter
     if (searchQuery.trim() !== "") {
       const lowerQuery = searchQuery.toLowerCase();
-      tempPatients = tempPatients.filter(
-        (patient) =>
-          patient.name.toLowerCase().includes(lowerQuery) ||
-          patient.phone.includes(lowerQuery)
+      temp = temp.filter(
+        (appt) =>
+          appt.name.toLowerCase().includes(lowerQuery) ||
+          appt.phone.includes(lowerQuery)
       );
     }
 
-    setFilteredPatients(tempPatients);
-  }, [searchQuery, selectedType, selectedDate, patients]);
+    setFilteredAppointments(temp);
+  }, [searchQuery, selectedType, selectedDate, appointments]);
 
+  // Search input handler
   const handleSearchInput = (query: string) => {
     setSearchQuery(query);
   };
 
+  // ----- EXPORT FUNCTIONS -----
   const exportToExcel = () => {
-    const dataToExport = filteredPatients.map((patient) => ({
-      "Patient Name": patient.name,
-      "Phone Number": patient.phone,
-      Type: patient.type,
-      Date: format(parseISO(patient.date), "PPP"),
-      Doctor: doctorMap.current[patient.doctor] || "N/A",
+    const dataToExport = filteredAppointments.map((item) => ({
+      "Patient Name": item.name,
+      "Phone Number": item.phone,
+      Type: item.type,
+      Date: format(parseISO(item.date), "PPP"),
+      Doctor: doctorMap.current[item.doctor] || "N/A",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -261,12 +269,12 @@ const PatientManagement: React.FC = () => {
     doc.setTextColor(100);
 
     const tableColumn = ["Name", "Phone", "Type", "Date", "Doctor"];
-    const tableRows = filteredPatients.map((patient) => [
-      patient.name,
-      patient.phone,
-      patient.type,
-      format(parseISO(patient.date), "PPP"),
-      doctorMap.current[patient.doctor] || "N/A",
+    const tableRows = filteredAppointments.map((item) => [
+      item.name,
+      item.phone,
+      item.type,
+      format(parseISO(item.date), "PPP"),
+      doctorMap.current[item.doctor] || "N/A",
     ]);
 
     (doc as any).autoTable({
@@ -278,9 +286,30 @@ const PatientManagement: React.FC = () => {
       styles: { fontSize: 9 },
     });
 
-    doc.save(`Patient_Management_${format(new Date(), "yyyyMMdd_HHmmss")}.pdf`);
+    const fileName = `Patient_Management_${format(new Date(), "yyyyMMdd_HHmmss")}.pdf`;
+    doc.save(fileName);
     toast.success("PDF file downloaded successfully!");
   };
+
+  // ----- ROW CLICK HANDLER & MODAL -----
+  const handleRowClick = (appt: IAppointment) => {
+    const patientId = appt.id.split("_")[0];
+    const fullRecord = rawPatients[patientId];
+    if (fullRecord) {
+      setSelectedPatientRecord({ ...fullRecord, uhid: patientId });
+      setIsModalOpen(true);
+    } else {
+      toast.error("Patient details not found!");
+    }
+  };
+
+  // ----- Derived Stats -----
+  const countAll = appointments.length;
+  const countOPD = appointments.filter((p) => p.type === "OPD").length;
+  const countIPD = appointments.filter((p) => p.type === "IPD").length;
+  const countPathology = appointments.filter((p) => p.type === "Pathology").length;
+
+  // Surgeries & Mortality included in total
 
   return (
     <>
@@ -304,43 +333,42 @@ const PatientManagement: React.FC = () => {
             </div>
           ) : (
             <>
+              {/* Stats */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
                 <div className="bg-white p-6 rounded-lg shadow-md">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-800">Total Patients</h2>
                     <Users className="text-green-500" size={24} />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">{patients.length}</p>
+                  <p className="text-3xl font-bold text-gray-900">{countAll}</p>
                 </div>
+
                 <div className="bg-white p-6 rounded-lg shadow-md">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-800">OPD Patients</h2>
                     <User className="text-blue-500" size={24} />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {patients.filter((p) => p.type === "OPD").length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{countOPD}</p>
                 </div>
+
                 <div className="bg-white p-6 rounded-lg shadow-md">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-800">IPD Patients</h2>
                     <Activity className="text-red-500" size={24} />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {patients.filter((p) => p.type === "IPD").length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{countIPD}</p>
                 </div>
+
                 <div className="bg-white p-6 rounded-lg shadow-md">
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-semibold text-gray-800">Pathology Tests</h2>
                     <FileText className="text-yellow-500" size={24} />
                   </div>
-                  <p className="text-3xl font-bold text-gray-900">
-                    {patients.filter((p) => p.type === "Pathology").length}
-                  </p>
+                  <p className="text-3xl font-bold text-gray-900">{countPathology}</p>
                 </div>
               </div>
 
+              {/* Search and Filters */}
               <div className="bg-white p-6 rounded-lg shadow-md mb-10">
                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
                   <div className="col-span-1 md:col-span-3 lg:col-span-2">
@@ -358,6 +386,7 @@ const PatientManagement: React.FC = () => {
                       <Search className="absolute left-3 top-2.5 text-gray-400" size={20} />
                     </div>
                   </div>
+
                   <div>
                     <label htmlFor="type" className="block text-sm font-medium text-gray-700 mb-1">
                       Filter by Type
@@ -372,8 +401,11 @@ const PatientManagement: React.FC = () => {
                       <option value="opd">OPD</option>
                       <option value="ipd">IPD</option>
                       <option value="pathology">Pathology</option>
+                      <option value="surgery">Surgery</option>
+                      <option value="mortality">Mortality</option>
                     </select>
                   </div>
+
                   <div>
                     <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
                       Filter by Date
@@ -389,6 +421,7 @@ const PatientManagement: React.FC = () => {
                       <Calendar className="absolute left-3 top-2.5 text-gray-400" size={20} />
                     </div>
                   </div>
+
                   <div className="flex space-x-2">
                     <button
                       onClick={exportToExcel}
@@ -408,65 +441,76 @@ const PatientManagement: React.FC = () => {
                 </div>
               </div>
 
+              {/* Appointments Table */}
               <div className="bg-white rounded-lg shadow-md overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Name
                         </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Phone Number
                         </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Type
                         </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Date
                         </th>
-                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Doctor
                         </th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredPatients.length === 0 ? (
+                      {filteredAppointments.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                             No patients found.
                           </td>
                         </tr>
                       ) : (
-                        filteredPatients.map((patient) => (
-                          <tr key={patient.id} className="hover:bg-gray-50">
+                        filteredAppointments.map((appt) => (
+                          <tr
+                            key={appt.id}
+                            className="hover:bg-gray-50 cursor-pointer"
+                            onClick={() => handleRowClick(appt)}
+                          >
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
                                 <div className="flex-shrink-0 h-10 w-10">
                                   <User className="h-10 w-10 rounded-full text-gray-300" />
                                 </div>
                                 <div className="ml-4">
-                                  <div className="text-sm font-medium text-gray-900">{patient.name}</div>
+                                  <div className="text-sm font-medium text-gray-900">{appt.name}</div>
                                 </div>
                               </div>
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appt.phone}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm text-gray-900">{patient.phone}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                patient.type === 'OPD' ? 'bg-green-100 text-green-800' :
-                                patient.type === 'IPD' ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-blue-100 text-blue-800'
-                              }`}>
-                                {patient.type}
+                              <span
+                                className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                  appt.type === "OPD"
+                                    ? "bg-green-100 text-green-800"
+                                    : appt.type === "IPD"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : appt.type === "Pathology"
+                                    ? "bg-blue-100 text-blue-800"
+                                    : appt.type === "Surgery"
+                                    ? "bg-purple-100 text-purple-800"
+                                    : "bg-red-100 text-red-800"
+                                }`}
+                              >
+                                {appt.type}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {format(parseISO(patient.date), "PPP")}
+                              {format(parseISO(appt.date), "PPP")}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {doctorMap.current[patient.doctor] || "N/A"}
+                              {doctorMap.current[appt.doctor] || "N/A"}
                             </td>
                           </tr>
                         ))
@@ -479,9 +523,131 @@ const PatientManagement: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* Modal for full patient details */}
+      <Dialog
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        className="fixed z-10 inset-0 overflow-y-auto"
+      >
+        {/* Background overlay */}
+        <div className="fixed inset-0 bg-black bg-opacity-30" aria-hidden="true" />
+
+        {/* Modal panel positioning */}
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <Dialog.Panel
+            className="relative bg-white rounded-lg shadow-xl max-w-2xl w-full p-6
+                       max-h-[80vh] overflow-y-auto"
+          >
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+            >
+              &times;
+            </button>
+            {selectedPatientRecord && (
+              <div className="space-y-4">
+                <Dialog.Title className="text-2xl font-bold mb-2">Patient Details</Dialog.Title>
+
+                <p><strong>Name:</strong> {selectedPatientRecord.name}</p>
+                <p><strong>Phone:</strong> {selectedPatientRecord.phone}</p>
+                <p><strong>Age:</strong> {selectedPatientRecord.age}</p>
+                <p><strong>Gender:</strong> {selectedPatientRecord.gender}</p>
+                <p><strong>Address:</strong> {selectedPatientRecord.address}</p>
+
+                {selectedPatientRecord.createdAt && (
+                  <p>
+                    <strong>Created At:</strong>{" "}
+                    {typeof selectedPatientRecord.createdAt === "string"
+                      ? format(parseISO(selectedPatientRecord.createdAt), "PPpp")
+                      : format(new Date(selectedPatientRecord.createdAt), "PPpp")}
+                  </p>
+                )}
+
+                {/* OPD Section */}
+                {selectedPatientRecord.opd && (
+                  <div>
+                    <h3 className="text-xl font-semibold mt-4">OPD Appointments</h3>
+                    {Object.entries(selectedPatientRecord.opd).map(([key, opd]) => (
+                      <div key={key} className="border p-2 rounded mb-2">
+                        <p><strong>Date:</strong> {format(parseISO(opd.date), "PPP")}</p>
+                        <p><strong>Doctor:</strong> {doctorMap.current[opd.doctor] || "N/A"}</p>
+                        <p><strong>Service:</strong> {opd.serviceName || "N/A"}</p>
+                        <p><strong>Amount:</strong> {opd.amount}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* IPD Section */}
+                {selectedPatientRecord.ipd && (
+                  <div>
+                    <h3 className="text-xl font-semibold mt-4">IPD Appointments</h3>
+                    {Object.entries(selectedPatientRecord.ipd).map(([key, ipd]) => (
+                      <div key={key} className="border p-2 rounded mb-2">
+                        <p><strong>Date:</strong> {format(parseISO(ipd.date), "PPP")}</p>
+                        <p><strong>Admission Type:</strong> {ipd.admissionType}</p>
+                        <p><strong>Doctor:</strong> {doctorMap.current[ipd.doctor] || "N/A"}</p>
+                        <p><strong>Amount:</strong> {ipd.amount}</p>
+                        <p><strong>Room Type:</strong> {ipd.roomType}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Pathology Section */}
+                {selectedPatientRecord.pathology && (
+                  <div>
+                    <h3 className="text-xl font-semibold mt-4">Pathology Tests</h3>
+                    {Object.entries(selectedPatientRecord.pathology).map(([key, path]) => (
+                      <div key={key} className="border p-2 rounded mb-2">
+                        <p>
+                          <strong>Date:</strong>{" "}
+                          {format(parseISO(path.createdAt || path.timestamp), "PPP")}
+                        </p>
+                        <p><strong>Test:</strong> {path.bloodTestName}</p>
+                        <p><strong>Amount:</strong> {path.amount}</p>
+                        <p><strong>Doctor:</strong> {doctorMap.current[path.doctor] || "N/A"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Surgery Section */}
+                {selectedPatientRecord.surgery && (
+                  <div>
+                    <h3 className="text-xl font-semibold mt-4">Surgery Details</h3>
+                    {Object.entries(selectedPatientRecord.surgery).map(([key, surg]) => (
+                      <div key={key} className="border p-2 rounded mb-2">
+                        <p><strong>Date:</strong> {surg.surgeryDate}</p>
+                        <p><strong>Title:</strong> {surg.surgeryTitle}</p>
+                        <p><strong>Final Diagnosis:</strong> {surg.finalDiagnosis}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Mortality Section */}
+                {selectedPatientRecord.mortality && (
+                  <div>
+                    <h3 className="text-xl font-semibold mt-4">Mortality Reports</h3>
+                    {Object.entries(selectedPatientRecord.mortality).map(([key, mort]) => (
+                      <div key={key} className="border p-2 rounded mb-2">
+                        <p><strong>Admission Date:</strong> {mort.admissionDate}</p>
+                        <p><strong>Date of Death:</strong> {mort.dateOfDeath}</p>
+                        <p><strong>Medical Findings:</strong> {mort.medicalFindings}</p>
+                        <p><strong>Timespan (Days):</strong> {mort.timeSpanDays}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Dialog.Panel>
+        </div>
+      </Dialog>
     </>
   );
 };
 
 export default PatientManagement;
-

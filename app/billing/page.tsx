@@ -1,4 +1,3 @@
-// src/app/patients/page.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -48,6 +47,7 @@ export default function PatientsPage() {
   const [allRecords, setAllRecords] = useState<BillingRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge");
   const router = useRouter();
 
   // ===== Fetch Patients Data =====
@@ -121,27 +121,35 @@ export default function PatientsPage() {
       });
 
       setAllRecords(ipdRecords);
-      setFilteredRecords(ipdRecords);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // ===== Search Handler =====
-  const handleSearch = () => {
+  // ===== Filter Records by Tab and Search Term =====
+  useEffect(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) {
-      setFilteredRecords(allRecords);
-      return;
+    let records = [...allRecords];
+
+    // Apply tab filter: "non-discharge" shows only records without a dischargeDate, "discharge" shows those with a dischargeDate.
+    if (selectedTab === "non-discharge") {
+      records = records.filter((rec) => !rec.dischargeDate);
+    } else if (selectedTab === "discharge") {
+      records = records.filter((rec) => rec.dischargeDate);
     }
-    const results = allRecords.filter(
-      (rec) =>
-        rec.ipdId.toLowerCase().includes(term) ||
-        rec.name.toLowerCase().includes(term) ||
-        rec.mobileNumber.toLowerCase().includes(term)
-    );
-    setFilteredRecords(results);
-  };
+
+    // Apply search filter if a term is entered.
+    if (term) {
+      records = records.filter(
+        (rec) =>
+          rec.ipdId.toLowerCase().includes(term) ||
+          rec.name.toLowerCase().includes(term) ||
+          rec.mobileNumber.toLowerCase().includes(term)
+      );
+    }
+
+    setFilteredRecords(records);
+  }, [allRecords, searchTerm, selectedTab]);
 
   // ===== Sorting by Date =====
   const getRecordDate = (record: BillingRecord): Date => {
@@ -158,7 +166,7 @@ export default function PatientsPage() {
     (a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime()
   );
 
-  // ===== Handle Selection =====
+  // ===== Handle Record Selection =====
   const handleSelectRecord = (record: BillingRecord) => {
     // Navigate to billing management page with patientId and ipdId as route params
     router.push(`/billing/${record.patientId}/${record.ipdId}`);
@@ -169,6 +177,34 @@ export default function PatientsPage() {
       <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">
         IPD Billing Management - Select Patient
       </h1>
+      
+      {/* Tabs for filtering by discharge status */}
+      <div className="flex justify-center mb-4">
+        <div className="inline-flex shadow rounded-lg" role="tablist">
+          <button
+            onClick={() => setSelectedTab("non-discharge")}
+            className={`px-4 py-2 rounded-l-lg focus:outline-none transition-colors duration-300 ${
+              selectedTab === "non-discharge"
+                ? "bg-indigo-600 text-white"
+                : "bg-white text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            Non Discharged
+          </button>
+          <button
+            onClick={() => setSelectedTab("discharge")}
+            className={`px-4 py-2 rounded-r-lg focus:outline-none transition-colors duration-300 ${
+              selectedTab === "discharge"
+                ? "bg-indigo-600 text-white"
+                : "bg-white text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            Discharged
+          </button>
+        </div>
+      </div>
+
+      {/* Search Bar */}
       <div className="mb-8 flex justify-center">
         <div className="flex items-center bg-gray-100 rounded-full p-2 w-full max-w-md">
           <input
@@ -178,19 +214,15 @@ export default function PatientsPage() {
             placeholder="Search by Name, IPD ID, or Mobile"
             className="flex-grow bg-transparent px-4 py-2 focus:outline-none"
           />
-          <button
-            onClick={handleSearch}
-            className="bg-indigo-600 text-white rounded-full p-2 hover:bg-indigo-700 transition duration-300"
-          >
-            Search
-          </button>
         </div>
       </div>
+      
+      {/* Table Container */}
       {sortedRecords.length === 0 ? (
         <p className="text-gray-500 text-center">No records found.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="overflow-x-auto bg-white shadow rounded-lg">
+          <table className="min-w-full">
             <thead>
               <tr className="bg-indigo-100">
                 <th className="px-4 py-2 text-left">Rank</th>

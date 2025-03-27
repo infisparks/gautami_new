@@ -20,6 +20,7 @@ import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 
 // =================== Interfaces ===================
+
 interface Booking {
   amount: number
   createdAt: string
@@ -99,12 +100,15 @@ interface MortalityReport {
 }
 
 // =================== Main Component ===================
+
 export default function DailyPerformanceReport() {
+  // States for data extracted from patients node
   const [bookings, setBookings] = useState<Booking[]>([])
   const [ipdBookings, setIpdBookings] = useState<IPDBooking[]>([])
   const [surgeries, setSurgeries] = useState<Surgery[]>([])
-  const [beds, setBeds] = useState<Record<string, Record<string, Bed>>>({})
   const [mortalityReports, setMortalityReports] = useState<MortalityReport[]>([])
+  // Beds from separate node
+  const [beds, setBeds] = useState<Record<string, Record<string, Bed>>>({})
 
   const [metrics, setMetrics] = useState({
     totalOPD: 0,
@@ -121,97 +125,142 @@ export default function DailyPerformanceReport() {
   // Ref for offscreen multi-page PDF container
   const reportRef = useRef<HTMLDivElement>(null)
 
-  // =================== Fetch Data ===================
+  // =================== Fetch Data from Patients ===================
   useEffect(() => {
-    const unsubArray: Array<() => void> = []
+    const patientsRef = ref(db, 'patients')
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val()
+      const opdList: Booking[] = []
+      const ipdList: IPDBooking[] = []
+      const surgeryList: Surgery[] = []
+      const mortalityList: MortalityReport[] = []
+      if (data) {
+        // Loop over patient records using Object.values to avoid unused keys.
+        Object.values(data).forEach((patientData: any) => {
+          // OPD Bookings (if present)
+          if (patientData.opd) {
+            Object.values(patientData.opd).forEach((opdData: any) => {
+              opdList.push({
+                amount: Number(opdData.amount) || 0,
+                createdAt: opdData.createdAt,
+                date: opdData.date,
+                doctor: opdData.doctor,
+                email: patientData.email || '',
+                message: opdData.message || '',
+                name: patientData.name,
+                paymentMethod: opdData.paymentMethod || 'cash',
+                phone: patientData.phone,
+                serviceName: opdData.serviceName,
+                time: opdData.time,
+              })
+            })
+          }
+          // IPD Bookings (if present)
+          if (patientData.ipd) {
+            Object.values(patientData.ipd).forEach((ipdData: any) => {
+              ipdList.push({
+                admissionType: ipdData.admissionType || '',
+                age: Number(ipdData.age) || 0,
+                amount: Number(ipdData.amount) || 0,
+                bed: ipdData.bed || '',
+                bloodGroup: ipdData.bloodGroup || '',
+                createdAt: ipdData.createdAt,
+                date: ipdData.date,
+                dateOfBirth: ipdData.dateOfBirth || '',
+                dischargeDate: ipdData.dischargeDate || '',
+                discountPercentage: ipdData.discountPercentage || 0,
+                doctor: ipdData.doctor || '',
+                email: patientData.email || '',
+                emergencyMobileNumber: ipdData.emergencyMobileNumber || '',
+                gender: ipdData.gender || '',
+                membershipType: ipdData.membershipType || '',
+                mobileNumber: patientData.phone || '',
+                name: patientData.name,
+                payments: ipdData.payments || {},
+                referralDoctor: ipdData.referralDoctor || '',
+                roomType: ipdData.roomType || '',
+                services: Array.isArray(ipdData.services) ? ipdData.services : [],
+                time: ipdData.time,
+                totalPaid: Number(ipdData.totalPaid) || 0,
+              })
+            })
+          }
+          // Surgeries (if present)
+          if (patientData.surgery) {
+            Object.values(patientData.surgery).forEach((surgeryData: any) => {
+              surgeryList.push({
+                age: Number(patientData.age) || 0,
+                finalDiagnosis: surgeryData.finalDiagnosis || '',
+                gender: patientData.gender || '',
+                name: patientData.name,
+                surgeryDate: surgeryData.surgeryDate,
+                surgeryTitle: surgeryData.surgeryTitle,
+                timestamp: surgeryData.timestamp,
+              })
+            })
+          }
+          // Mortality Reports (if present)
+          if (patientData.mortality) {
+            Object.values(patientData.mortality).forEach((mortData: any) => {
+              mortalityList.push({
+                admissionDate: mortData.admissionDate,
+                age: Number(patientData.age) || 0,
+                dateOfDeath: mortData.dateOfDeath,
+                medicalFindings: mortData.medicalFindings,
+                name: patientData.name,
+                timeSpanDays: mortData.timeSpanDays,
+                timestamp: mortData.timestamp,
+              })
+            })
+          }
+        })
+      }
+      setBookings(opdList)
+      setIpdBookings(ipdList)
+      setSurgeries(surgeryList)
+      setMortalityReports(mortalityList)
+    })
+    return () => unsubscribe()
+  }, [])
 
-    // Bookings (OPD)
-    const bookingsRef = ref(db, 'bookings')
-    unsubArray.push(
-      onValue(bookingsRef, (snapshot) => {
-        const data = snapshot.val()
-        setBookings(data ? (Object.values(data) as Booking[]) : [])
-      })
-    )
-
-    // IPD Bookings
-    const ipdRef = ref(db, 'ipd_bookings')
-    unsubArray.push(
-      onValue(ipdRef, (snapshot) => {
-        const data = snapshot.val()
-        setIpdBookings(data ? (Object.values(data) as IPDBooking[]) : [])
-      })
-    )
-
-    // Surgeries
-    const surgeriesRef = ref(db, 'surgeries')
-    unsubArray.push(
-      onValue(surgeriesRef, (snapshot) => {
-        const data = snapshot.val()
-        setSurgeries(data ? (Object.values(data) as Surgery[]) : [])
-      })
-    )
-
-    // Beds
+  // =================== Fetch Beds ===================
+  useEffect(() => {
     const bedsRef = ref(db, 'beds')
-    unsubArray.push(
-      onValue(bedsRef, (snapshot) => {
-        const data = snapshot.val()
-        setBeds(data || {})
-      })
-    )
-
-    // Mortality
-    const mortalityRef = ref(db, 'mortalityReports')
-    unsubArray.push(
-      onValue(mortalityRef, (snapshot) => {
-        const data = snapshot.val()
-        setMortalityReports(data ? (Object.values(data) as MortalityReport[]) : [])
-      })
-    )
-
-    // Cleanup
-    return () => {
-      unsubArray.forEach((u) => u())
-    }
+    const unsubscribe = onValue(bedsRef, (snapshot) => {
+      const data = snapshot.val()
+      setBeds(data || {})
+    })
+    return () => unsubscribe()
   }, [])
 
   // =================== Calculate Today's Metrics ===================
   useEffect(() => {
     const today = new Date()
 
-    // OPD Today
     const totalOPD = bookings.filter((bk) => isSameDay(parseISO(bk.date), today)).length
 
-    // IPD Admissions
     const totalIPDAdmissions = ipdBookings.filter((ipd) =>
       isSameDay(parseISO(ipd.date), today)
     ).length
 
-    // IPD Discharges
     const totalIPDDischarges = ipdBookings.filter((ipd) => {
       if (!ipd.dischargeDate) return false
       return isSameDay(parseISO(ipd.dischargeDate), today)
     }).length
 
-    // IPD Referrals
     const totalIPDReferrals = ipdBookings.filter((ipd) => {
       if (!ipd.referralDoctor) return false
-      // Assume referral date is createdAt
       return isSameDay(parseISO(ipd.createdAt), today)
     }).length
 
-    // Surgeries
     const totalSurgeries = surgeries.filter((srg) =>
       isSameDay(parseISO(srg.surgeryDate), today)
     ).length
 
-    // Mortality
     const totalMortalityReports = mortalityReports.filter((mr) =>
       isSameDay(parseISO(mr.dateOfDeath), today)
     ).length
 
-    // Beds
     let totalBeds = 0
     let bedsOccupied = 0
     let bedsAvailable = 0
@@ -248,7 +297,6 @@ export default function DailyPerformanceReport() {
       status: string
       type?: string
     }> = []
-
     Object.keys(beds).forEach((ward) => {
       Object.keys(beds[ward]).forEach((bedKey) => {
         details.push({
@@ -298,6 +346,7 @@ export default function DailyPerformanceReport() {
     }
   }
 
+  // =================== Render ===================
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-100 p-6">
       <ToastContainer />
@@ -526,6 +575,7 @@ export default function DailyPerformanceReport() {
 }
 
 // =================== Multi-page DPR Content ===================
+
 interface DPRMultiPageProps {
   metrics: {
     totalOPD: number
@@ -548,11 +598,6 @@ interface DPRMultiPageProps {
   mortalityReports: MortalityReport[]
 }
 
-/**
- * DPRMultiPage breaks the content into multiple A4 pages:
- * - The letterhead covers the full 595x842.
- * - The content is placed 70px from the top and 70px from the bottom.
- */
 function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPageProps) {
   const [pages, setPages] = useState<React.ReactNode[]>([])
 
@@ -577,20 +622,18 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
     return pairs
   }, [metrics])
 
+  // PDF page layout constants
   useEffect(() => {
     const pageWidth = 595
     const pageHeight = 842
-
-    // Content area
-    const topOffset = 90
+    const topOffset = 70
     const bottomOffset = 70
-    const maxContentHeight = pageHeight - (topOffset + bottomOffset) // 702
+    const maxContentHeight = pageHeight - (topOffset + bottomOffset)
 
     const contentPages: React.ReactNode[] = []
     let currentPage: React.ReactNode[] = []
     let currentHeight = 0
 
-    // Helper to push content blocks onto the current page or create a new page if needed.
     const addToPage = (element: React.ReactNode, blockHeight: number) => {
       if (currentHeight + blockHeight > maxContentHeight) {
         contentPages.push(
@@ -615,7 +658,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
       currentHeight += blockHeight
     }
 
-    // ========== 1. Header ( ~40px ) ==========
+    // 1. Header (~40px)
     addToPage(
       <div key="header" style={{ marginBottom: '8px' }}>
         <div style={{ textAlign: 'center' }}>
@@ -628,7 +671,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
       40
     )
 
-    // ========== 2. Metrics Table ( ~120px ) ==========
+    // 2. Metrics Table (~120px)
     const metricsContent = (
       <div key="metrics" style={{ marginBottom: '12px' }}>
         <h2 style={{ fontSize: '12px', fontWeight: '600', marginBottom: '6px' }}>Today’s Metrics</h2>
@@ -643,7 +686,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
                         border: '1px solid #ddd',
                         padding: '4px',
                         fontWeight: '500',
-                        verticalAlign: 'middle', // Vertically center content
+                        verticalAlign: 'middle',
                       }}
                     >
                       {item.label}
@@ -653,30 +696,17 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
                         border: '1px solid #ddd',
                         padding: '4px',
                         textAlign: 'center',
-                        verticalAlign: 'middle', // Vertically center content
+                        verticalAlign: 'middle',
                       }}
                     >
                       {item.value}
                     </td>
                   </React.Fragment>
                 ))}
-                {/* If odd number, add empty cells */}
                 {pair.length === 1 && (
                   <>
-                    <td
-                      style={{
-                        border: '1px solid #ddd',
-                        padding: '4px',
-                        verticalAlign: 'middle',
-                      }}
-                    ></td>
-                    <td
-                      style={{
-                        border: '1px solid #ddd',
-                        padding: '4px',
-                        verticalAlign: 'middle',
-                      }}
-                    ></td>
+                    <td style={{ border: '1px solid #ddd', padding: '4px', verticalAlign: 'middle' }}></td>
+                    <td style={{ border: '1px solid #ddd', padding: '4px', verticalAlign: 'middle' }}></td>
                   </>
                 )}
               </tr>
@@ -687,8 +717,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
     )
     addToPage(metricsContent, 120)
 
-    // ========== 3. Detailed Bed Status ==========
-    // Approximate height estimation
+    // 3. Detailed Bed Status
     const bedHeaderH = 24
     const bedRowHeight = 12
     const bedBodyH = bedDetails.length * bedRowHeight + bedHeaderH
@@ -698,46 +727,10 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
           <thead>
             <tr style={{ backgroundColor: '#f0f4f8' }}>
-              <th
-                style={{
-                  border: '1px solid #ddd',
-                  padding: '2px',
-                  textAlign: 'left',
-                  verticalAlign: 'middle', // Vertically center header
-                }}
-              >
-                Ward
-              </th>
-              <th
-                style={{
-                  border: '1px solid #ddd',
-                  padding: '2px',
-                  textAlign: 'left',
-                  verticalAlign: 'middle', // Vertically center header
-                }}
-              >
-                Bed Number
-              </th>
-              <th
-                style={{
-                  border: '1px solid #ddd',
-                  padding: '2px',
-                  textAlign: 'left',
-                  verticalAlign: 'middle', // Vertically center header
-                }}
-              >
-                Type
-              </th>
-              <th
-                style={{
-                  border: '1px solid #ddd',
-                  padding: '2px',
-                  textAlign: 'left',
-                  verticalAlign: 'middle', // Vertically center header
-                }}
-              >
-                Status
-              </th>
+              <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Ward</th>
+              <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Bed Number</th>
+              <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Type</th>
+              <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Status</th>
             </tr>
           </thead>
           <tbody>
@@ -768,7 +761,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
       bedBodyH
     )
 
-    // ========== 4. Mortality Reports ==========
+    // 4. Mortality Reports
     const mortalityContent = (
       <div key="mortality" style={{ marginBottom: '12px' }}>
         <h2 style={{ fontSize: '12px', fontWeight: '600', color: '#e74c3c', marginBottom: '6px' }}>
@@ -780,56 +773,11 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '8px' }}>
             <thead>
               <tr style={{ backgroundColor: '#fdecea' }}>
-                <th
-                  style={{
-                    border: '1px solid #ddd',
-                    padding: '2px',
-                    textAlign: 'left',
-                    verticalAlign: 'middle', // Vertically center header
-                  }}
-                >
-                  Name
-                </th>
-                <th
-                  style={{
-                    border: '1px solid #ddd',
-                    padding: '2px',
-                    textAlign: 'left',
-                    verticalAlign: 'middle', // Vertically center header
-                  }}
-                >
-                  Age
-                </th>
-                <th
-                  style={{
-                    border: '1px solid #ddd',
-                    padding: '2px',
-                    textAlign: 'left',
-                    verticalAlign: 'middle', // Vertically center header
-                  }}
-                >
-                  Date of Death
-                </th>
-                <th
-                  style={{
-                    border: '1px solid #ddd',
-                    padding: '2px',
-                    textAlign: 'left',
-                    verticalAlign: 'middle', // Vertically center header
-                  }}
-                >
-                  Medical Findings
-                </th>
-                <th
-                  style={{
-                    border: '1px solid #ddd',
-                    padding: '2px',
-                    textAlign: 'left',
-                    verticalAlign: 'middle', // Vertically center header
-                  }}
-                >
-                  Time Span (Days)
-                </th>
+                <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Name</th>
+                <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Age</th>
+                <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Date of Death</th>
+                <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Medical Findings</th>
+                <th style={{ border: '1px solid #ddd', padding: '2px', textAlign: 'left', verticalAlign: 'middle' }}>Time Span (Days)</th>
               </tr>
             </thead>
             <tbody>
@@ -849,13 +797,12 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
         )}
       </div>
     )
-    // Approximate height estimation
     const mortHeaderH = 24
     const mortRowHeight = 12
     const mortBodyH = mortalityReports.length * mortRowHeight + mortHeaderH
     addToPage(mortalityContent, mortBodyH)
 
-    // ========== 5. Footer ~30px ==========
+    // 5. Footer (~30px)
     addToPage(
       <div key="footer" style={{ textAlign: 'center', fontSize: '6px', color: '#666', marginTop: '8px' }}>
         <p>This is a computer-generated report and does not require a signature.</p>
@@ -864,7 +811,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
       30
     )
 
-    // If there's any content left in currentPage, create the final page
+    // If any content remains, add the final page
     if (currentPage.length > 0) {
       contentPages.push(
         <div
@@ -889,25 +836,21 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports }: DPRMultiPagePro
   return <>{pages.map((page, idx) => <React.Fragment key={idx}>{page}</React.Fragment>)}</>
 }
 
-// =================== Page Layout with Full Letterhead ===================
+// =================== Page Layout with Letterhead ===================
+
 interface DPRPageLayoutProps {
   children: React.ReactNode
   topOffset: number
   bottomOffset: number
 }
 
-/**
- * DPRPageLayout fills the entire 595x842 page with the letterhead image,
- * and places the content within an absolutely positioned container
- * at top=70px, bottom=70px, left/right=16px.
- */
 function DPRPageLayout({ children, topOffset, bottomOffset }: DPRPageLayoutProps) {
   return (
     <div
       style={{
-        width: '595px',   // A4 width
-        height: '842px',  // A4 height
-        backgroundImage: 'url(/letterhead.png)', // Full-page letterhead
+        width: '595px',
+        height: '842px',
+        backgroundImage: 'url(/letterhead.png)',
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         backgroundRepeat: 'no-repeat',
@@ -915,16 +858,15 @@ function DPRPageLayout({ children, topOffset, bottomOffset }: DPRPageLayoutProps
         boxSizing: 'border-box',
       }}
     >
-      {/* Content container with top/bottom offsets */}
       <div
         style={{
           position: 'absolute',
-          top: `${topOffset}px`,       // 70px from top
+          top: `${topOffset}px`,
           left: '16px',
           right: '16px',
-          bottom: `${bottomOffset}px`, // 70px from bottom
+          bottom: `${bottomOffset}px`,
           overflow: 'hidden',
-          padding: '8px', // Add padding for better spacing
+          padding: '8px',
         }}
       >
         {children}

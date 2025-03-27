@@ -1,4 +1,6 @@
-"use client";
+"use client"; 
+// If you're using Next.js 13+ with the App Router, keep "use client".
+// If you're on Pages Router (pages/ directory), you can remove it if it's not needed.
 
 import React, { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
@@ -14,10 +16,13 @@ import { FaCheckCircle, FaTimesCircle } from "react-icons/fa";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-// Import the main (Gautami) Firebase database and the Medford one
+// Firebase imports — adjust paths as needed
 import { db as dbGautami } from "../../lib/firebase";
 import { db as dbMedford } from "../../lib/firebaseMedford";
 
+/* ------------------------------------------------------------------
+  Type definitions
+------------------------------------------------------------------ */
 interface IPatientFormInput {
   name: string;
   phone: string;
@@ -27,28 +32,7 @@ interface IPatientFormInput {
   bloodTestName: string;
   amount: number;
   paymentId?: string;
-  doctor?: string;
-}
-
-// Patient record in Gautami (full details)
-
-// Minimal record in Medford Family (only minimal details)
-interface MedfordPatient {
-  patientId: string;
-  name: string;
-  contact: string;
-  dob: string;
-  gender: string;
-  hospitalName: string;
-}
-
-// Combined type for auto‑complete suggestions
-interface CombinedPatient {
-  id: string;
-  name: string;
-  phone?: string;
-  source: "gautami" | "medford";
-  data: any;
+  doctor?: string; // This will hold the final doctor ID
 }
 
 interface IBloodTestEntry {
@@ -60,6 +44,34 @@ interface Doctor {
   name: string;
 }
 
+interface GautamiPatient {
+  name: string;
+  phone: string;
+  address: string;
+  age: number;
+  gender: string;
+}
+
+interface MedfordPatient {
+  patientId: string;
+  name: string;
+  contact: string;
+  dob: string;
+  gender: string;
+  hospitalName: string;
+}
+
+interface CombinedPatient {
+  id: string;
+  name: string;
+  phone?: string;
+  source: "gautami" | "medford";
+  data: GautamiPatient | MedfordPatient;
+}
+
+/* ------------------------------------------------------------------
+  Utility function for generating random patient IDs
+------------------------------------------------------------------ */
 function generatePatientId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let result = "";
@@ -69,13 +81,27 @@ function generatePatientId(): string {
   return result;
 }
 
+/* ------------------------------------------------------------------
+  The main component
+------------------------------------------------------------------ */
 const PathologyEntryPage: React.FC = () => {
+  /* --------------------------------------------
+     1. State for data from Firebase
+  -------------------------------------------- */
+  const [bloodTestOptions, setBloodTestOptions] = useState<string[]>([]);
+  const [doctorOptions, setDoctorOptions] = useState<Doctor[]>([]);
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
+
+  /* --------------------------------------------
+     2. React Hook Form Setup
+  -------------------------------------------- */
   const {
     register,
     handleSubmit,
     formState: { errors },
     reset,
-    setValue,
+    setValue, // We'll call this when user clicks suggestions
   } = useForm<IPatientFormInput>({
     defaultValues: {
       name: "",
@@ -86,50 +112,48 @@ const PathologyEntryPage: React.FC = () => {
       bloodTestName: "",
       amount: 0,
       paymentId: "",
-      doctor: "",
+      doctor: "", // we'll store the final doctor ID here
     },
   });
 
   const [loading, setLoading] = useState(false);
 
-  // Blood test suggestions
-  const [bloodTestOptions, setBloodTestOptions] = useState<string[]>([]);
-  const [filteredBloodTests, setFilteredBloodTests] = useState<string[]>([]);
-  const [showBloodTestSuggestions, setShowBloodTestSuggestions] =
-    useState(false);
-  const bloodTestSuggestionBoxRef = useRef<HTMLUListElement>(null);
-
-  // Patient auto-complete state (from both databases)
-  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
-  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
-  const [patientNameInput, setPatientNameInput] = useState("");
-  const [patientSuggestions, setPatientSuggestions] = useState<
-    CombinedPatient[]
-  >([]);
-  const [selectedPatient, setSelectedPatient] =
-    useState<CombinedPatient | null>(null);
+  /* --------------------------------------------
+     3. Auto-Complete States & Refs
+  -------------------------------------------- */
+  // Patient name suggestions
+  const [patientSuggestions, setPatientSuggestions] = useState<CombinedPatient[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
   const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
-  // Doctor auto-complete state
-  const [doctorOptions, setDoctorOptions] = useState<Doctor[]>([]);
-  const [doctorReferInput, setDoctorReferInput] = useState("");
-  const [filteredDoctors, setFilteredDoctors] = useState<
-    { label: string; value: string }[]
-  >([]);
+  // Blood test suggestions
+  const [filteredBloodTests, setFilteredBloodTests] = useState<string[]>([]);
+  const [showBloodTestSuggestions, setShowBloodTestSuggestions] = useState(false);
+  const bloodTestSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
+  // Doctor auto-complete
+  //  - We'll keep a local typed string for doctor search
+  //  - We'll put the final doctor ID into the "doctor" form field
+  const [doctorTyped, setDoctorTyped] = useState("");
+  const [filteredDoctors, setFilteredDoctors] = useState<{ label: string; value: string }[]>([]);
   const doctorSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
-  // Fetch available blood tests from Gautami DB
+  /* ------------------------------------------------------------------
+     4. Fetch data from Firebase (on mount only) 
+        => These must have `[]` in the dependency array to avoid re-runs
+  ------------------------------------------------------------------ */
+
+  // === Fetch Blood Tests ===
   useEffect(() => {
     const bloodTestsRef = ref(dbGautami, "bloodTests");
     const unsubscribe = onValue(bloodTestsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
         const typedData = data as Record<string, IBloodTestEntry>;
-        const tests: string[] = Object.values(typedData).map(
-          (entry: IBloodTestEntry) => entry.bloodTestName
+        const testNames: string[] = Object.values(typedData).map(
+          (entry) => entry.bloodTestName
         );
-        const uniqueTests = Array.from(new Set(tests));
-        setBloodTestOptions(uniqueTests);
+        setBloodTestOptions(Array.from(new Set(testNames)));
       } else {
         setBloodTestOptions([]);
       }
@@ -137,12 +161,13 @@ const PathologyEntryPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch doctors from Gautami DB
+  // === Fetch Doctors ===
   useEffect(() => {
     const doctorsRef = ref(dbGautami, "doctors");
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
+        // If your DB stores doctors as an object of { id, name }, then:
         const docsArray = Object.values(data) as Doctor[];
         setDoctorOptions(docsArray);
       } else {
@@ -152,7 +177,7 @@ const PathologyEntryPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch patients from Gautami DB
+  // === Fetch Gautami Patients ===
   useEffect(() => {
     const patientsRef = ref(dbGautami, "patients");
     const unsubscribe = onValue(patientsRef, (snapshot) => {
@@ -174,7 +199,7 @@ const PathologyEntryPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Fetch patients from Medford Family DB
+  // === Fetch Medford Patients ===
   useEffect(() => {
     const medfordPatientsRef = ref(dbMedford, "patients");
     const unsubscribe = onValue(medfordPatientsRef, (snapshot) => {
@@ -197,113 +222,152 @@ const PathologyEntryPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Combine patients from both databases for suggestions
+  // Combine both sets of patients for suggestion usage
   const allCombinedPatients = [...gautamiPatients, ...medfordPatients];
 
-  // Filter patient suggestions when name input changes
-  useEffect(() => {
-    if (patientNameInput.length >= 2) {
-      const lower = patientNameInput.toLowerCase();
+  /* ------------------------------------------------------------------
+     5. Patient Name Auto-Complete
+     Instead of `useEffect` on watch(name), we use a custom onChange.
+  ------------------------------------------------------------------ */
+  const handlePatientNameChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onChangeFn: (...event: any[]) => void
+  ) => {
+    // First let react-hook-form track this new value
+    onChangeFn(e);
+
+    // Then do the suggestion filtering:
+    const inputValue = e.target.value.trim();
+    if (inputValue.length >= 2) {
+      const lower = inputValue.toLowerCase();
       const suggestions = allCombinedPatients.filter((p) =>
         p.name.toLowerCase().includes(lower)
       );
       setPatientSuggestions(suggestions);
+      setSelectedPatient(null);
     } else {
       setPatientSuggestions([]);
     }
-  }, [patientNameInput, allCombinedPatients]);
-
-  // Filter blood test suggestions
-  const handleBloodTestInputChange = (value: string) => {
-    if (value) {
-      const filtered = bloodTestOptions.filter((test) =>
-        test.toLowerCase().includes(value.toLowerCase())
-      );
-      setFilteredBloodTests(filtered);
-      setShowBloodTestSuggestions(filtered.length > 0);
-    } else {
-      setFilteredBloodTests([]);
-      setShowBloodTestSuggestions(false);
-    }
   };
 
-  // Filter doctor suggestions
-  const handleDoctorReferInputChange = (value: string) => {
-    setDoctorReferInput(value);
-    if (value) {
-      const filtered = doctorOptions.filter((doc) =>
-        doc.name.toLowerCase().includes(value.toLowerCase())
-      );
-      const suggestions = filtered.map((doc) => ({
-        label: doc.name,
-        value: doc.id,
-      }));
-      setFilteredDoctors(suggestions);
-    } else {
-      setFilteredDoctors([]);
-    }
-  };
-
-  // When a patient suggestion is clicked, populate the form
+  // When user clicks on a patient suggestion
   const handlePatientSuggestionClick = (patient: CombinedPatient) => {
     setSelectedPatient(patient);
+    // Fill form fields from this patient's data
     setValue("name", patient.name);
     setValue("phone", patient.phone || "");
     if (patient.source === "gautami") {
-      setValue("address", patient.data.address);
-      setValue("age", patient.data.age);
-      setValue("gender", patient.data.gender);
+      const gData = patient.data as GautamiPatient;
+      setValue("address", gData.address);
+      setValue("age", gData.age);
+      setValue("gender", gData.gender);
     } else {
-      setValue("gender", patient.data.gender);
+      const mData = patient.data as MedfordPatient;
+      setValue("gender", mData.gender);
     }
-    setPatientNameInput(patient.name);
+    // Clear suggestions
     setPatientSuggestions([]);
-    toast.info(
-      `Patient ${patient.name} selected from ${patient.source.toUpperCase()}!`
-    );
+    toast.info(`Selected patient from ${patient.source.toUpperCase()}`);
   };
 
-  // When a doctor suggestion is clicked
+  /* ------------------------------------------------------------------
+     6. Blood Test Auto-Complete
+     We'll do it in a custom onChange as well.
+  ------------------------------------------------------------------ */
+  const handleBloodTestChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    onChangeFn: (...event: any[]) => void
+  ) => {
+    onChangeFn(e); // update form state
+    const inputVal = e.target.value.trim();
+    if (inputVal.length === 0) {
+      setFilteredBloodTests([]);
+      setShowBloodTestSuggestions(false);
+      return;
+    }
+    // Filter from available tests
+    const matched = bloodTestOptions.filter((test) =>
+      test.toLowerCase().includes(inputVal.toLowerCase())
+    );
+    setFilteredBloodTests(matched);
+    setShowBloodTestSuggestions(matched.length > 0);
+  };
+
+  const handleBloodTestSelect = (testName: string) => {
+    setValue("bloodTestName", testName);
+    setFilteredBloodTests([]);
+    setShowBloodTestSuggestions(false);
+  };
+
+  /* ------------------------------------------------------------------
+     7. Doctor Auto-Complete
+     We store typed text in local `doctorTyped`, so user sees suggestions.
+     The final chosen doctor ID goes into form field "doctor".
+  ------------------------------------------------------------------ */
+  const handleDoctorTypedChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const typed = e.target.value;
+    setDoctorTyped(typed);
+    // When user is typing a new text, we can clear the hidden "doctor" ID from form
+    setValue("doctor", "");
+
+    if (typed.trim().length === 0) {
+      setFilteredDoctors([]);
+      return;
+    }
+    const lower = typed.toLowerCase();
+    const matched = doctorOptions
+      .filter((doc) => doc.name.toLowerCase().includes(lower))
+      .map((doc) => ({ label: doc.name, value: doc.id }));
+    setFilteredDoctors(matched);
+  };
+
   const handleDoctorSuggestionClick = (id: string, name: string) => {
-    setDoctorReferInput(name);
-    setValue("doctor", id, { shouldValidate: true });
+    // We store the chosen doctor's ID in the form
+    setValue("doctor", id);
+    // We store the typed text in local state
+    setDoctorTyped(name);
     setFilteredDoctors([]);
   };
 
-  // Hide suggestion boxes on click outside
+  /* ------------------------------------------------------------------
+     8. Close suggestion boxes if user clicks outside
+  ------------------------------------------------------------------ */
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    function handleClickOutside(e: MouseEvent) {
       if (
         patientSuggestionBoxRef.current &&
-        !patientSuggestionBoxRef.current.contains(event.target as Node)
+        !patientSuggestionBoxRef.current.contains(e.target as Node)
       ) {
         setPatientSuggestions([]);
       }
       if (
         bloodTestSuggestionBoxRef.current &&
-        !bloodTestSuggestionBoxRef.current.contains(event.target as Node)
+        !bloodTestSuggestionBoxRef.current.contains(e.target as Node)
       ) {
         setShowBloodTestSuggestions(false);
       }
       if (
         doctorSuggestionBoxRef.current &&
-        !doctorSuggestionBoxRef.current.contains(event.target as Node)
+        !doctorSuggestionBoxRef.current.contains(e.target as Node)
       ) {
         setFilteredDoctors([]);
       }
-    };
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // onSubmit handler
+  /* ------------------------------------------------------------------
+     9. Form Submission
+  ------------------------------------------------------------------ */
   const onSubmit: SubmitHandler<IPatientFormInput> = async (data) => {
     setLoading(true);
     try {
       let patientId: string;
-      // If a patient is selected, update the full details in the Gautami database
       if (selectedPatient) {
+        // Existing patient
         patientId = selectedPatient.id;
         const patientRef = ref(dbGautami, `patients/${patientId}`);
         await update(patientRef, {
@@ -314,7 +378,7 @@ const PathologyEntryPage: React.FC = () => {
           gender: data.gender,
         });
       } else {
-        // New patient: create full record in Gautami DB and minimal record in Medford DB
+        // New patient
         patientId = generatePatientId();
         // Save full details in Gautami
         await set(ref(dbGautami, `patients/${patientId}`), {
@@ -327,25 +391,26 @@ const PathologyEntryPage: React.FC = () => {
           uhid: patientId,
           ipd: {},
         });
-        // Save minimal details in Medford (only contact, dob, gender, name, patientId)
+        // Minimal details in Medford
         await set(ref(dbMedford, `patients/${patientId}`), {
           name: data.name,
           contact: data.phone,
           gender: data.gender,
-          dob: "", // Use empty string or set a proper value if available
+          dob: "",
           patientId: patientId,
           hospitalName: "MEDFORD",
         });
       }
-      // Save pathology entry under the patient record in Gautami DB
+
+      // Save pathology entry under that patient in Gautami
       const pathologyRef = ref(dbGautami, `patients/${patientId}/pathology`);
-      const newPathologyRef = push(pathologyRef);
-      await set(newPathologyRef, {
+      const newPathRef = push(pathologyRef);
+      await set(newPathRef, {
         bloodTestName: data.bloodTestName,
         amount: data.amount,
         paymentId: data.paymentId || null,
         createdAt: new Date().toISOString(),
-        doctor: data.doctor || "",
+        doctor: data.doctor || "", // this is the doctor ID
       });
 
       toast.success("Patient pathology entry saved successfully!", {
@@ -353,6 +418,7 @@ const PathologyEntryPage: React.FC = () => {
         autoClose: 5000,
       });
 
+      // Reset form and local states
       reset({
         name: "",
         phone: "",
@@ -364,12 +430,11 @@ const PathologyEntryPage: React.FC = () => {
         paymentId: "",
         doctor: "",
       });
-      setPatientNameInput("");
-      setDoctorReferInput("");
       setSelectedPatient(null);
       setPatientSuggestions([]);
-    } catch (error) {
-      console.error("Error saving patient pathology entry:", error);
+      setDoctorTyped(""); // clearing typed text for doctor
+    } catch (err) {
+      console.error("Error saving patient pathology entry:", err);
       toast.error("Failed to save entry. Please try again.", {
         position: "top-right",
         autoClose: 5000,
@@ -379,14 +444,14 @@ const PathologyEntryPage: React.FC = () => {
     }
   };
 
+  /* ------------------------------------------------------------------
+     10. Rendering
+  ------------------------------------------------------------------ */
   return (
     <>
       <Head>
         <title>Admin - Pathology Entry</title>
-        <meta
-          name="description"
-          content="Add patient details and blood tests"
-        />
+        <meta name="description" content="Add patient details and blood tests" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
@@ -400,23 +465,24 @@ const PathologyEntryPage: React.FC = () => {
           <div className="mb-6 text-center text-gray-600">
             {new Date().toLocaleString()}
           </div>
+
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* Patient Name with Auto-Complete */}
+            {/* ======= Patient Name (auto-complete) ======= */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="text"
-                value={patientNameInput}
-                onChange={(e) => {
-                  setPatientNameInput(e.target.value);
-                  setValue("name", e.target.value, { shouldValidate: true });
-                  setSelectedPatient(null);
-                }}
                 placeholder="Patient Name"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.name ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                // Combine react-hook-form + custom onChange
+                {...register("name", {
+                  required: "Patient name is required",
+                  onChange: (e) => handlePatientNameChange(e, (v) => v),
+                })}
               />
+
+              {/* Patient Suggestions */}
               {patientSuggestions.length > 0 && (
                 <ul
                   ref={patientSuggestionBoxRef}
@@ -428,9 +494,10 @@ const PathologyEntryPage: React.FC = () => {
                       onClick={() => handlePatientSuggestionClick(patient)}
                       className="px-4 py-2 hover:bg-green-100 cursor-pointer flex justify-between items-center"
                     >
-                      <span>{`${patient.name} - ${
-                        patient.phone || ""
-                      }`}</span>
+                      <span>
+                        {patient.name}
+                        {patient.phone ? ` - ${patient.phone}` : ""}
+                      </span>
                       {patient.source === "gautami" ? (
                         <FaCheckCircle color="green" />
                       ) : (
@@ -440,76 +507,67 @@ const PathologyEntryPage: React.FC = () => {
                   ))}
                 </ul>
               )}
+
               {errors.name && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.name.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
               )}
             </div>
 
-            {/* Patient Phone */}
+            {/* ======= Phone ======= */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="text"
-                {...register("phone")}
                 placeholder="Patient Phone Number"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.phone ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                {...register("phone")}
               />
               {errors.phone && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.phone.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>
               )}
             </div>
 
-            {/* Age */}
+            {/* ======= Age ======= */}
             <div className="relative">
               <AiOutlineFieldBinary className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
-                {...register("age", { valueAsNumber: true })}
+                min={0}
                 placeholder="Age"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.age ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
-                min="0"
+                {...register("age", { valueAsNumber: true })}
               />
               {errors.age && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.age.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.age.message}</p>
               )}
             </div>
 
-            {/* Address */}
+            {/* ======= Address ======= */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="text"
-                {...register("address")}
                 placeholder="Address"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.address ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                {...register("address")}
               />
               {errors.address && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.address.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.address.message}</p>
               )}
             </div>
 
-            {/* Gender (Drop-Down) */}
+            {/* ======= Gender ======= */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
               <select
-                {...register("gender")}
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.gender ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                {...register("gender")}
               >
                 <option value="">Select Gender</option>
                 <option value="Male">Male</option>
@@ -517,47 +575,43 @@ const PathologyEntryPage: React.FC = () => {
                 <option value="Other">Other</option>
               </select>
               {errors.gender && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.gender.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>
               )}
             </div>
 
-            {/* Blood Test Name with Suggestions */}
+            {/* ======= Blood Test Name (auto-complete) ======= */}
             <div className="relative">
               <AiOutlineFieldBinary className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="text"
-                {...register("bloodTestName")}
                 placeholder="Blood Test Name"
-                onChange={(e) => {
-                  handleBloodTestInputChange(e.target.value);
-                  setValue("bloodTestName", e.target.value, { shouldValidate: true });
-                }}
                 autoComplete="off"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.bloodTestName ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                {...register("bloodTestName", {
+                  required: "Blood test name is required",
+                  onChange: (e) => handleBloodTestChange(e, (v) => v),
+                })}
               />
+
+              {/* Blood Test Suggestions */}
               {showBloodTestSuggestions && filteredBloodTests.length > 0 && (
                 <ul
                   ref={bloodTestSuggestionBoxRef}
                   className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
                 >
-                  {filteredBloodTests.map((suggestion, index) => (
+                  {filteredBloodTests.map((test, index) => (
                     <li
                       key={index}
-                      onClick={() => {
-                        setValue("bloodTestName", suggestion, { shouldValidate: true });
-                        setShowBloodTestSuggestions(false);
-                      }}
+                      onClick={() => handleBloodTestSelect(test)}
                       className="px-4 py-2 hover:bg-green-100 cursor-pointer"
                     >
-                      {suggestion}
+                      {test}
                     </li>
                   ))}
                 </ul>
               )}
+
               {errors.bloodTestName && (
                 <p className="text-red-500 text-sm mt-1">
                   {errors.bloodTestName.message}
@@ -565,16 +619,15 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
-            {/* Payment ID (Optional) */}
+            {/* ======= Payment ID (optional) ======= */}
             <div className="relative">
               <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
               <input
-                type="text"
-                {...register("paymentId")}
                 placeholder="Payment ID (Optional)"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.paymentId ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
+                {...register("paymentId")}
               />
               {errors.paymentId && (
                 <p className="text-red-500 text-sm mt-1">
@@ -583,70 +636,66 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
-            {/* Doctor Refer with Auto-Complete */}
+            {/* ======= Doctor Refer (auto-complete) ======= */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
+
+              {/* This is the typed text for searching doctors */}
               <input
                 type="text"
-                value={doctorReferInput}
-                onChange={(e) => {
-                  handleDoctorReferInputChange(e.target.value);
-                  setValue("doctor", "", { shouldValidate: true });
-                }}
-                placeholder="Doctor Refer"
+                placeholder="Referred By Doctor (Optional)"
                 autoComplete="off"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
+                value={doctorTyped}
+                onChange={handleDoctorTypedChange}
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 transition duration-200 ${
                   errors.doctor ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
+                }`}
               />
+
+              {/* Suggestions */}
               {filteredDoctors.length > 0 && (
                 <ul
                   ref={doctorSuggestionBoxRef}
                   className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
                 >
-                  {filteredDoctors.map((suggestion) => (
+                  {filteredDoctors.map((item) => (
                     <li
-                      key={suggestion.value}
-                      onClick={() =>
-                        handleDoctorSuggestionClick(
-                          suggestion.value,
-                          suggestion.label
-                        )
-                      }
+                      key={item.value}
+                      onClick={() => handleDoctorSuggestionClick(item.value, item.label)}
                       className="px-4 py-2 hover:bg-green-100 cursor-pointer"
                     >
-                      {suggestion.label}
+                      {item.label}
                     </li>
                   ))}
                 </ul>
               )}
+
+              {/* The actual selected doctor ID stored in the form */}
+              <input type="hidden" {...register("doctor")} />
+
               {errors.doctor && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.doctor.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.doctor.message}</p>
               )}
             </div>
 
-            {/* Amount */}
+            {/* ======= Amount ======= */}
             <div className="relative">
               <AiOutlineDollarCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
-                {...register("amount", { valueAsNumber: true })}
+                min={0}
                 placeholder="Amount (Rs)"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.amount ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
-                min="0"
+                {...register("amount", { valueAsNumber: true })}
               />
               {errors.amount && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.amount.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>
               )}
             </div>
 
-            {/* Submit Button */}
+            {/* ======= Submit Button ======= */}
             <button
               type="submit"
               disabled={loading}

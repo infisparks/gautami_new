@@ -26,44 +26,58 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 // TypeScript Interface for Mortality Reports
 interface IMortalityReport {
-  id: string; // Firebase key
+  id: string; // Composite key: `${uhid}_mortality_${mortalityKey}`
   name: string;
-  admissionDate: string; // ISO date string
+  admissionDate: string; // ISO date string from mortality data
   age: number;
-  dateOfDeath: string; // ISO date string
+  dateOfDeath: string; // ISO date string from mortality data
   medicalFindings: string;
   timeSpanDays: number;
-  timestamp: number; // Unix timestamp
+  timestamp: number; // Unix timestamp from mortality data
 }
 
 const MortalityDashboardPage: React.FC = () => {
   const [reports, setReports] = useState<IMortalityReport[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [filterDate, setFilterDate] = useState<string>("");
+  const [filterDate, setFilterDate] = useState<string>(""); // When empty, show all reports
   const [totalDeathsToday, setTotalDeathsToday] = useState<number>(0);
   const [monthlyData, setMonthlyData] = useState<{ [key: string]: number }>({});
   const [searchQuery, setSearchQuery] = useState<string>(""); // For search functionality
 
+  // Fetch mortality reports by extracting them from each patient record in the "patients" node.
   useEffect(() => {
-    const dbRef = ref(db, "mortalityReports");
+    const patientsRef = ref(db, "patients");
     onValue(
-      dbRef,
+      patientsRef,
       (snapshot) => {
         const data = snapshot.val();
         const fetchedReports: IMortalityReport[] = [];
         if (data) {
-          Object.keys(data).forEach((key) => {
-            fetchedReports.push({
-              id: key,
-              ...data[key],
-            });
+          Object.entries(data).forEach(([uhid, patientData]: [string, any]) => {
+            // If a patient record has mortality data, extract it.
+            if (patientData.mortality) {
+              Object.entries(patientData.mortality).forEach(
+                ([mortalityKey, mortalityData]: [string, any]) => {
+                  fetchedReports.push({
+                    id: `${uhid}_mortality_${mortalityKey}`,
+                    name: patientData.name,
+                    admissionDate: mortalityData.admissionDate,
+                    age: patientData.age,
+                    dateOfDeath: mortalityData.dateOfDeath,
+                    medicalFindings: mortalityData.medicalFindings,
+                    timeSpanDays: mortalityData.timeSpanDays,
+                    timestamp: mortalityData.timestamp,
+                  });
+                }
+              );
+            }
           });
         }
         setReports(fetchedReports);
         setLoading(false);
       },
       (error) => {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching mortality reports:", error);
         toast.error("Failed to fetch mortality reports.", {
           position: "top-right",
           autoClose: 5000,
@@ -73,8 +87,8 @@ const MortalityDashboardPage: React.FC = () => {
     );
   }, []);
 
+  // Calculate total deaths today (using dateOfDeath)
   useEffect(() => {
-    // Calculate total deaths today
     const today = new Date();
     const count = reports.filter((report) =>
       isSameDay(parseISO(report.dateOfDeath), today)
@@ -82,18 +96,16 @@ const MortalityDashboardPage: React.FC = () => {
     setTotalDeathsToday(count);
   }, [reports]);
 
+  // Calculate monthly deaths for the current month for charting
   useEffect(() => {
-    // Calculate monthly deaths
     const currentMonthStart = startOfMonth(new Date());
     const currentMonthEnd = endOfMonth(new Date());
-
     const monthlyReports = reports.filter((report) => {
       const deathDate = parseISO(report.dateOfDeath);
       return deathDate >= currentMonthStart && deathDate <= currentMonthEnd;
     });
 
     const daysInMonth = getDaysInMonth(new Date());
-
     const data: { [key: string]: number } = {};
 
     for (let day = 1; day <= daysInMonth; day++) {
@@ -109,14 +121,14 @@ const MortalityDashboardPage: React.FC = () => {
     setMonthlyData(data);
   }, [reports]);
 
-  // Chart Data
+  // Chart Data for Monthly Deaths
   const chartData = {
     labels: Object.keys(monthlyData).map((day) => `Day ${day}`),
     datasets: [
       {
         label: "Total Deaths",
         data: Object.values(monthlyData),
-        backgroundColor: "rgba(220, 38, 38, 0.7)", // Tailwind's red-600 with opacity
+        backgroundColor: "rgba(220, 38, 38, 0.7)", // red-600 with opacity
       },
     ],
   };
@@ -125,17 +137,13 @@ const MortalityDashboardPage: React.FC = () => {
   const chartOptions = {
     responsive: true,
     plugins: {
-      legend: {
-        position: "top" as const,
-      },
-      title: {
-        display: true,
-        text: "Total Deaths This Month",
-      },
+      legend: { position: "top" as const },
+      title: { display: true, text: "Total Deaths This Month" },
     },
   };
 
-  // Filtered Reports based on filterDate and searchQuery
+  // Filter reports based on filterDate and searchQuery.
+  // If filterDate is empty, all reports are shown.
   const filteredReports = reports
     .filter((report) => {
       if (filterDate) {
@@ -226,7 +234,8 @@ const MortalityDashboardPage: React.FC = () => {
           {/* Reports List */}
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-2xl font-semibold text-gray-700 mb-4">
-              Mortality Reports {filterDate && `for ${format(parseISO(filterDate), "PPP")}`}
+              Mortality Reports{" "}
+              {filterDate && `for ${format(parseISO(filterDate), "PPP")}`}
             </h2>
             {loading ? (
               <p className="text-center text-gray-500">Loading reports...</p>
@@ -237,40 +246,22 @@ const MortalityDashboardPage: React.FC = () => {
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Patient Name
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Admission Date
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Age
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Date of Death
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Time Span (Days)
                       </th>
-                      <th
-                        scope="col"
-                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                      >
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Medical Findings
                       </th>
                     </tr>

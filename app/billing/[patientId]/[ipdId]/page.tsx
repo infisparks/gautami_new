@@ -59,6 +59,7 @@ interface DoctorVisitForm {
 
 export interface BillingRecord {
   patientId: string;
+  uhid:string
   ipdId: string;
   name: string;
   mobileNumber: string;
@@ -214,6 +215,7 @@ export default function BillingPage() {
       // IMPORTANT: We'll assign `admitDate` from ipd.date, else ipd.createdAt, else undefined
       const record: BillingRecord = {
         patientId,
+        uhid: patientData.uhid || "",
         ipdId,
         name: patientData.name || "Unknown",
         mobileNumber: patientData.phone || "",

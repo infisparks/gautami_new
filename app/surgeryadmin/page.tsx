@@ -6,10 +6,7 @@ import React, { useState, useEffect } from "react";
 import { db } from "../../lib/firebase";
 import { ref, onValue } from "firebase/database";
 import Head from "next/head";
-import {
-  AiOutlineCalendar,
-  AiOutlineUser,
-} from "react-icons/ai";
+import { AiOutlineCalendar, AiOutlineUser } from "react-icons/ai";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import DatePicker from "react-datepicker";
@@ -20,7 +17,7 @@ interface ISurgeryEntry {
   name: string;
   gender: string;
   age: number;
-  surgeryDate: string; // YYYY-MM-DD
+  surgeryDate: string; // expected format YYYY-MM-DD
   surgeryTitle: string;
   finalDiagnosis: string;
   timestamp: number;
@@ -35,33 +32,37 @@ const AdminDashboard: React.FC = () => {
   const [selectedEntry, setSelectedEntry] = useState<ISurgeryEntry | null>(null);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
+  // Fetch surgery entries from "patients" node
   useEffect(() => {
-    const surgeriesRef = ref(db, "surgeries");
+    const patientsRef = ref(db, "patients");
     const unsubscribe = onValue(
-      surgeriesRef,
+      patientsRef,
       (snapshot) => {
         const data = snapshot.val();
+        const entries: ISurgeryEntry[] = [];
         if (data) {
-          const entries: ISurgeryEntry[] = Object.entries(data).map(
-            ([key, value]: [string, any]) => ({
-              id: key,
-              name: value.name,
-              gender: value.gender,
-              age: value.age,
-              surgeryDate: value.surgeryDate,
-              surgeryTitle: value.surgeryTitle,
-              finalDiagnosis: value.finalDiagnosis,
-              timestamp: value.timestamp,
-            })
-          );
-          // Sort entries by timestamp descending
-          entries.sort((a, b) => b.timestamp - a.timestamp);
-          setSurgeryEntries(entries);
-          setFilteredEntries(entries);
-        } else {
-          setSurgeryEntries([]);
-          setFilteredEntries([]);
+          Object.entries(data).forEach(([patientId, patientData]: [string, any]) => {
+            // Check if the patient has surgery data
+            if (patientData.surgery) {
+              Object.entries(patientData.surgery).forEach(([surgeryKey, surgeryEntry]: [string, any]) => {
+                entries.push({
+                  id: `${patientId}_surgery_${surgeryKey}`,
+                  name: patientData.name,
+                  gender: patientData.gender,
+                  age: Number(patientData.age) || 0,
+                  surgeryDate: surgeryEntry.surgeryDate,
+                  surgeryTitle: surgeryEntry.surgeryTitle,
+                  finalDiagnosis: surgeryEntry.finalDiagnosis,
+                  timestamp: surgeryEntry.timestamp,
+                });
+              });
+            }
+          });
         }
+        // Sort entries by timestamp descending
+        entries.sort((a, b) => b.timestamp - a.timestamp);
+        setSurgeryEntries(entries);
+        setFilteredEntries(entries);
         setLoading(false);
       },
       (error) => {
@@ -77,11 +78,12 @@ const AdminDashboard: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // Filter entries based on selected date range
   useEffect(() => {
     if (filterStartDate || filterEndDate) {
       const filtered = surgeryEntries.filter((entry) => {
         const entryDate = new Date(entry.surgeryDate);
-        // Normalize the time part for accurate comparison
+        // Normalize time to ensure accurate date comparisons
         entryDate.setHours(0, 0, 0, 0);
         if (filterStartDate && filterEndDate) {
           const start = new Date(filterStartDate);
@@ -198,10 +200,7 @@ const AdminDashboard: React.FC = () => {
                       className="bg-white p-6 rounded-lg shadow-md hover:shadow-lg cursor-pointer transition duration-200"
                     >
                       <div className="flex items-center mb-4">
-                        <AiOutlineUser
-                          className="text-blue-500"
-                          size={30}
-                        />
+                        <AiOutlineUser className="text-blue-500" size={30} />
                         <h2 className="ml-3 text-xl font-semibold">
                           {entry.name}
                         </h2>

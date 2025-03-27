@@ -32,6 +32,7 @@ interface Payment {
 interface BillingRecord {
   patientId: string;
   ipdId: string;
+  uhid:string;
   name: string;
   mobileNumber: string;
   dischargeDate?: string;
@@ -320,7 +321,7 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
                 <strong>Mobile No.:</strong> {record.mobileNumber}
               </p>
               <p>
-                <strong>IPD ID:</strong> {record.ipdId}
+                <strong>UHID:</strong> {record.uhid}
               </p>
             </div>
             <div className="text-right">
@@ -415,27 +416,27 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           </div>
 
           {/* Final Summary Section */}
-          <div className="mt-4 p-2 bg-gray-100 rounded text-[9px]">
-            <p className="flex justify-between">
+          <div className="mt-4 p-2  rounded text-[9px] w-[200px] ml-auto">
+            <p className="flex justify-between w-full">
               <span>Subtotal:</span>
               <span>Rs. {subtotal.toLocaleString()}</span>
             </p>
             {discount > 0 && (
-              <p className="flex justify-between text-green-600 font-bold">
+              <p className="flex justify-between w-full text-green-600 font-bold">
                 <span>Discount:</span>
                 <span>- Rs. {discount.toLocaleString()}</span>
               </p>
             )}
             <hr className="my-1" />
-            <p className="flex justify-between font-bold">
+            <p className="flex justify-between w-full font-bold">
               <span>Net Total:</span>
               <span>Rs. {netTotal.toLocaleString()}</span>
             </p>
-            <p className="flex justify-between">
+            <p className="flex justify-between w-full">
               <span>Deposit Amount:</span>
               <span>Rs. {deposit.toLocaleString()}</span>
             </p>
-            <p className="flex justify-between text-red-600 font-bold">
+            <p className="flex justify-between w-full text-red-600 font-bold">
               <span>Due Amount:</span>
               <span>Rs. {dueAmount.toLocaleString()}</span>
             </p>
