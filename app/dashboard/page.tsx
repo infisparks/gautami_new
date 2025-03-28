@@ -85,7 +85,6 @@ interface PathologyData {
   amount?: number;
   bloodTestName?: string;
   timestamp?: number;
-  // (Assuming pathology payments do not have a breakdown)
 }
 
 // Surgery Appointment Data Structure (from patient.surgery)
@@ -258,8 +257,8 @@ const DashboardPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [monthsDataOPD, setMonthsDataOPD] = useState<{ [key: string]: number }>({});
   const [monthsDataIPD, setMonthsDataIPD] = useState<{ [key: string]: number }>({});
-  
-  // Totals for amounts (from calculateTotalAmounts are kept for backwards compatibility)
+
+  // Totals for amounts (from calculateTotals are kept for backwards compatibility)
   const [totalAmountIPD, setTotalAmountIPD] = useState<number>(0);
   const [totalAmountOPD, setTotalAmountOPD] = useState<number>(0);
   const [totalAmountPathology, setTotalAmountPathology] = useState<number>(0);
@@ -378,7 +377,7 @@ const DashboardPage: React.FC = () => {
               allAppointments.push(appointment);
             });
           }
-          // Surgery Appointments (optional)
+          // Surgery Appointments
           if (patient.surgery) {
             Object.entries(patient.surgery).forEach(([id, surgeryEntry]) => {
               const appointment: SurgeryAppointment = {
@@ -407,7 +406,7 @@ const DashboardPage: React.FC = () => {
       setOpdCount(totals.totalOpdCount);
       setIpdCount(totals.totalIpdCount);
       setPathologyCount(totals.totalPathologyCount);
-      
+
       const paymentBreakdown = calculatePaymentBreakdowns(allAppointments);
       setOpdCash(paymentBreakdown.opdCash);
       setOpdOnline(paymentBreakdown.opdOnline);
@@ -437,7 +436,7 @@ const DashboardPage: React.FC = () => {
     setMonthsDataIPD(dataIPD);
   };
 
-  // Apply filters
+  // Apply filters with updated date filter logic for IPD appointments
   const applyFilters = useCallback(
     (query: string, month: string, today: boolean, date: string) => {
       let temp = [...appointments];
@@ -464,9 +463,19 @@ const DashboardPage: React.FC = () => {
         );
       }
       if (date) {
-        temp = temp.filter(
-          (app) => format(parseISO(app.date), 'yyyy-MM-dd') === date
-        );
+        temp = temp.filter((app) => {
+          const appointmentDate = format(parseISO(app.date), 'yyyy-MM-dd');
+          if (app.appointmentType === 'IPD') {
+            const ipdApp = app as IPDAppointment;
+            const paymentDateMatch =
+              ipdApp.payments &&
+              Object.values(ipdApp.payments).some(
+                (p) => p.date && format(parseISO(p.date), 'yyyy-MM-dd') === date
+              );
+            return appointmentDate === date || paymentDateMatch;
+          }
+          return appointmentDate === date;
+        });
       }
       setFilteredAppointments(temp);
       generateMonthsData(temp);

@@ -500,7 +500,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** -------------------------------------------
    *  SELECT PATIENT FROM DROPDOWN, AUTO-FILL FORM
-   *  ------------------------------------------- */
+   *  -------------------------------------------
+   */
   const handlePatientSuggestionClick = (patient: CombinedPatient) => {
     setSelectedPatient(patient);
     setValue('name', patient.name);
@@ -530,7 +531,8 @@ const OPDBookingPage: React.FC = () => {
         const snapshot = await get(doctorRef);
         if (snapshot.exists()) {
           const data = snapshot.val();
-          setValue('amount', data.amount);
+          // Use opdCharge from the doctor record as per your firebase DB structure
+          setValue('amount', data.opdCharge || 0);
         } else {
           setValue('amount', 0);
         }
@@ -947,28 +949,6 @@ const OPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Amount Field */}
-            <div className="relative">
-              <FaDollarSign className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="number"
-                {...register('amount', {
-                  required: 'Amount is required',
-                  min: { value: 0, message: 'Amount must be positive' },
-                })}
-                placeholder="Amount (Rs)"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
-                  errors.amount ? 'border-red-500' : 'border-gray-300'
-                } transition duration-200`}
-                min="0"
-              />
-              {errors.amount && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.amount.message}
-                </p>
-              )}
-            </div>
-
             {/* Service Name Field */}
             <div className="relative">
               <FaInfoCircle className="absolute top-3 left-3 text-gray-400" />
@@ -989,7 +969,7 @@ const OPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Doctor Selection Field */}
+            {/* Doctor Selection Field (moved before Amount) */}
             <div>
               <label className="block text-gray-700 mb-2">Select Doctor</label>
               <Controller
@@ -1017,6 +997,28 @@ const OPDBookingPage: React.FC = () => {
               {errors.doctor && (
                 <p className="text-red-500 text-sm mt-1">
                   {errors.doctor.message}
+                </p>
+              )}
+            </div>
+
+            {/* Amount Field (now below Doctor Selection) */}
+            <div className="relative">
+              <FaDollarSign className="absolute top-3 left-3 text-gray-400" />
+              <input
+                type="number"
+                {...register('amount', {
+                  required: 'Amount is required',
+                  min: { value: 0, message: 'Amount must be positive' },
+                })}
+                placeholder="Amount (Rs)"
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                  errors.amount ? 'border-red-500' : 'border-gray-300'
+                } transition duration-200`}
+                min="0"
+              />
+              {errors.amount && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.amount.message}
                 </p>
               )}
             </div>
@@ -1072,13 +1074,13 @@ const OPDBookingPage: React.FC = () => {
                       {previewData.paymentMethod?.label}
                     </p>
                     <p>
-                      <strong>Amount:</strong> Rs {previewData.amount}
-                    </p>
-                    <p>
                       <strong>Service Name:</strong> {previewData.serviceName}
                     </p>
                     <p>
                       <strong>Doctor:</strong> {previewData.doctor?.label}
+                    </p>
+                    <p>
+                      <strong>Amount:</strong> Rs {previewData.amount}
                     </p>
                   </div>
                   <div className="mt-6 flex justify-end space-x-4">

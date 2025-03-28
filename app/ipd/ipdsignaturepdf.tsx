@@ -2,7 +2,7 @@
 import React from 'react';
 import jsPDF from 'jspdf';
 import { IPDFormInput } from './page';
-
+// import letterhead from "@/public/letterhead.png"
 interface IPDSignaturePDFProps {
   data: IPDFormInput;
 }
@@ -43,12 +43,16 @@ const IPDSignaturePDF: React.FC<IPDSignaturePDFProps> = ({ data }) => {
       currentY += lineHeight;
     };
 
+    // Modified addSectionTitle with extra space at the top and a little extra gap before the separator
     const addSectionTitle = (title: string) => {
+      // Add extra vertical space before the section title
+      currentY += 10;
       doc.setFont('Helvetica', 'bold');
       doc.setFontSize(11);
       doc.setTextColor(0, 0, 128); // Subtle blue for headings
       doc.text(title, leftMargin, currentY);
-      currentY += lineHeight;
+      // Add a little extra space below the heading before the separator
+      currentY += 4;
       drawSeparator();
       // Reset font for section content
       doc.setFont('Helvetica', 'normal');
@@ -88,27 +92,22 @@ const IPDSignaturePDF: React.FC<IPDSignaturePDFProps> = ({ data }) => {
       'Under Care of Doctor',
       data.doctor?.label || 'NA'
     );
-    // Removed Duty Doctor field
     addField(
       'Address',
-      data.address || 'na'
+      data.address || 'NA'
     );
     addField('Number', data.phone || 'NA');
 
     // ADMISSION DETAILS
     addSectionTitle('Admission Details');
-    // Removed UHID field
     const admissionDate = data.date ? data.date.toLocaleDateString() : '24-03-2025';
     addField('Admission Date', admissionDate);
     addField('Referral Doctor', data.referDoctor || '');
-    // Removed IP No. field
 
     // ROOM / WARD
     addSectionTitle('Room / Ward');
     addField('Room / Ward', data.roomType?.label || 'NA');
     addField('Bed No', data.bed?.label || 'NA');
-
-    // Removed Bill Details section
 
     // INSTRUCTIONS
     addSectionTitle('Instructions');
@@ -130,12 +129,10 @@ const IPDSignaturePDF: React.FC<IPDSignaturePDFProps> = ({ data }) => {
     ];
 
     instructions.forEach((instr) => {
-      // Check if we need a new page
       if (currentY > 730) {
         doc.addPage();
         currentY = 50;
       }
-      // Use splitTextToSize to add line breaks
       const splittedText = doc.splitTextToSize(instr, rightMargin - leftMargin - 15);
       doc.setFont('Helvetica', 'bold');
       doc.setTextColor(0, 0, 128);
@@ -162,16 +159,19 @@ const IPDSignaturePDF: React.FC<IPDSignaturePDFProps> = ({ data }) => {
     );
     currentY += lineHeight * 2;
 
-    // SIGNATURE BLOCK
+    // SIGNATURE BLOCK WITH TWO COLUMNS
     doc.setFont('Helvetica', 'normal');
     doc.setTextColor(60, 60, 60);
-    doc.text('Signature: ________________________________________', leftMargin, currentY);
+    // First row: Left side signature and right side Billing Executive signature
+    doc.text('Signature: ______________', leftMargin, currentY, { align: 'left' });
+    doc.text('Billing Executive: ______________', rightMargin, currentY, { align: 'right' });
+    
+    currentY += lineHeight * 2;
+    // Second row: Name field on left
+    doc.text('Name: ______________', leftMargin, currentY);
     currentY += lineHeight * 1.5;
-    doc.text('Name: _____________________________________________', leftMargin, currentY);
-    currentY += lineHeight * 1.5;
-    doc.text('Relation with Patient: _______________________________', leftMargin, currentY);
-    currentY += lineHeight * 1.5;
-    doc.text('Billing Executive: ___________________________________', leftMargin, currentY);
+    // Third row: Relation with Patient on left
+    doc.text('Relation with Patient: ______________', leftMargin, currentY);
 
     // SAVE PDF
     doc.save(`IPD_Admission_Letter_${data.name || 'Patient'}.pdf`);
