@@ -34,6 +34,7 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import Select from 'react-select';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+import Joyride, { CallBackProps, STATUS } from 'react-joyride';
 
 /** ---------------------------
  *   TYPE & CONSTANT DEFINITIONS
@@ -96,7 +97,7 @@ const GenderOptions = [
 ];
 
 /**
- * Utility function: Format a Date to 12-hour time with AM/PM
+ * Utility function: Format a Date to 12‑hour time with AM/PM
  */
 function formatAMPM(date: Date): string {
   let hours = date.getHours();
@@ -108,7 +109,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-/** Helper function to generate a 10-character alphanumeric UHID */
+/** Helper function to generate a 10‑character alphanumeric UHID */
 function generatePatientId(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -163,6 +164,66 @@ const OPDBookingPage: React.FC = () => {
   // We'll store patients from both databases separately
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
+
+  // States for Joyride (guided tour)
+  const [runTour, setRunTour] = useState(false);
+  const tourSteps = [
+    {
+      target: '[data-tour="patient-name"]',
+      content: 'Enter the patient name here.',
+    },
+    {
+      target: '[data-tour="phone"]',
+      content: 'Enter a valid 10-digit phone number here.',
+    },
+    {
+      target: '[data-tour="age"]',
+      content: 'Specify the patient’s age.',
+    },
+    {
+      target: '[data-tour="gender"]',
+      content: 'Select the patient’s gender.',
+    },
+    {
+      target: '[data-tour="address"]',
+      content: 'Fill in the address (optional).',
+    },
+    {
+      target: '[data-tour="date"]',
+      content: 'Choose the appointment date.',
+    },
+    {
+      target: '[data-tour="time"]',
+      content: 'Enter the appointment time.',
+    },
+    {
+      target: '[data-tour="message"]',
+      content: 'Add any additional message or note here (optional).',
+    },
+    {
+      target: '[data-tour="paymentMethod"]',
+      content: 'Select the payment method.',
+    },
+    {
+      target: '[data-tour="serviceName"]',
+      content: 'Enter the service name for the appointment.',
+    },
+    {
+      target: '[data-tour="doctor"]',
+      content: 'Select the doctor or choose "No Doctor".',
+    },
+    {
+      target: '[data-tour="amount"]',
+      content: 'The amount will be auto‑filled based on the doctor charge. Adjust if needed.',
+    },
+  ];
+
+  const handleJoyrideCallback = (data: CallBackProps) => {
+    const { status } = data;
+    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+      setRunTour(false);
+    }
+  };
 
   /** ---------------------------
    *  SPEECH RECOGNITION COMMANDS
@@ -394,7 +455,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** ------------------------------
    *  HOOKS: SPEECH RECOGNITION INIT
-   *  ------------------------------ */
+   *  ------------------------------
+   */
   const {
     transcript,
     resetTranscript,
@@ -522,7 +584,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** -----------------------------------------
    *  FETCH DOCTOR AMOUNT WHEN DOCTOR CHANGES
-   *  ----------------------------------------- */
+   *  -----------------------------------------
+   */
   const selectedDoctor = watch('doctor');
   const fetchDoctorAmount = useCallback(
     async (doctorId: string) => {
@@ -561,7 +624,8 @@ const OPDBookingPage: React.FC = () => {
    *  1. If an existing patient is selected, push OPD data.
    *  2. Otherwise, create a new patient record in Gautami DB (full details)
    *     and a minimal record in Medford DB, then push OPD data.
-   *  --------------------------------------------------------- */
+   *  ---------------------------------------------------------
+   */
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
     try {
@@ -665,7 +729,8 @@ const OPDBookingPage: React.FC = () => {
 
   /** -------------------------------
    *  TOGGLE START/STOP VOICE CONTROL
-   *  ------------------------------- */
+   *  -------------------------------
+   */
   const toggleListening = () => {
     if (micListening) {
       SpeechRecognition.stopListening();
@@ -680,8 +745,16 @@ const OPDBookingPage: React.FC = () => {
     }
   };
 
-  /** -----------
-   *   RENDER UI
+  /** -------------
+   *   START TOUR
+   *  -------------
+   */
+  const startTour = () => {
+    setRunTour(true);
+  };
+
+  /** ----------- 
+   *   RENDER UI 
    *  -----------
    */
   return (
@@ -694,11 +767,34 @@ const OPDBookingPage: React.FC = () => {
 
       <ToastContainer />
 
+      {/* Joyride Component for Guided Tour */}
+      <Joyride
+        steps={tourSteps}
+        run={runTour}
+        continuous
+        showSkipButton
+        showProgress
+        callback={handleJoyrideCallback}
+        styles={{
+          options: { zIndex: 10000 }
+        }}
+      />
+
       <main className="min-h-screen bg-gradient-to-r from-green-100 to-teal-200 flex items-center justify-center p-6">
         <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl p-10">
-          <h2 className="text-3xl font-bold text-center text-teal-600 mb-8">
-            Book an Appointment
-          </h2>
+          <div className="flex justify-between items-center mb-8">
+            <h2 className="text-3xl font-bold text-center text-teal-600">
+              Book an Appointment
+            </h2>
+            {/* Helper Button to Start the Tour */}
+            <button
+              type="button"
+              onClick={startTour}
+              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              Help
+            </button>
+          </div>
 
           {/* Voice Control Buttons */}
           <div className="flex justify-center mb-6 space-x-4">
@@ -736,7 +832,7 @@ const OPDBookingPage: React.FC = () => {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Patient Name Field with Auto-Suggest */}
-            <div className="relative">
+            <div className="relative" data-tour="patient-name">
               <FaUser className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
@@ -778,7 +874,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Phone Field */}
-            <div className="relative">
+            <div className="relative" data-tour="phone">
               <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="tel"
@@ -802,7 +898,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Age Field */}
-            <div className="relative">
+            <div className="relative" data-tour="age">
               <FaBirthdayCake className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"
@@ -823,7 +919,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Gender Field */}
-            <div>
+            <div data-tour="gender">
               <label className="block text-gray-700 mb-2">Gender</label>
               <Controller
                 control={control}
@@ -847,7 +943,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Address Field */}
-            <div className="relative">
+            <div className="relative" data-tour="address">
               <FaMapMarkerAlt className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
@@ -858,7 +954,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Date Field */}
-            <div className="relative">
+            <div className="relative" data-tour="date">
               <FaCalendarAlt className="absolute top-3 left-3 text-gray-400" />
               <Controller
                 control={control}
@@ -886,7 +982,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Time Field */}
-            <div className="relative">
+            <div className="relative" data-tour="time">
               <FaClock className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
@@ -905,7 +1001,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Message Field */}
-            <div className="relative">
+            <div className="relative" data-tour="message">
               <FaRegCommentDots className="absolute top-3 left-3 text-gray-400" />
               <textarea
                 {...register('message')}
@@ -923,7 +1019,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Payment Method Field */}
-            <div>
+            <div data-tour="paymentMethod">
               <label className="block text-gray-700 mb-2">Payment Method</label>
               <Controller
                 control={control}
@@ -950,7 +1046,7 @@ const OPDBookingPage: React.FC = () => {
             </div>
 
             {/* Service Name Field */}
-            <div className="relative">
+            <div className="relative" data-tour="serviceName">
               <FaInfoCircle className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="text"
@@ -969,8 +1065,8 @@ const OPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Doctor Selection Field (moved before Amount) */}
-            <div>
+            {/* Doctor Selection Field */}
+            <div data-tour="doctor">
               <label className="block text-gray-700 mb-2">Select Doctor</label>
               <Controller
                 control={control}
@@ -1001,8 +1097,8 @@ const OPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Amount Field (now below Doctor Selection) */}
-            <div className="relative">
+            {/* Amount Field */}
+            <div className="relative" data-tour="amount">
               <FaDollarSign className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="number"

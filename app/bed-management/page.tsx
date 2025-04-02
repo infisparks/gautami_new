@@ -12,11 +12,10 @@ import {
   AiOutlinePlus,
   AiOutlineEdit,
   AiOutlineDelete,
-  AiOutlineCheckCircle,
-  AiOutlineCloseCircle,
   AiOutlineUser,
   AiOutlineInfoCircle,
 } from 'react-icons/ai';
+import { FaBed, FaDoorOpen } from 'react-icons/fa';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Select from 'react-select';
@@ -30,24 +29,26 @@ interface BedFormInput {
 }
 
 // Define the validation schema using Yup
-const bedSchema: ObjectSchema<BedFormInput> = yup.object({
-  roomType: yup
-    .object({
-      label: yup.string().required(),
-      value: yup.string().required(),
-    })
-    .nullable()
-    .required('Room Type is required'),
-  bedNumber: yup.string().required('Bed Number is required'),
-  type: yup.string().required('Bed Type is required'),
-  status: yup
-    .object({
-      label: yup.string().required(),
-      value: yup.string().required(),
-    })
-    .nullable()
-    .required('Status is required'),
-}).required();
+const bedSchema: ObjectSchema<BedFormInput> = yup
+  .object({
+    roomType: yup
+      .object({
+        label: yup.string().required(),
+        value: yup.string().required(),
+      })
+      .nullable()
+      .required('Room Type is required'),
+    bedNumber: yup.string().required('Bed Number is required'),
+    type: yup.string().required('Bed Type is required'),
+    status: yup
+      .object({
+        label: yup.string().required(),
+        value: yup.string().required(),
+      })
+      .nullable()
+      .required('Status is required'),
+  })
+  .required();
 
 const RoomTypeOptions = [
   { value: 'female_ward', label: 'Female Ward' },
@@ -224,9 +225,7 @@ const BedManagementPage: React.FC = () => {
                     options={RoomTypeOptions}
                     placeholder="Select Room Type"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.roomType ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                    className={`${errors.roomType ? 'border-red-500' : 'border-gray-300'}`}
                     isDisabled={!!editingBed} // Disable room type selection when editing
                     onChange={(value) => field.onChange(value)}
                     value={field.value || null}
@@ -276,9 +275,7 @@ const BedManagementPage: React.FC = () => {
                     options={StatusOptions}
                     placeholder="Select Status"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.status ? 'border-red-500' : 'border-gray-300'
-                    }`}
+                    className={`${errors.status ? 'border-red-500' : 'border-gray-300'}`}
                     onChange={(value) => field.onChange(value)}
                     value={field.value || null}
                   />
@@ -295,80 +292,68 @@ const BedManagementPage: React.FC = () => {
                 loading ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
-              {loading
-                ? 'Processing...'
-                : editingBed
-                ? (
-                  <>
-                    <AiOutlineEdit className="mr-2" />
-                    Update Bed
-                  </>
-                )
-                : (
-                  <>
-                    <AiOutlinePlus className="mr-2" />
-                    Add Bed
-                  </>
-                )}
+              {loading ? (
+                'Processing...'
+              ) : editingBed ? (
+                <>
+                  <AiOutlineEdit className="mr-2" />
+                  Update Bed
+                </>
+              ) : (
+                <>
+                  <AiOutlinePlus className="mr-2" />
+                  Add Bed
+                </>
+              )}
             </button>
           </form>
         </div>
 
-        {/* Existing Beds Table */}
+        {/* Existing Beds - Room Layout */}
         <div className="w-full max-w-6xl bg-white rounded-3xl shadow-xl p-10">
-          <h3 className="text-2xl font-semibold text-center text-teal-600 mb-6">Existing Beds</h3>
+          <h3 className="text-2xl font-semibold text-center text-teal-600 mb-8">Existing Beds</h3>
           {roomTypes.length === 0 ? (
-            <p className="text-gray-500">No beds available.</p>
+            <p className="text-gray-500 text-center">No beds available.</p>
           ) : (
             <div className="space-y-8">
               {roomTypes.map((room, index) => (
-                <div key={index}>
-                  <h4 className="text-xl font-medium text-gray-700 mb-4">{room.roomName}</h4>
-                  <table className="w-full table-auto border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="border px-4 py-2">Bed Number</th>
-                        <th className="border px-4 py-2">Type</th>
-                        <th className="border px-4 py-2">Status</th>
-                        <th className="border px-4 py-2">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {room.beds.map((bed, bedIndex) => (
-                        <tr key={bedIndex} className="text-center">
-                          <td className="border px-4 py-2">{bed.bedNumber}</td>
-                          <td className="border px-4 py-2">{bed.type}</td>
-                          <td className="border px-4 py-2">
-                            {bed.status === 'Available' ? (
-                              <div className="flex items-center justify-center text-green-500">
-                                <AiOutlineCheckCircle size={20} className="mr-2" />
-                                Available
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center text-red-500">
-                                <AiOutlineCloseCircle size={20} className="mr-2" />
-                                Occupied
-                              </div>
-                            )}
-                          </td>
-                          <td className="border px-4 py-2">
-                            <button
-                              onClick={() => handleEdit(room.roomName.toLowerCase().replace(' ', '_'), bed)}
-                              className="text-blue-500 hover:text-blue-700 mr-4"
-                            >
-                              <AiOutlineEdit size={20} />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(room.roomName.toLowerCase().replace(' ', '_'), bed.id)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              <AiOutlineDelete size={20} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div key={index} className="bg-gray-50 p-6 rounded-lg shadow-md border">
+                  <div className="flex items-center mb-4">
+                    <FaDoorOpen size={28} className="text-teal-600 mr-2" />
+                    <h4 className="text-xl font-bold text-teal-700">{room.roomName}</h4>
+                  </div>
+                  <div className="flex flex-wrap gap-6">
+                    {room.beds.map((bed, bedIndex) => (
+                      <div
+                        key={bedIndex}
+                        className="relative flex flex-col items-center justify-center p-4 border rounded-lg bg-white shadow-sm"
+                      >
+                        <FaBed
+                          size={32}
+                          className={bed.status === 'Available' ? 'text-green-500' : 'text-red-500'}
+                        />
+                        <span className="mt-2 font-medium">{bed.bedNumber}</span>
+                        <div className="flex mt-2 space-x-2">
+                          <button
+                            onClick={() =>
+                              handleEdit(room.roomName.toLowerCase().replace(' ', '_'), bed)
+                            }
+                            className="text-blue-500 hover:text-blue-700"
+                          >
+                            <AiOutlineEdit size={20} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleDelete(room.roomName.toLowerCase().replace(' ', '_'), bed.id)
+                            }
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            <AiOutlineDelete size={20} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -376,9 +361,7 @@ const BedManagementPage: React.FC = () => {
         </div>
       </main>
     </>
-
   );
-
 };
 
 export default BedManagementPage;

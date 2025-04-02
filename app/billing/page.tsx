@@ -6,7 +6,6 @@ import { db } from "@/lib/firebase";
 import { format, parseISO } from "date-fns";
 import { useRouter } from "next/navigation";
 
-// ===== Interfaces =====
 interface ServiceItem {
   serviceName: string;
   doctorName?: string;
@@ -35,7 +34,6 @@ interface BillingRecord {
   relativeAddress?: string;
   dischargeDate?: string;
   amount: number;
-  paymentType: string;
   roomType?: string;
   bed?: string;
   services: ServiceItem[];
@@ -50,7 +48,9 @@ export default function PatientsPage() {
   const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge");
   const router = useRouter();
 
-  // ===== Fetch Patients Data =====
+  /* ---------------------------
+     Fetch Patients & IPD Records
+  --------------------------- */
   useEffect(() => {
     const patientsRef = ref(db, "patients");
     const unsubscribe = onValue(patientsRef, (snapshot) => {
@@ -106,7 +106,6 @@ export default function PatientsPage() {
               relativePhone: ipd.relativePhone || "",
               relativeAddress: ipd.relativeAddress || "",
               amount: Number(ipd.amount || 0),
-              paymentType: ipd.paymentType || "deposit",
               roomType: ipd.roomType || "",
               bed: ipd.bed || "",
               services: servicesArray,
@@ -126,19 +125,19 @@ export default function PatientsPage() {
     return () => unsubscribe();
   }, []);
 
-  // ===== Filter Records by Tab and Search Term =====
+  /* ---------------------------
+     Filtering & Sorting
+  --------------------------- */
   useEffect(() => {
     const term = searchTerm.trim().toLowerCase();
     let records = [...allRecords];
 
-    // Apply tab filter: "non-discharge" shows only records without a dischargeDate, "discharge" shows those with a dischargeDate.
     if (selectedTab === "non-discharge") {
       records = records.filter((rec) => !rec.dischargeDate);
     } else if (selectedTab === "discharge") {
       records = records.filter((rec) => rec.dischargeDate);
     }
 
-    // Apply search filter if a term is entered.
     if (term) {
       records = records.filter(
         (rec) =>
@@ -151,7 +150,6 @@ export default function PatientsPage() {
     setFilteredRecords(records);
   }, [allRecords, searchTerm, selectedTab]);
 
-  // ===== Sorting by Date =====
   const getRecordDate = (record: BillingRecord): Date => {
     if (record.dischargeDate) {
       return new Date(record.dischargeDate);
@@ -166,100 +164,112 @@ export default function PatientsPage() {
     (a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime()
   );
 
-  // ===== Handle Record Selection =====
-  const handleSelectRecord = (record: BillingRecord) => {
-    // Navigate to billing management page with patientId and ipdId as route params
+  /* ---------------------------
+     Navigation Handlers
+  --------------------------- */
+  const handleRowClick = (record: BillingRecord) => {
+    // Navigate to the details page at billing/[patientId]/[ipdId]/page.tsx
     router.push(`/billing/${record.patientId}/${record.ipdId}`);
+  };
+
+  const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
+    // Prevent the row click when clicking Edit
+    e.stopPropagation();
+    // Redirect to the edit route under billing/edit/[patientId]/[ipdId]/page.tsx
+    router.push(`/billing/edit/${record.patientId}/${record.ipdId}`);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">
-        IPD Billing Management - Select Patient
-      </h1>
-      
-      {/* Tabs for filtering by discharge status */}
-      <div className="flex justify-center mb-4">
-        <div className="inline-flex shadow rounded-lg" role="tablist">
-          <button
-            onClick={() => setSelectedTab("non-discharge")}
-            className={`px-4 py-2 rounded-l-lg focus:outline-none transition-colors duration-300 ${
-              selectedTab === "non-discharge"
-                ? "bg-indigo-600 text-white"
-                : "bg-white text-gray-600 hover:bg-gray-100"
-            }`}
-          >
-            Non Discharged
-          </button>
-          <button
-            onClick={() => setSelectedTab("discharge")}
-            className={`px-4 py-2 rounded-r-lg focus:outline-none transition-colors duration-300 ${
-              selectedTab === "discharge"
-                ? "bg-indigo-600 text-white"
-                : "bg-white text-gray-600 hover:bg-gray-100"
-            }`}
-          >
-            Discharged
-          </button>
-        </div>
-      </div>
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">
+          IPD Billing Management
+        </h1>
 
-      {/* Search Bar */}
-      <div className="mb-8 flex justify-center">
-        <div className="flex items-center bg-gray-100 rounded-full p-2 w-full max-w-md">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by Name, IPD ID, or Mobile"
-            className="flex-grow bg-transparent px-4 py-2 focus:outline-none"
-          />
+        {/* Tabs */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex shadow rounded-lg overflow-hidden" role="tablist">
+            <button
+              onClick={() => setSelectedTab("non-discharge")}
+              className={`px-6 py-3 font-medium transition-colors duration-300 ${
+                selectedTab === "non-discharge"
+                  ? "bg-indigo-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Non Discharged
+            </button>
+            <button
+              onClick={() => setSelectedTab("discharge")}
+              className={`px-6 py-3 font-medium transition-colors duration-300 ${
+                selectedTab === "discharge"
+                  ? "bg-indigo-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              Discharged
+            </button>
+          </div>
         </div>
-      </div>
-      
-      {/* Table Container */}
-      {sortedRecords.length === 0 ? (
-        <p className="text-gray-500 text-center">No records found.</p>
-      ) : (
-        <div className="overflow-x-auto bg-white shadow rounded-lg">
-          <table className="min-w-full">
-            <thead>
-              <tr className="bg-indigo-100">
-                <th className="px-4 py-2 text-left">Rank</th>
-                <th className="px-4 py-2 text-left">Patient Name</th>
-                <th className="px-4 py-2 text-left">Mobile Number</th>
-                <th className="px-4 py-2 text-left">Total Deposit (Rs)</th>
-                <th className="px-4 py-2 text-left">Payment Type</th>
-                <th className="px-4 py-2 text-left">Discharge Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedRecords.map((rec, index) => (
-                <tr
-                  key={`${rec.patientId}-${rec.ipdId}`}
-                  className="hover:bg-indigo-50 cursor-pointer transition duration-150"
-                  onClick={() => handleSelectRecord(rec)}
-                >
-                  <td className="border-t px-4 py-2">{index + 1}</td>
-                  <td className="border-t px-4 py-2">{rec.name}</td>
-                  <td className="border-t px-4 py-2">{rec.mobileNumber}</td>
-                  <td className="border-t px-4 py-2">
-                    {rec.amount.toLocaleString()}
-                  </td>
-                  <td className="border-t px-4 py-2 capitalize">
-                    {rec.paymentType}
-                  </td>
-                  <td className="border-t px-4 py-2">
-                    {rec.dischargeDate
-                      ? format(parseISO(rec.dischargeDate), "dd MMM yyyy")
-                      : "Not discharged"}
-                  </td>
+
+        {/* Search */}
+        <div className="mb-6 flex justify-center">
+          <div className="flex items-center bg-gray-100 rounded-full px-4 py-2 w-full max-w-md shadow">
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by Name, IPD ID, or Mobile"
+              className="flex-grow bg-transparent outline-none text-gray-700"
+            />
+          </div>
+        </div>
+
+        {/* Records Table */}
+        {sortedRecords.length === 0 ? (
+          <p className="text-center text-gray-500">No records found.</p>
+        ) : (
+          <div className="overflow-x-auto bg-white rounded-lg shadow-lg">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-indigo-100">
+                <tr>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Rank</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Patient Name</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Mobile Number</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Total Deposit (Rs)</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Room Type</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sortedRecords.map((rec, index) => (
+                  <tr
+                    key={`${rec.patientId}-${rec.ipdId}`}
+                    onClick={() => handleRowClick(rec)}
+                    className="hover:bg-indigo-50 transition-colors duration-200 cursor-pointer"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{index + 1}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.name}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.mobileNumber}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
+                      {rec.amount.toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.roomType}</td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <button
+                        onClick={(e) => handleEditRecord(e, rec)}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-150"
+                      >
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
