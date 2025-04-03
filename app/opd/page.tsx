@@ -4,14 +4,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { db } from '../../lib/firebase'; // Gautami DB
 import { db as dbMedford } from '../../lib/firebaseMedford'; // Medford Family DB
-import {
-  ref,
-  push,
-  update,
-  get,
-  onValue,
-  set
-} from 'firebase/database';
+import { ref, push, update, get, onValue, set } from 'firebase/database';
 import Head from 'next/head';
 import {
   FaUser,
@@ -161,6 +154,11 @@ const OPDBookingPage: React.FC = () => {
   const [patientSuggestions, setPatientSuggestions] = useState<CombinedPatient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
 
+  // New states for phone auto-complete
+  const [patientPhoneInput, setPatientPhoneInput] = useState('');
+  const [phoneSuggestions, setPhoneSuggestions] = useState<CombinedPatient[]>([]);
+  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
   // We'll store patients from both databases separately
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
@@ -174,7 +172,7 @@ const OPDBookingPage: React.FC = () => {
     },
     {
       target: '[data-tour="phone"]',
-      content: 'Enter a valid 10-digit phone number here.',
+      content: 'Enter a valid 10-digit phone number here. You can also search by number.',
     },
     {
       target: '[data-tour="age"]',
@@ -220,7 +218,7 @@ const OPDBookingPage: React.FC = () => {
 
   const handleJoyrideCallback = (data: CallBackProps) => {
     const { status } = data;
-    if ([STATUS.FINISHED, STATUS.SKIPPED].includes(status)) {
+    if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
       setRunTour(false);
     }
   };
@@ -260,6 +258,7 @@ const OPDBookingPage: React.FC = () => {
       command: 'number *',
       callback: (phone: string) => {
         const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setPatientPhoneInput(sanitizedPhone);
         setValue('phone', sanitizedPhone, { shouldValidate: true });
         toast.info(`Phone number set to: ${sanitizedPhone}`);
       },
@@ -268,6 +267,7 @@ const OPDBookingPage: React.FC = () => {
       command: 'mera number *',
       callback: (phone: string) => {
         const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setPatientPhoneInput(sanitizedPhone);
         setValue('phone', sanitizedPhone, { shouldValidate: true });
         toast.info(`Phone number set to: ${sanitizedPhone}`);
       },
@@ -276,6 +276,7 @@ const OPDBookingPage: React.FC = () => {
       command: 'my number *',
       callback: (phone: string) => {
         const sanitizedPhone = phone.replace(/\D/g, '').trim();
+        setPatientPhoneInput(sanitizedPhone);
         setValue('phone', sanitizedPhone, { shouldValidate: true });
         toast.info(`Phone number set to: ${sanitizedPhone}`);
       },
@@ -541,11 +542,10 @@ const OPDBookingPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Combined suggestions from both sources
+  // Combined suggestions for the name field are updated when patientNameInput changes.
   useEffect(() => {
     const allCombined = [...gautamiPatients, ...medfordPatients];
     if (patientNameInput.length >= 2) {
-      // If a patient is selected and the input exactly matches, clear suggestions.
       if (selectedPatient && patientNameInput === selectedPatient.name) {
         setPatientSuggestions([]);
       } else {
@@ -568,17 +568,17 @@ const OPDBookingPage: React.FC = () => {
     setSelectedPatient(patient);
     setValue('name', patient.name);
     setValue('phone', patient.phone || '');
-    // For gender and address, populate if available (from Gautami)
+    setPatientNameInput(patient.name);
+    setPatientPhoneInput(patient.phone || '');
     if (patient.source === 'gautami') {
       setValue('address', (patient.data as PatientRecord).address);
       setValue('age', (patient.data as PatientRecord).age || 0);
       setValue('gender', GenderOptions.find(opt => opt.value === (patient.data as PatientRecord).gender) || null);
     } else {
-      // For Medford, we may have only gender available
       setValue('gender', GenderOptions.find(opt => opt.value === (patient.data as MedfordPatient).gender) || null);
     }
-    setPatientNameInput(patient.name);
     setPatientSuggestions([]);
+    setPhoneSuggestions([]);
     toast.info(`Patient ${patient.name} selected from ${patient.source.toUpperCase()}!`);
   };
 
@@ -594,7 +594,6 @@ const OPDBookingPage: React.FC = () => {
         const snapshot = await get(doctorRef);
         if (snapshot.exists()) {
           const data = snapshot.val();
-          // Use opdCharge from the doctor record as per your firebase DB structure
           setValue('amount', data.opdCharge || 0);
         } else {
           setValue('amount', 0);
@@ -629,7 +628,6 @@ const OPDBookingPage: React.FC = () => {
   const onSubmit: SubmitHandler<IFormInput> = async (data) => {
     setLoading(true);
     try {
-      // OPD appointment data
       const appointmentData = {
         date: data.date.toISOString(),
         time: data.time,
@@ -643,9 +641,7 @@ const OPDBookingPage: React.FC = () => {
 
       let patientId = '';
       if (selectedPatient) {
-        // Existing patient
         patientId = selectedPatient.id;
-        // Optionally update patient info in Gautami DB here if needed...
         const patientRef = ref(db, `patients/${patientId}`);
         await update(patientRef, {
           name: data.name,
@@ -655,7 +651,6 @@ const OPDBookingPage: React.FC = () => {
           gender: data.gender?.value || ''
         });
       } else {
-        // New patient: create full record in Gautami and minimal record in Medford
         const newPatientId = generatePatientId();
         const newPatientData = {
           name: data.name,
@@ -667,19 +662,17 @@ const OPDBookingPage: React.FC = () => {
           uhid: newPatientId,
         };
         await set(ref(db, `patients/${newPatientId}`), newPatientData);
-        // Minimal record for Medford Family DB
         await set(ref(dbMedford, `patients/${newPatientId}`), {
           name: data.name,
           contact: data.phone,
           gender: data.gender?.value || '',
-          dob: "", // Set to empty or update with proper value if available
+          dob: "",
           patientId: newPatientId,
           hospitalName: "MEDFORD",
         });
         patientId = newPatientId;
       }
 
-      // Push appointment data under patients/{patientId}/opd/{unique_opd_key}
       const opdRef = ref(db, `patients/${patientId}/opd`);
       const newOpdRef = push(opdRef);
       await update(newOpdRef, appointmentData);
@@ -689,7 +682,6 @@ const OPDBookingPage: React.FC = () => {
         autoClose: 5000,
       });
 
-      // Reset form & states
       reset({
         name: '',
         phone: '',
@@ -698,9 +690,9 @@ const OPDBookingPage: React.FC = () => {
         address: '',
         date: new Date(),
         time: formatAMPM(new Date()),
+        message: '',
         paymentMethod: null,
         amount: 0,
-        message: '',
         serviceName: '',
         doctor: null,
       });
@@ -708,6 +700,7 @@ const OPDBookingPage: React.FC = () => {
       resetTranscript();
       setSelectedPatient(null);
       setPatientNameInput('');
+      setPatientPhoneInput('');
     } catch (error) {
       console.error('Error booking appointment:', error);
       toast.error('Failed to book appointment. Please try again.', {
@@ -720,7 +713,7 @@ const OPDBookingPage: React.FC = () => {
   };
 
   /** -------------
-   *  FORM PREVIEW
+   *   FORM PREVIEW
    *  -------------
    */
   const handlePreview = () => {
@@ -753,8 +746,8 @@ const OPDBookingPage: React.FC = () => {
     setRunTour(true);
   };
 
-  /** ----------- 
-   *   RENDER UI 
+  /** -----------
+   *   RENDER UI
    *  -----------
    */
   return (
@@ -780,13 +773,45 @@ const OPDBookingPage: React.FC = () => {
         }}
       />
 
+      {/* Voice Control Buttons */}
+      <div className="flex justify-center mb-6 space-x-4">
+        <button
+          type="button"
+          onClick={toggleListening}
+          className="flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        >
+          {micListening ? (
+            <FaMicrophoneSlash className="mr-2" />
+          ) : (
+            <FaMicrophone className="mr-2" />
+          )}
+          {micListening ? 'Stop Listening' : 'Start Voice Control'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            resetTranscript();
+            toast.info('Transcript cleared.');
+          }}
+          className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400"
+        >
+          Reset Transcript
+        </button>
+      </div>
+
+      {micListening && (
+        <div className="mb-6 p-4 bg-gray-100 rounded-lg">
+          <h3 className="text-lg font-semibold mb-2">Listening...</h3>
+          <p className="text-gray-700">{transcript}</p>
+        </div>
+      )}
+
       <main className="min-h-screen bg-gradient-to-r from-green-100 to-teal-200 flex items-center justify-center p-6">
         <div className="w-full max-w-3xl bg-white rounded-3xl shadow-xl p-10">
           <div className="flex justify-between items-center mb-8">
             <h2 className="text-3xl font-bold text-center text-teal-600">
               Book an Appointment
             </h2>
-            {/* Helper Button to Start the Tour */}
             <button
               type="button"
               onClick={startTour}
@@ -795,40 +820,6 @@ const OPDBookingPage: React.FC = () => {
               Help
             </button>
           </div>
-
-          {/* Voice Control Buttons */}
-          <div className="flex justify-center mb-6 space-x-4">
-            <button
-              type="button"
-              onClick={toggleListening}
-              className="flex items-center px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {micListening ? (
-                <FaMicrophoneSlash className="mr-2" />
-              ) : (
-                <FaMicrophone className="mr-2" />
-              )}
-              {micListening ? 'Stop Listening' : 'Start Voice Control'}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                resetTranscript();
-                toast.info('Transcript cleared.');
-              }}
-              className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-400"
-            >
-              Reset Transcript
-            </button>
-          </div>
-
-          {/* Display Transcript */}
-          {micListening && (
-            <div className="mb-6 p-4 bg-gray-100 rounded-lg">
-              <h3 className="text-lg font-semibold mb-2">Listening...</h3>
-              <p className="text-gray-700">{transcript}</p>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Patient Name Field with Auto-Suggest */}
@@ -848,20 +839,17 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
               />
               {errors.name && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.name.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>
               )}
-              {/* Suggestions Dropdown with Tick Icons */}
               {patientSuggestions.length > 0 && !selectedPatient && (
                 <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto">
                   {patientSuggestions.map((suggestion) => (
                     <li
                       key={suggestion.id}
-                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
+                      className="px-4 py-2 hover:bg-green-100 cursor-pointer flex justify-between items-center"
                       onClick={() => handlePatientSuggestionClick(suggestion)}
                     >
-                      <span>{`${suggestion.name} - ${suggestion.phone || ""}`}</span>
+                      <span>{`${suggestion.name} - ${suggestion.phone || ''}`}</span>
                       {suggestion.source === "gautami" ? (
                         <FaCheckCircle color="green" />
                       ) : (
@@ -873,27 +861,53 @@ const OPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* Phone Field */}
+            {/* Phone Field with Auto-Suggest */}
             <div className="relative" data-tour="phone">
               <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="tel"
-                {...register('phone', {
-                  required: 'Phone number is required',
-                  pattern: {
-                    value: /^[0-9]{10}$/,
-                    message: 'Phone number must be 10 digits',
-                  },
-                })}
+                value={patientPhoneInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPatientPhoneInput(val);
+                  setValue('phone', val, { shouldValidate: true });
+                  if (val.trim().length >= 2) {
+                    const suggestions = [...gautamiPatients, ...medfordPatients].filter(
+                      (p) => p.phone && p.phone.includes(val)
+                    );
+                    setPhoneSuggestions(suggestions);
+                  } else {
+                    setPhoneSuggestions([]);
+                  }
+                }}
                 placeholder="Phone Number"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 ${
                   errors.phone ? 'border-red-500' : 'border-gray-300'
                 } transition duration-200`}
               />
               {errors.phone && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.phone.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>
+              )}
+              {phoneSuggestions.length > 0 && (
+                <ul
+                  ref={phoneSuggestionBoxRef}
+                  className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto"
+                >
+                  {phoneSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.id}
+                      onClick={() => handlePatientSuggestionClick(suggestion)}
+                      className="px-4 py-2 hover:bg-green-100 cursor-pointer flex justify-between items-center"
+                    >
+                      <span>{`${suggestion.name} - ${suggestion.phone || ''}`}</span>
+                      {suggestion.source === "gautami" ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
@@ -912,9 +926,7 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
               />
               {errors.age && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.age.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.age.message}</p>
               )}
             </div>
 
@@ -936,9 +948,7 @@ const OPDBookingPage: React.FC = () => {
                 )}
               />
               {errors.gender && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.gender.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.gender.message}</p>
               )}
             </div>
 
@@ -975,9 +985,7 @@ const OPDBookingPage: React.FC = () => {
                 )}
               />
               {errors.date && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.date.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.date.message}</p>
               )}
             </div>
 
@@ -994,9 +1002,7 @@ const OPDBookingPage: React.FC = () => {
                 defaultValue={formatAMPM(new Date())}
               />
               {errors.time && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.time.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.time.message}</p>
               )}
             </div>
 
@@ -1012,9 +1018,7 @@ const OPDBookingPage: React.FC = () => {
                 rows={3}
               ></textarea>
               {errors.message && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.message.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.message.message}</p>
               )}
             </div>
 
@@ -1031,17 +1035,13 @@ const OPDBookingPage: React.FC = () => {
                     options={PaymentOptions}
                     placeholder="Select Payment Method"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.paymentMethod ? 'border-red-500' : 'border-gray-300'
-                    }`}
                     onChange={(value) => field.onChange(value)}
+                    className={`${errors.paymentMethod ? 'border-red-500' : 'border-gray-300'}`}
                   />
                 )}
               />
               {errors.paymentMethod && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.paymentMethod.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.paymentMethod.message}</p>
               )}
             </div>
 
@@ -1059,9 +1059,7 @@ const OPDBookingPage: React.FC = () => {
                 } transition duration-200`}
               />
               {errors.serviceName && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.serviceName.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.serviceName.message}</p>
               )}
             </div>
 
@@ -1078,22 +1076,18 @@ const OPDBookingPage: React.FC = () => {
                     options={doctors}
                     placeholder="Select Doctor or No Doctor"
                     classNamePrefix="react-select"
-                    className={`${
-                      errors.doctor ? 'border-red-500' : 'border-gray-300'
-                    }`}
                     isClearable
                     onChange={(value) => field.onChange(value)}
                     menuIsOpen={doctorMenuIsOpen}
                     onMenuClose={() => setDoctorMenuIsOpen(false)}
                     onMenuOpen={() => setDoctorMenuIsOpen(true)}
                     ref={doctorSelectRef}
+                    className={`${errors.doctor ? 'border-red-500' : 'border-gray-300'}`}
                   />
                 )}
               />
               {errors.doctor && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.doctor.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.doctor.message}</p>
               )}
             </div>
 
@@ -1113,9 +1107,7 @@ const OPDBookingPage: React.FC = () => {
                 min="0"
               />
               {errors.amount && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.amount.message}
-                </p>
+                <p className="text-red-500 text-sm mt-1">{errors.amount.message}</p>
               )}
             </div>
 
@@ -1132,9 +1124,7 @@ const OPDBookingPage: React.FC = () => {
             {previewData && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg">
-                  <h3 className="text-2xl font-semibold mb-4">
-                    Preview Appointment
-                  </h3>
+                  <h3 className="text-2xl font-semibold mb-4">Preview Appointment</h3>
                   <div className="space-y-2">
                     <p>
                       <strong>Name:</strong> {previewData.name}
@@ -1154,8 +1144,7 @@ const OPDBookingPage: React.FC = () => {
                       </p>
                     )}
                     <p>
-                      <strong>Date:</strong>{' '}
-                      {previewData.date.toLocaleDateString()}
+                      <strong>Date:</strong> {previewData.date.toLocaleDateString()}
                     </p>
                     <p>
                       <strong>Time:</strong> {previewData.time}
@@ -1166,8 +1155,7 @@ const OPDBookingPage: React.FC = () => {
                       </p>
                     )}
                     <p>
-                      <strong>Payment Method:</strong>{' '}
-                      {previewData.paymentMethod?.label}
+                      <strong>Payment Method:</strong> {previewData.paymentMethod?.label}
                     </p>
                     <p>
                       <strong>Service Name:</strong> {previewData.serviceName}

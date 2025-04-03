@@ -261,7 +261,7 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
             <div className="bg-white rounded-full p-1 shadow-md">
               <Image src={logo} alt="Logo" width={42} height={42} className="rounded-full" />
             </div>
-            <span className="text-xl font-bold text-white ml-2">Gautami Hospital</span>
+            <span className="text-xl font-bold text-white ml-2">Gautami Medford</span>
           </div>
         </div>
 

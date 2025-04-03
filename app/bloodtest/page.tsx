@@ -126,6 +126,14 @@ const PathologyEntryPage: React.FC = () => {
   const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
   const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
+  // For the name field local typed text (optional)
+  const [patientNameInput, setPatientNameInput] = useState("");
+
+  // Phone auto-complete states
+  const [patientPhoneInput, setPatientPhoneInput] = useState("");
+  const [phoneSuggestions, setPhoneSuggestions] = useState<CombinedPatient[]>([]);
+  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
   // Blood test suggestions
   const [filteredBloodTests, setFilteredBloodTests] = useState<string[]>([]);
   const [showBloodTestSuggestions, setShowBloodTestSuggestions] = useState(false);
@@ -140,7 +148,6 @@ const PathologyEntryPage: React.FC = () => {
 
   /* ------------------------------------------------------------------
      4. Fetch data from Firebase (on mount only) 
-        => These must have `[]` in the dependency array to avoid re-runs
   ------------------------------------------------------------------ */
 
   // === Fetch Blood Tests ===
@@ -226,18 +233,17 @@ const PathologyEntryPage: React.FC = () => {
   const allCombinedPatients = [...gautamiPatients, ...medfordPatients];
 
   /* ------------------------------------------------------------------
-     5. Patient Name Auto-Complete
-     Instead of `useEffect` on watch(name), we use a custom onChange.
+     5. Name Auto-Complete
   ------------------------------------------------------------------ */
   const handlePatientNameChange = (
     e: React.ChangeEvent<HTMLInputElement>,
     onChangeFn: (...event: any[]) => void
   ) => {
-    // First let react-hook-form track this new value
+    // Let react-hook-form track this new value
     onChangeFn(e);
-
-    // Then do the suggestion filtering:
     const inputValue = e.target.value.trim();
+    setPatientNameInput(inputValue);
+
     if (inputValue.length >= 2) {
       const lower = inputValue.toLowerCase();
       const suggestions = allCombinedPatients.filter((p) =>
@@ -250,42 +256,70 @@ const PathologyEntryPage: React.FC = () => {
     }
   };
 
-  // When user clicks on a patient suggestion
+  /* ------------------------------------------------------------------
+     6. Phone Auto-Complete
+  ------------------------------------------------------------------ */
+  const handlePatientPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputValue = e.target.value;
+    setPatientPhoneInput(inputValue);
+    setValue("phone", inputValue);
+
+    if (inputValue.trim().length >= 2) {
+      const suggestions = allCombinedPatients.filter(
+        (p) => p.phone && p.phone.includes(inputValue)
+      );
+      setPhoneSuggestions(suggestions);
+      setSelectedPatient(null);
+    } else {
+      setPhoneSuggestions([]);
+    }
+  };
+
+  /* ------------------------------------------------------------------
+     7. On Select: Fill in all known details
+  ------------------------------------------------------------------ */
   const handlePatientSuggestionClick = (patient: CombinedPatient) => {
     setSelectedPatient(patient);
+
     // Fill form fields from this patient's data
     setValue("name", patient.name);
+    setPatientNameInput(patient.name);
+
     setValue("phone", patient.phone || "");
+    setPatientPhoneInput(patient.phone || "");
+
     if (patient.source === "gautami") {
       const gData = patient.data as GautamiPatient;
       setValue("address", gData.address);
       setValue("age", gData.age);
       setValue("gender", gData.gender);
     } else {
+      // medford
       const mData = patient.data as MedfordPatient;
       setValue("gender", mData.gender);
     }
+
     // Clear suggestions
     setPatientSuggestions([]);
+    setPhoneSuggestions([]);
+
     toast.info(`Selected patient from ${patient.source.toUpperCase()}`);
   };
 
   /* ------------------------------------------------------------------
-     6. Blood Test Auto-Complete
-     We'll do it in a custom onChange as well.
+     8. Blood Test Auto-Complete
   ------------------------------------------------------------------ */
   const handleBloodTestChange = (
     e: React.ChangeEvent<HTMLInputElement>,
     onChangeFn: (...event: any[]) => void
   ) => {
-    onChangeFn(e); // update form state
+    onChangeFn(e);
     const inputVal = e.target.value.trim();
     if (inputVal.length === 0) {
       setFilteredBloodTests([]);
       setShowBloodTestSuggestions(false);
       return;
     }
-    // Filter from available tests
     const matched = bloodTestOptions.filter((test) =>
       test.toLowerCase().includes(inputVal.toLowerCase())
     );
@@ -300,18 +334,12 @@ const PathologyEntryPage: React.FC = () => {
   };
 
   /* ------------------------------------------------------------------
-     7. Doctor Auto-Complete
-     We store typed text in local `doctorTyped`, so user sees suggestions.
-     The final chosen doctor ID goes into form field "doctor".
+     9. Doctor Auto-Complete
   ------------------------------------------------------------------ */
-  const handleDoctorTypedChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleDoctorTypedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const typed = e.target.value;
     setDoctorTyped(typed);
-    // When user is typing a new text, we can clear the hidden "doctor" ID from form
-    setValue("doctor", "");
-
+    setValue("doctor", ""); // clear any existing doctor ID
     if (typed.trim().length === 0) {
       setFilteredDoctors([]);
       return;
@@ -324,15 +352,13 @@ const PathologyEntryPage: React.FC = () => {
   };
 
   const handleDoctorSuggestionClick = (id: string, name: string) => {
-    // We store the chosen doctor's ID in the form
     setValue("doctor", id);
-    // We store the typed text in local state
     setDoctorTyped(name);
     setFilteredDoctors([]);
   };
 
   /* ------------------------------------------------------------------
-     8. Close suggestion boxes if user clicks outside
+     10. Close suggestion boxes if user clicks outside
   ------------------------------------------------------------------ */
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -341,6 +367,12 @@ const PathologyEntryPage: React.FC = () => {
         !patientSuggestionBoxRef.current.contains(e.target as Node)
       ) {
         setPatientSuggestions([]);
+      }
+      if (
+        phoneSuggestionBoxRef.current &&
+        !phoneSuggestionBoxRef.current.contains(e.target as Node)
+      ) {
+        setPhoneSuggestions([]);
       }
       if (
         bloodTestSuggestionBoxRef.current &&
@@ -360,7 +392,7 @@ const PathologyEntryPage: React.FC = () => {
   }, []);
 
   /* ------------------------------------------------------------------
-     9. Form Submission
+     11. Form Submission
   ------------------------------------------------------------------ */
   const onSubmit: SubmitHandler<IPatientFormInput> = async (data) => {
     setLoading(true);
@@ -431,8 +463,11 @@ const PathologyEntryPage: React.FC = () => {
         doctor: "",
       });
       setSelectedPatient(null);
+      setPatientNameInput("");
+      setPatientPhoneInput("");
       setPatientSuggestions([]);
-      setDoctorTyped(""); // clearing typed text for doctor
+      setPhoneSuggestions([]);
+      setDoctorTyped("");
     } catch (err) {
       console.error("Error saving patient pathology entry:", err);
       toast.error("Failed to save entry. Please try again.", {
@@ -445,7 +480,7 @@ const PathologyEntryPage: React.FC = () => {
   };
 
   /* ------------------------------------------------------------------
-     10. Rendering
+     12. Rendering
   ------------------------------------------------------------------ */
   return (
     <>
@@ -475,14 +510,20 @@ const PathologyEntryPage: React.FC = () => {
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.name ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
-                // Combine react-hook-form + custom onChange
                 {...register("name", {
                   required: "Patient name is required",
                   onChange: (e) => handlePatientNameChange(e, (v) => v),
                 })}
+                value={patientNameInput}
+                onChange={(e) => {
+                  // 1) Update local state
+                  setPatientNameInput(e.target.value);
+                  // 2) Also do react-hook-form + suggestions
+                  handlePatientNameChange(e, (v) => v);
+                }}
               />
 
-              {/* Patient Suggestions */}
+              {/* Patient Name Suggestions */}
               {patientSuggestions.length > 0 && (
                 <ul
                   ref={patientSuggestionBoxRef}
@@ -513,7 +554,7 @@ const PathologyEntryPage: React.FC = () => {
               )}
             </div>
 
-            {/* ======= Phone ======= */}
+            {/* ======= Phone with Auto-Complete ======= */}
             <div className="relative">
               <AiOutlinePhone className="absolute top-3 left-3 text-gray-400" />
               <input
@@ -521,10 +562,36 @@ const PathologyEntryPage: React.FC = () => {
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 ${
                   errors.phone ? "border-red-500" : "border-gray-300"
                 } transition duration-200`}
-                {...register("phone")}
+                value={patientPhoneInput}
+                onChange={handlePatientPhoneChange}
               />
               {errors.phone && (
                 <p className="text-red-500 text-sm mt-1">{errors.phone.message}</p>
+              )}
+              {/* Phone Suggestions */}
+              {phoneSuggestions.length > 0 && (
+                <ul
+                  ref={phoneSuggestionBoxRef}
+                  className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
+                >
+                  {phoneSuggestions.map((patient) => (
+                    <li
+                      key={patient.id}
+                      onClick={() => handlePatientSuggestionClick(patient)}
+                      className="px-4 py-2 hover:bg-green-100 cursor-pointer flex justify-between items-center"
+                    >
+                      <span>
+                        {patient.name}
+                        {patient.phone ? ` - ${patient.phone}` : ""}
+                      </span>
+                      {patient.source === "gautami" ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 
@@ -639,8 +706,6 @@ const PathologyEntryPage: React.FC = () => {
             {/* ======= Doctor Refer (auto-complete) ======= */}
             <div className="relative">
               <AiOutlineUser className="absolute top-3 left-3 text-gray-400" />
-
-              {/* This is the typed text for searching doctors */}
               <input
                 type="text"
                 placeholder="Referred By Doctor (Optional)"
@@ -652,7 +717,7 @@ const PathologyEntryPage: React.FC = () => {
                 }`}
               />
 
-              {/* Suggestions */}
+              {/* Doctor Suggestions */}
               {filteredDoctors.length > 0 && (
                 <ul
                   ref={doctorSuggestionBoxRef}
@@ -670,7 +735,7 @@ const PathologyEntryPage: React.FC = () => {
                 </ul>
               )}
 
-              {/* The actual selected doctor ID stored in the form */}
+              {/* Hidden input to store the final doctor ID */}
               <input type="hidden" {...register("doctor")} />
 
               {errors.doctor && (

@@ -161,9 +161,12 @@ const IPDBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState<IPDFormInput | null>(null);
 
-  // Auto-complete states
+  // Auto-complete states for name
   const [patientNameInput, setPatientNameInput] = useState("");
   const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([]);
+  // New states for phone auto-complete
+  const [patientPhoneInput, setPatientPhoneInput] = useState("");
+  const [phoneSuggestions, setPhoneSuggestions] = useState<PatientSuggestion[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
 
   // Doctor & Bed data
@@ -258,7 +261,7 @@ const IPDBookingPage: React.FC = () => {
   }, [gautamiPatients, medfordPatients]);
 
   /* -----------------------------------------------------------------
-     3B) Patient auto-suggest logic
+     3B) Patient auto-suggest logic for Name
   ------------------------------------------------------------------ */
   function filterPatientSuggestions(name: string) {
     if (name.length < 2) {
@@ -299,11 +302,53 @@ const IPDBookingPage: React.FC = () => {
     setValue("name", val);
   };
 
+  /* -----------------------------------------------------------------
+     3B2) Patient auto-suggest logic for Phone
+  ------------------------------------------------------------------ */
+  function filterPatientSuggestionsByPhone(phone: string) {
+    if (phone.length < 2) {
+      if (phoneSuggestions.length > 0) setPhoneSuggestions([]);
+      return;
+    }
+    const matched = combinedPatients.filter((p) =>
+      p.phone && p.phone.includes(phone)
+    );
+    const suggestions: PatientSuggestion[] = matched.map((p) => ({
+      label: `${p.name} - ${p.phone || ""}`,
+      value: p.id,
+      source: p.source,
+    }));
+    if (
+      suggestions.length !== phoneSuggestions.length ||
+      suggestions.some((s, i) => s.value !== phoneSuggestions[i]?.value)
+    ) {
+      setPhoneSuggestions(suggestions);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedPatient) {
+      if (patientPhoneInput !== selectedPatient.phone) {
+        setSelectedPatient(null);
+      }
+      setPhoneSuggestions([]);
+      return;
+    }
+    filterPatientSuggestionsByPhone(patientPhoneInput);
+  }, [patientPhoneInput, combinedPatients, selectedPatient]);
+
+  const handlePatientPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setPatientPhoneInput(val);
+    setValue("phone", val);
+  };
+
   const handleSelectPatient = (patientId: string) => {
     const found = combinedPatients.find((p) => p.id === patientId);
     if (!found) return;
     setSelectedPatient(found);
     setPatientNameInput(found.name);
+    setPatientPhoneInput(found.phone || "");
     setValue("name", found.name);
     setValue("phone", found.phone || "");
     if (found.source === "gautami") {
@@ -326,6 +371,7 @@ const IPDBookingPage: React.FC = () => {
       }
     }
     setPatientSuggestions([]);
+    setPhoneSuggestions([]);
     toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`);
   };
 
@@ -483,6 +529,7 @@ const IPDBookingPage: React.FC = () => {
         admissionType: null,
       });
       setPatientNameInput("");
+      setPatientPhoneInput("");
       setSelectedPatient(null);
       setPreviewData(null);
     } catch (err) {
@@ -560,18 +607,13 @@ const IPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* ============== Phone ============== */}
+            {/* ============== Phone with Auto-Complete ============== */}
             <div className="relative">
               <FaPhone className="absolute top-3 left-3 text-gray-400" />
               <input
                 type="tel"
-                {...register("phone", {
-                  required: "Phone number is required",
-                  pattern: {
-                    value: /^[0-9]{10}$/,
-                    message: "Must be a valid 10-digit phone number",
-                  },
-                })}
+                value={patientPhoneInput}
+                onChange={handlePatientPhoneChange}
                 placeholder="Patient Phone Number"
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                   errors.phone ? "border-red-500" : "border-gray-300"
@@ -581,6 +623,24 @@ const IPDBookingPage: React.FC = () => {
                 <p className="text-red-500 text-sm mt-1">
                   {errors.phone.message}
                 </p>
+              )}
+              {phoneSuggestions.length > 0 && !selectedPatient && (
+                <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
+                  {phoneSuggestions.map((sug) => (
+                    <li
+                      key={sug.value}
+                      onClick={() => handleSelectPatient(sug.value)}
+                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
+                    >
+                      <span>{sug.label}</span>
+                      {sug.source === "gautami" ? (
+                        <FaCheckCircle color="green" />
+                      ) : (
+                        <FaTimesCircle color="red" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
 

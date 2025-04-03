@@ -15,12 +15,11 @@ import { FaCheckCircle, FaTimesCircle } from "react-icons/fa";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
-// Import the main (Gautami) Firebase database and the Medford Family one
+// Import the main (Gautami) Firebase database and the Medford Family DB
 import { db as dbGautami } from "../../lib/firebase";
 import { db as dbMedford } from "../../lib/firebaseMedford";
 
 // Interfaces for form inputs and Firebase storage
-
 interface IMortalityReportInput {
   // Personal Details
   name: string;
@@ -92,13 +91,23 @@ const MortalityReportPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
 
-  // --- Auto-Complete for Patient Name (from both databases) ---
+  // --- Auto-Complete for Patient Name and Phone ---
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
   const [patientNameInput, setPatientNameInput] = useState("");
-  const [patientSuggestions, setPatientSuggestions] = useState<CombinedPatient[]>([]);
-  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
+  const [patientSuggestions, setPatientSuggestions] = useState<
+    { label: string; value: string; source: "gautami" | "medford" }[]
+  >([]);
+  const [patientPhoneInput, setPatientPhoneInput] = useState("");
+  const [phoneSuggestions, setPhoneSuggestions] = useState<
+    { label: string; value: string; source: "gautami" | "medford" }[]
+  >([]);
+  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(
+    null
+  );
+
   const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
+  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
   // Fetch patients from Gautami DB (full details)
   useEffect(() => {
@@ -145,29 +154,48 @@ const MortalityReportPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Use useMemo to avoid recreating the array on every render
+  // Combine patients for suggestions (memoized)
   const allCombinedPatients = useMemo(
     () => [...gautamiPatients, ...medfordPatients],
     [gautamiPatients, medfordPatients]
   );
 
-  // Filter suggestions based on input.
-  // If a patient is already selected and the input matches, then hide suggestions.
+  // --- Name Auto-Complete ---
   useEffect(() => {
     if (selectedPatient && patientNameInput === selectedPatient.name) {
       setPatientSuggestions([]);
     } else if (patientNameInput.length >= 2) {
       const lower = patientNameInput.toLowerCase();
-      const suggestions = allCombinedPatients.filter((p) =>
-        p.name.toLowerCase().includes(lower)
-      );
+      const suggestions = allCombinedPatients
+        .filter((p) => p.name.toLowerCase().includes(lower))
+        .map((p) => ({
+          label: `${p.name} - ${p.phone}`,
+          value: p.id,
+          source: p.source,
+        }));
       setPatientSuggestions(suggestions);
     } else {
       setPatientSuggestions([]);
     }
   }, [patientNameInput, allCombinedPatients, selectedPatient]);
 
-  // Close suggestion dropdown when clicking outside
+  // --- Phone Auto-Complete ---
+  useEffect(() => {
+    if (patientPhoneInput.length >= 2) {
+      const suggestions = allCombinedPatients
+        .filter((p) => p.phone && p.phone.includes(patientPhoneInput))
+        .map((p) => ({
+          label: `${p.name} - ${p.phone}`,
+          value: p.id,
+          source: p.source,
+        }));
+      setPhoneSuggestions(suggestions);
+    } else {
+      setPhoneSuggestions([]);
+    }
+  }, [patientPhoneInput, allCombinedPatients]);
+
+  // Close suggestion dropdown when clicking outside (for both name and phone)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -176,6 +204,12 @@ const MortalityReportPage: React.FC = () => {
       ) {
         setPatientSuggestions([]);
       }
+      if (
+        phoneSuggestionBoxRef.current &&
+        !phoneSuggestionBoxRef.current.contains(event.target as Node)
+      ) {
+        setPhoneSuggestions([]);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
@@ -183,21 +217,21 @@ const MortalityReportPage: React.FC = () => {
     };
   }, []);
 
-  // When a patient suggestion is clicked, auto-fill the personal details
-  const handlePatientSuggestionClick = (patient: CombinedPatient) => {
-    setSelectedPatient(patient);
-    setValue("name", patient.name);
-    setValue("phone", patient.phone || "");
-    if (patient.source === "gautami") {
-      setValue("address", patient.data.address);
-      setValue("age", patient.data.age);
-      setValue("gender", patient.data.gender);
-    } else {
-      setValue("gender", patient.data.gender);
-    }
-    setPatientNameInput(patient.name);
+  // When a patient suggestion is clicked (from name or phone), auto-fill details
+  const handlePatientSuggestionClick = (uhid: string) => {
+    const found = allCombinedPatients.find((p) => p.id === uhid);
+    if (!found) return;
+    setSelectedPatient(found);
+    setValue("name", found.name);
+    setValue("phone", found.phone || "");
+    setValue("age", found.data.age);
+    setValue("address", found.data.address);
+    setValue("gender", found.data.gender);
+    setPatientNameInput(found.name);
+    setPatientPhoneInput(found.phone || "");
     setPatientSuggestions([]);
-    toast.info(`Patient ${patient.name} selected from ${patient.source.toUpperCase()}!`);
+    setPhoneSuggestions([]);
+    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`);
   };
 
   // --- onSubmit Handler ---
@@ -231,9 +265,8 @@ const MortalityReportPage: React.FC = () => {
           gender: data.gender,
         });
       } else {
-        // New patient: create full record in Gautami and minimal record in Medford Family
+        // New patient: create full record in Gautami DB and minimal record in Medford DB
         uhid = generatePatientId();
-        // Save full details in Gautami DB
         await set(ref(dbGautami, `patients/${uhid}`), {
           name: data.name,
           phone: data.phone,
@@ -244,12 +277,11 @@ const MortalityReportPage: React.FC = () => {
           uhid: uhid,
           ipd: {},
         });
-        // Save minimal details in Medford Family DB (only contact, dob, gender, name, patientId)
         await set(ref(dbMedford, `patients/${uhid}`), {
           name: data.name,
           contact: data.phone,
           gender: data.gender,
-          dob: "", // Set to empty string or update with proper value if available
+          dob: "",
           patientId: uhid,
           hospitalName: "MEDFORD",
         });
@@ -277,8 +309,10 @@ const MortalityReportPage: React.FC = () => {
         medicalFindings: "",
       });
       setPatientNameInput("");
+      setPatientPhoneInput("");
       setSelectedPatient(null);
       setPatientSuggestions([]);
+      setPhoneSuggestions([]);
     } catch (error) {
       console.error("Error saving mortality report:", error);
       toast.error("Failed to save report. Please try again.", {
@@ -332,17 +366,17 @@ const MortalityReportPage: React.FC = () => {
                   ref={patientSuggestionBoxRef}
                   className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
                 >
-                  {patientSuggestions.map((patient) => (
+                  {patientSuggestions.map((suggestion) => (
                     <li
-                      key={patient.id}
-                      onClick={() => handlePatientSuggestionClick(patient)}
+                      key={suggestion.value}
+                      onClick={() => handlePatientSuggestionClick(suggestion.value)}
                       className="px-4 py-2 hover:bg-red-100 cursor-pointer flex justify-between items-center"
                     >
-                      <span>{`${patient.name} - ${patient.phone || ""}`}</span>
-                      {patient.source === "gautami" ? (
-                        <FaCheckCircle color="green" />
+                      <span>{suggestion.label}</span>
+                      {suggestion.source === "gautami" ? (
+                        <FaCheckCircle color="green" className="ml-2" />
                       ) : (
-                        <FaTimesCircle color="red" />
+                        <FaTimesCircle color="red" className="ml-2" />
                       )}
                     </li>
                   ))}
@@ -350,7 +384,7 @@ const MortalityReportPage: React.FC = () => {
               )}
             </div>
 
-            {/* Patient Phone */}
+            {/* Patient Phone with Auto-Complete */}
             <div className="relative">
               <label htmlFor="phone" className="block text-gray-700 font-medium mb-1">
                 Phone <span className="text-red-500">*</span>
@@ -359,13 +393,39 @@ const MortalityReportPage: React.FC = () => {
               <input
                 id="phone"
                 type="text"
-                {...register("phone")}
+                value={patientPhoneInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPatientPhoneInput(val);
+                  setValue("phone", val, { shouldValidate: true });
+                }}
                 placeholder="Patient Phone Number"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
               />
+              {phoneSuggestions.length > 0 && (
+                <ul
+                  ref={phoneSuggestionBoxRef}
+                  className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
+                >
+                  {phoneSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.value}
+                      onClick={() => handlePatientSuggestionClick(suggestion.value)}
+                      className="px-4 py-2 hover:bg-red-100 cursor-pointer flex justify-between items-center"
+                    >
+                      <span>{suggestion.label}</span>
+                      {suggestion.source === "gautami" ? (
+                        <FaCheckCircle color="green" className="ml-2" />
+                      ) : (
+                        <FaTimesCircle color="red" className="ml-2" />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            {/* Age */}
+            {/* Age Field */}
             <div className="relative">
               <label htmlFor="age" className="block text-gray-700 font-medium mb-1">
                 Age <span className="text-red-500">*</span>
@@ -381,7 +441,7 @@ const MortalityReportPage: React.FC = () => {
               />
             </div>
 
-            {/* Address */}
+            {/* Address Field */}
             <div className="relative">
               <label htmlFor="address" className="block text-gray-700 font-medium mb-1">
                 Address <span className="text-red-500">*</span>
@@ -396,16 +456,16 @@ const MortalityReportPage: React.FC = () => {
               />
             </div>
 
-            {/* Gender (Drop-Down) */}
+            {/* Gender Field */}
             <div className="relative">
               <label htmlFor="gender" className="block text-gray-700 font-medium mb-1">
                 Gender <span className="text-red-500">*</span>
               </label>
-              <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
+              <AiOutlineFieldBinary className="absolute top-9 left-3 text-gray-400" />
               <select
                 id="gender"
                 {...register("gender")}
-                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                className="w-full pl-10 pr-4 py-3 border rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
               >
                 <option value="">Select Gender</option>
                 <option value="Male">Male</option>
@@ -414,7 +474,7 @@ const MortalityReportPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Admission Date */}
+            {/* Admission Date Field */}
             <div className="relative">
               <label htmlFor="admissionDate" className="block text-gray-700 font-medium mb-1">
                 Admission Date <span className="text-red-500">*</span>
@@ -430,7 +490,7 @@ const MortalityReportPage: React.FC = () => {
               />
             </div>
 
-            {/* Date of Death */}
+            {/* Date of Death Field */}
             <div className="relative">
               <label htmlFor="dateOfDeath" className="block text-gray-700 font-medium mb-1">
                 Date of Death <span className="text-red-500">*</span>
@@ -446,7 +506,7 @@ const MortalityReportPage: React.FC = () => {
               />
             </div>
 
-            {/* Medical Findings */}
+            {/* Medical Findings Field */}
             <div className="relative">
               <label htmlFor="medicalFindings" className="block text-gray-700 font-medium mb-1">
                 Medical Findings <span className="text-red-500">*</span>
@@ -457,7 +517,7 @@ const MortalityReportPage: React.FC = () => {
                 {...register("medicalFindings")}
                 placeholder="Medical Findings"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 h-32 resize-none transition duration-200"
-              />
+              ></textarea>
             </div>
 
             {/* Submit Button */}

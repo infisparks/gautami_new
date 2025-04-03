@@ -9,7 +9,7 @@ import type { ObjectSchema } from "yup"
 import { db } from "../../lib/firebase"
 import { ref, push, update, onValue, remove } from "firebase/database"
 import Head from "next/head"
-import { PlusCircle, Edit, Trash2, User, Info, Search, X, AlertCircle } from "lucide-react"
+import { PlusCircle, Edit, Trash2, Info } from "lucide-react"
 import { BedIcon, DoorOpen } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -37,6 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { PersonIcon, MagnifyingGlassIcon, Cross2Icon, ExclamationTriangleIcon } from "@radix-ui/react-icons"
 
 // Define the shape of your form inputs
 interface BedFormInput {
@@ -124,7 +125,7 @@ const BedManagementPage: React.FC = () => {
     control,
     formState: { errors },
     reset,
-
+    setValue,
   } = useForm<BedFormInput>({
     resolver: yupResolver(bedSchema),
     defaultValues: {
@@ -406,7 +407,7 @@ const BedManagementPage: React.FC = () => {
           <div className="bg-white rounded-lg shadow-md p-4 mb-6">
             <div className="flex flex-col md:flex-row gap-4">
               <div className="relative flex-grow">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
                   type="text"
                   placeholder="Search beds by number, type or room..."
@@ -419,7 +420,7 @@ const BedManagementPage: React.FC = () => {
                     onClick={() => setSearchTerm("")}
                     className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                   >
-                    <X className="h-4 w-4" />
+                    <Cross2Icon className="h-4 w-4" />
                   </button>
                 )}
               </div>
@@ -448,7 +449,7 @@ const BedManagementPage: React.FC = () => {
             {filteredRoomTypes.length === 0 ? (
               <Card>
                 <CardContent className="p-8 flex flex-col items-center justify-center">
-                  <AlertCircle className="h-12 w-12 text-gray-400 mb-3" />
+                  <ExclamationTriangleIcon className="h-12 w-12 text-gray-400 mb-3" />
                   <h3 className="text-xl font-medium text-gray-700">No beds found</h3>
                   <p className="text-gray-500 mt-1">
                     {searchTerm ? "Try adjusting your search term" : "Add beds to get started"}
@@ -548,7 +549,7 @@ const BedManagementPage: React.FC = () => {
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">Bed Number</label>
               <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <PersonIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
                   {...register("bedNumber")}
                   placeholder="e.g., B101"

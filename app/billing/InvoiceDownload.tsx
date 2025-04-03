@@ -32,7 +32,7 @@ interface Payment {
 interface BillingRecord {
   patientId: string;
   ipdId: string;
-  uhid:string;
+  uhid: string;
   name: string;
   mobileNumber: string;
   dischargeDate?: string;
@@ -42,6 +42,8 @@ interface BillingRecord {
   // The key for displaying "Admit Date":
   admitDate?: string;   // <--- We'll read this
   createdAt?: string;   // fallback if needed
+  // Optionally, a custom time string from your Firebase data:
+  time?: string;
   services: ServiceItem[];
   payments: Payment[];
   discount?: number;
@@ -61,7 +63,7 @@ type InvoiceDownloadProps = {
 export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
   const invoiceRef = useRef<HTMLDivElement>(null);
 
-  // Helper function to format ISO date strings into a readable format.
+  // Helper function to format ISO date strings into a readable date.
   const formatDate = (dateString: string) => {
     const options: Intl.DateTimeFormatOptions = {
       year: "numeric",
@@ -70,6 +72,79 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
     };
     return new Date(dateString).toLocaleDateString(undefined, options);
   };
+
+  // Helper function to format a time portion from a date string.
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  // Helper function to convert a number to words.
+  function convertNumberToWords(num: number): string {
+    const a = [
+      "",
+      "One",
+      "Two",
+      "Three",
+      "Four",
+      "Five",
+      "Six",
+      "Seven",
+      "Eight",
+      "Nine",
+      "Ten",
+      "Eleven",
+      "Twelve",
+      "Thirteen",
+      "Fourteen",
+      "Fifteen",
+      "Sixteen",
+      "Seventeen",
+      "Eighteen",
+      "Nineteen",
+    ];
+    const b = [
+      "",
+      "",
+      "Twenty",
+      "Thirty",
+      "Forty",
+      "Fifty",
+      "Sixty",
+      "Seventy",
+      "Eighty",
+      "Ninety",
+    ];
+    if ((num = Math.floor(num)) === 0) return "Zero";
+    if (num < 20) return a[num];
+    if (num < 100)
+      return b[Math.floor(num / 10)] + (num % 10 ? " " + a[num % 10] : "");
+    if (num < 1000)
+      return (
+        a[Math.floor(num / 100)] +
+        " Hundred" +
+        (num % 100 ? " " + convertNumberToWords(num % 100) : "")
+      );
+    if (num < 1000000)
+      return (
+        convertNumberToWords(Math.floor(num / 1000)) +
+        " Thousand" +
+        (num % 1000 ? " " + convertNumberToWords(num % 1000) : "")
+      );
+    if (num < 1000000000)
+      return (
+        convertNumberToWords(Math.floor(num / 1000000)) +
+        " Million" +
+        (num % 1000000 ? " " + convertNumberToWords(num % 1000000) : "")
+      );
+    return (
+      convertNumberToWords(Math.floor(num / 1000000000)) +
+      " Billion" +
+      (num % 1000000000 ? " " + convertNumberToWords(num % 1000000000) : "")
+    );
+  }
 
   // Capture the bill date when rendering the invoice
   const billDate = new Date().toISOString();
@@ -327,20 +402,31 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
             <div className="text-right">
               <p>
                 <strong>Admit Date:</strong>{" "}
-                {record.admitDate
-                  ? formatDate(record.admitDate)
-                  : record.createdAt
-                  ? formatDate(record.createdAt)
-                  : "N/A"}
+                {record.admitDate ? (
+                  <>
+                    {formatDate(record.admitDate)} /{" "}
+                    {record.time ||
+                      formatTime(record.admitDate)}
+                  </>
+                ) : record.createdAt ? (
+                  <>
+                    {formatDate(record.createdAt)} /{" "}
+                    {formatTime(record.createdAt)}
+                  </>
+                ) : (
+                  "N/A"
+                )}
               </p>
               {record.dischargeDate && (
                 <p>
                   <strong>Discharge Date:</strong>{" "}
-                  {formatDate(record.dischargeDate)}
+                  {formatDate(record.dischargeDate)} /{" "}
+                  {formatTime(record.dischargeDate)}
                 </p>
               )}
               <p>
-                <strong>Bill Date:</strong> {formatDate(billDate)}
+                <strong>Bill Date:</strong>{" "}
+                {formatDate(billDate)} / {formatTime(billDate)}
               </p>
             </div>
           </div>
@@ -416,9 +502,9 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
           </div>
 
           {/* Final Summary Section */}
-          <div className="mt-4 p-2  rounded text-[9px] w-[200px] ml-auto">
+          <div className="mt-4 p-2 rounded text-[9px] w-[200px] ml-auto">
             <p className="flex justify-between w-full">
-              <span>Subtotal:</span>
+              <span>Total Amount:</span>
               <span>Rs. {subtotal.toLocaleString()}</span>
             </p>
             {discount > 0 && (
@@ -440,6 +526,12 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
               <span>Due Amount:</span>
               <span>Rs. {dueAmount.toLocaleString()}</span>
             </p>
+            {dueAmount > 0 && (
+              <p className="mt-1 text-xs">
+                <strong>Due Amount in Words:</strong>{" "}
+                {convertNumberToWords(dueAmount)} Rupees Only
+              </p>
+            )}
           </div>
         </div>
       </div>

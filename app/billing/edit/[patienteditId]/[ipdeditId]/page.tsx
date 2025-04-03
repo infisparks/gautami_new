@@ -9,7 +9,7 @@ import Select from "react-select";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { toast } from "react-toastify";
-import { FaUser, FaPhone, FaCalendarAlt, FaClock, FaHome, FaUserFriends, FaStethoscope, FaInfoCircle } from "react-icons/fa";
+import { FaUser, FaPhone,  FaClock, FaHome, FaUserFriends,  FaInfoCircle } from "react-icons/fa";
 
 /* ---------------------------
    Types & Options

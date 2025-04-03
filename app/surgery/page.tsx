@@ -2,9 +2,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
-// import { yupResolver } from "@hookform/resolvers/yup";
-// import * as yup from "yup";
-import { db } from "../../lib/firebase";
 import { ref, push, set, onValue, update } from "firebase/database";
 import Head from "next/head";
 import {
@@ -16,6 +13,9 @@ import {
 } from "react-icons/ai";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+
+// Import Firebase (Gautami DB)
+import { db } from "../../lib/firebase";
 
 interface ISurgeryFormInput {
   // Personal details
@@ -85,6 +85,13 @@ const SurgeryEntryPage: React.FC = () => {
   } | null>(null);
   const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
 
+  // Auto-complete state for patient phone
+  const [patientPhoneInput, setPatientPhoneInput] = useState("");
+  const [phoneSuggestions, setPhoneSuggestions] = useState<
+    { label: string; value: string }[]
+  >([]);
+  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null);
+
   // Fetch all patient records from Firebase
   useEffect(() => {
     const patientsRef = ref(db, "patients");
@@ -117,7 +124,44 @@ const SurgeryEntryPage: React.FC = () => {
     }
   }, [patientNameInput, allPatients]);
 
-  // When a suggestion is clicked, auto-fill the form with personal details
+  // Filter suggestions based on Patient Phone input (min. 2 characters)
+  useEffect(() => {
+    if (patientPhoneInput.length >= 2) {
+      const suggestions = allPatients
+        .filter((p) => p.phone && p.phone.includes(patientPhoneInput))
+        .map((p) => ({
+          label: `${p.name} - ${p.phone}`,
+          value: p.uhid,
+        }));
+      setPhoneSuggestions(suggestions);
+    } else {
+      setPhoneSuggestions([]);
+    }
+  }, [patientPhoneInput, allPatients]);
+
+  // Close suggestion dropdown when clicking outside (for both name and phone)
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        patientSuggestionBoxRef.current &&
+        !patientSuggestionBoxRef.current.contains(event.target as Node)
+      ) {
+        setPatientSuggestions([]);
+      }
+      if (
+        phoneSuggestionBoxRef.current &&
+        !phoneSuggestionBoxRef.current.contains(event.target as Node)
+      ) {
+        setPhoneSuggestions([]);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // When a patient suggestion is clicked (from either name or phone), auto-fill the form
   const handlePatientSuggestionClick = (uhid: string) => {
     const found = allPatients.find((p) => p.uhid === uhid);
     if (!found) return;
@@ -128,24 +172,11 @@ const SurgeryEntryPage: React.FC = () => {
     setValue("address", found.address);
     setValue("gender", found.gender);
     setPatientNameInput(found.name);
+    setPatientPhoneInput(found.phone);
     setPatientSuggestions([]);
+    setPhoneSuggestions([]);
     toast.info(`Patient ${found.name} selected.`);
   };
-
-  // Close suggestion dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        patientSuggestionBoxRef.current &&
-        !patientSuggestionBoxRef.current.contains(event.target as Node)
-      ) {
-        setPatientSuggestions([]);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () =>
-      document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   const onSubmit: SubmitHandler<ISurgeryFormInput> = async (data) => {
     setLoading(true);
@@ -203,8 +234,10 @@ const SurgeryEntryPage: React.FC = () => {
         finalDiagnosis: "",
       });
       setPatientNameInput("");
+      setPatientPhoneInput("");
       setSelectedPatient(null);
       setPatientSuggestions([]);
+      setPhoneSuggestions([]);
     } catch (error) {
       console.error("Error saving surgery entry:", error);
       toast.error("Failed to save surgery entry. Please try again.", {
@@ -237,10 +270,7 @@ const SurgeryEntryPage: React.FC = () => {
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Patient Name with Auto-Complete */}
             <div className="relative">
-              <label
-                htmlFor="name"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="name" className="block text-gray-700 font-medium mb-1">
                 Patient Name <span className="text-red-500">*</span>
               </label>
               <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
@@ -264,9 +294,7 @@ const SurgeryEntryPage: React.FC = () => {
                   {patientSuggestions.map((suggestion) => (
                     <li
                       key={suggestion.value}
-                      onClick={() =>
-                        handlePatientSuggestionClick(suggestion.value)
-                      }
+                      onClick={() => handlePatientSuggestionClick(suggestion.value)}
                       className="px-4 py-2 hover:bg-blue-100 cursor-pointer"
                     >
                       {suggestion.label}
@@ -276,30 +304,45 @@ const SurgeryEntryPage: React.FC = () => {
               )}
             </div>
 
-            {/* Patient Phone */}
+            {/* Patient Phone with Auto-Complete */}
             <div className="relative">
-              <label
-                htmlFor="phone"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="phone" className="block text-gray-700 font-medium mb-1">
                 Phone <span className="text-red-500">*</span>
               </label>
               <AiOutlinePhone className="absolute top-9 left-3 text-gray-400" />
               <input
                 id="phone"
                 type="text"
-                {...register("phone")}
+                value={patientPhoneInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setPatientPhoneInput(val);
+                  setValue("phone", val, { shouldValidate: true });
+                }}
                 placeholder="Patient Phone Number"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200"
               />
+              {phoneSuggestions.length > 0 && (
+                <ul
+                  ref={phoneSuggestionBoxRef}
+                  className="absolute z-10 w-full bg-white border border-gray-300 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg"
+                >
+                  {phoneSuggestions.map((suggestion) => (
+                    <li
+                      key={suggestion.value}
+                      onClick={() => handlePatientSuggestionClick(suggestion.value)}
+                      className="px-4 py-2 hover:bg-blue-100 cursor-pointer"
+                    >
+                      {suggestion.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            {/* Age */}
+            {/* Age Field */}
             <div className="relative">
-              <label
-                htmlFor="age"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="age" className="block text-gray-700 font-medium mb-1">
                 Age <span className="text-red-500">*</span>
               </label>
               <AiOutlineFieldBinary className="absolute top-9 left-3 text-gray-400" />
@@ -313,12 +356,9 @@ const SurgeryEntryPage: React.FC = () => {
               />
             </div>
 
-            {/* Address */}
+            {/* Address Field */}
             <div className="relative">
-              <label
-                htmlFor="address"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="address" className="block text-gray-700 font-medium mb-1">
                 Address <span className="text-red-500">*</span>
               </label>
               <AiOutlineUser className="absolute top-9 left-3 text-gray-400" />
@@ -331,12 +371,9 @@ const SurgeryEntryPage: React.FC = () => {
               />
             </div>
 
-            {/* Gender (Drop-Down) */}
+            {/* Gender Field */}
             <div className="relative">
-              <label
-                htmlFor="gender"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="gender" className="block text-gray-700 font-medium mb-1">
                 Gender <span className="text-red-500">*</span>
               </label>
               <AiOutlineFieldBinary className="absolute top-9 left-3 text-gray-400" />
@@ -352,12 +389,9 @@ const SurgeryEntryPage: React.FC = () => {
               </select>
             </div>
 
-            {/* Surgery Date */}
+            {/* Surgery Date Field */}
             <div className="relative">
-              <label
-                htmlFor="surgeryDate"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="surgeryDate" className="block text-gray-700 font-medium mb-1">
                 Surgery Date <span className="text-red-500">*</span>
               </label>
               <AiOutlineCalendar className="absolute top-9 left-3 text-gray-400" />
@@ -370,12 +404,9 @@ const SurgeryEntryPage: React.FC = () => {
               />
             </div>
 
-            {/* Title of Surgery */}
+            {/* Surgery Title Field */}
             <div className="relative">
-              <label
-                htmlFor="surgeryTitle"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="surgeryTitle" className="block text-gray-700 font-medium mb-1">
                 Title of Surgery <span className="text-red-500">*</span>
               </label>
               <AiOutlineFieldBinary className="absolute top-9 left-3 text-gray-400" />
@@ -388,12 +419,9 @@ const SurgeryEntryPage: React.FC = () => {
               />
             </div>
 
-            {/* Final Diagnosis */}
+            {/* Final Diagnosis Field */}
             <div className="relative">
-              <label
-                htmlFor="finalDiagnosis"
-                className="block text-gray-700 font-medium mb-1"
-              >
+              <label htmlFor="finalDiagnosis" className="block text-gray-700 font-medium mb-1">
                 Final Diagnosis <span className="text-red-500">*</span>
               </label>
               <AiOutlineFileText className="absolute top-9 left-3 text-gray-400" />
