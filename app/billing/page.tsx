@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from "react";
 import { ref, onValue } from "firebase/database";
 import { db } from "@/lib/firebase";
-// import { format, parseISO } from "date-fns";
 import { useRouter } from "next/navigation";
 
 interface ServiceItem {
@@ -46,6 +45,7 @@ export default function PatientsPage() {
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge");
+  const [selectedWard, setSelectedWard] = useState("All");
   const router = useRouter();
 
   /* ---------------------------
@@ -132,12 +132,21 @@ export default function PatientsPage() {
     const term = searchTerm.trim().toLowerCase();
     let records = [...allRecords];
 
+    // Tab filtering: non-discharged vs discharged
     if (selectedTab === "non-discharge") {
       records = records.filter((rec) => !rec.dischargeDate);
     } else if (selectedTab === "discharge") {
       records = records.filter((rec) => rec.dischargeDate);
     }
 
+    // Ward filtering
+    if (selectedWard !== "All") {
+      records = records.filter(
+        (rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase()
+      );
+    }
+
+    // Search filtering
     if (term) {
       records = records.filter(
         (rec) =>
@@ -148,7 +157,7 @@ export default function PatientsPage() {
     }
 
     setFilteredRecords(records);
-  }, [allRecords, searchTerm, selectedTab]);
+  }, [allRecords, searchTerm, selectedTab, selectedWard]);
 
   const getRecordDate = (record: BillingRecord): Date => {
     if (record.dischargeDate) {
@@ -168,16 +177,18 @@ export default function PatientsPage() {
      Navigation Handlers
   --------------------------- */
   const handleRowClick = (record: BillingRecord) => {
-    // Navigate to the details page at billing/[patientId]/[ipdId]/page.tsx
     router.push(`/billing/${record.patientId}/${record.ipdId}`);
   };
 
   const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
-    // Prevent the row click when clicking Edit
     e.stopPropagation();
-    // Redirect to the edit route under billing/edit/[patientId]/[ipdId]/page.tsx
     router.push(`/billing/edit/${record.patientId}/${record.ipdId}`);
   };
+
+  // Get unique ward names from allRecords
+  const uniqueWards = Array.from(
+    new Set(allRecords.map((record) => record.roomType).filter((ward) => ward))
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
@@ -209,6 +220,35 @@ export default function PatientsPage() {
             >
               Discharged
             </button>
+          </div>
+        </div>
+
+        {/* Ward Filter */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex space-x-2">
+            <button
+              onClick={() => setSelectedWard("All")}
+              className={`px-4 py-2 rounded-md transition-colors duration-300 ${
+                selectedWard === "All"
+                  ? "bg-green-600 text-white"
+                  : "bg-white text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              All
+            </button>
+            {uniqueWards.map((ward) => (
+              <button
+                key={ward}
+                onClick={() => setSelectedWard(ward ?? '')}
+                className={`px-4 py-2 rounded-md transition-colors duration-300 ${
+                  selectedWard.toLowerCase() === (ward ?? '').toLowerCase()
+                    ? "bg-green-600 text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-100"
+                }`}
+              >
+                {ward}
+              </button>
+            ))}
           </div>
         </div>
 
