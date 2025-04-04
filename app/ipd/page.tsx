@@ -7,7 +7,7 @@ import { ref, push, update, onValue, set } from "firebase/database";
 import Head from "next/head";
 
 // UPDATED IMPORTS:
-import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, Search, ChevronRight, AlertCircle, Send, FileText, ArrowLeft } from 'lucide-react';
+import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, ChevronRight, AlertCircle, Send, FileText, ArrowLeft } from 'lucide-react';
 
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -65,14 +65,14 @@ interface CombinedPatient {
   id: string;
   name: string;
   phone?: string;
-  source: "gautami" | "medford";
+  source: "gautami" | "other";
   data: PatientRecord | MedfordPatient;
 }
 
 interface PatientSuggestion {
   label: string;
   value: string;
-  source: "gautami" | "medford";
+  source: "gautami" | "other";
 }
 
 /* ---------------------------------------------------------------------
@@ -245,7 +245,7 @@ const IPDBookingPage: React.FC = () => {
           id: rec.patientId,
           name: rec.name,
           phone: rec.contact,
-          source: "medford",
+          source: "other",
           data: rec,
         });
       }
@@ -504,7 +504,7 @@ const IPDBookingPage: React.FC = () => {
           gender: data.gender?.value || "",
           dob: "",
           patientId: newId,
-          hospitalName: "MEDFORD",
+          hospitalName: "other",
         });
         patientId = newId;
       }
@@ -684,7 +684,7 @@ const IPDBookingPage: React.FC = () => {
                             </div>
                             <div className="flex items-center">
                               <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
-                                {sug.source === "gautami" ? "Gautami" : "Medford"}
+                                {sug.source === "gautami" ? "Gautami" : "other"}
                               </span>
                               <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
                             </div>
@@ -741,7 +741,7 @@ const IPDBookingPage: React.FC = () => {
                             </div>
                             <div className="flex items-center">
                               <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
-                                {sug.source === "gautami" ? "Gautami" : "Medford"}
+                                {sug.source === "gautami" ? "Gautami" : "other"}
                               </span>
                               <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
                             </div>

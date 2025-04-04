@@ -1,78 +1,87 @@
-"use client";
+"use client"
 
-import React, { useEffect, useState } from "react";
-import { ref, onValue } from "firebase/database";
-import { db } from "@/lib/firebase";
-import { useRouter } from "next/navigation";
+import type React from "react"
+import { useEffect, useState } from "react"
+import { ref, onValue } from "firebase/database"
+import { db } from "@/lib/firebase"
+import { useRouter } from "next/navigation"
+import { Search, Edit, Users,  CreditCard, Home, CheckCircle, XCircle } from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface ServiceItem {
-  serviceName: string;
-  doctorName?: string;
-  type: "service" | "doctorvisit";
-  amount: number;
-  createdAt?: string;
+  serviceName: string
+  doctorName?: string
+  type: "service" | "doctorvisit"
+  amount: number
+  createdAt?: string
 }
 
 interface Payment {
-  id?: string;
-  amount: number;
-  paymentType: string;
-  date: string;
+  id?: string
+  amount: number
+  paymentType: string
+  date: string
 }
 
 interface BillingRecord {
-  patientId: string;
-  ipdId: string;
-  name: string;
-  mobileNumber: string;
-  address?: string;
-  age?: string | number;
-  gender?: string;
-  relativeName?: string;
-  relativePhone?: string;
-  relativeAddress?: string;
-  dischargeDate?: string;
-  amount: number;
-  roomType?: string;
-  bed?: string;
-  services: ServiceItem[];
-  payments: Payment[];
-  discount?: number;
+  patientId: string
+  ipdId: string
+  name: string
+  mobileNumber: string
+  address?: string
+  age?: string | number
+  gender?: string
+  relativeName?: string
+  relativePhone?: string
+  relativeAddress?: string
+  dischargeDate?: string
+  amount: number
+  roomType?: string
+  bed?: string
+  services: ServiceItem[]
+  payments: Payment[]
+  discount?: number
 }
 
 export default function PatientsPage() {
-  const [allRecords, setAllRecords] = useState<BillingRecord[]>([]);
-  const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge");
-  const [selectedWard, setSelectedWard] = useState("All");
-  const router = useRouter();
+  const [allRecords, setAllRecords] = useState<BillingRecord[]>([])
+  const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge")
+  const [selectedWard, setSelectedWard] = useState("All")
+  const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
 
   /* ---------------------------
      Fetch Patients & IPD Records
   --------------------------- */
   useEffect(() => {
-    const patientsRef = ref(db, "patients");
+    const patientsRef = ref(db, "patients")
     const unsubscribe = onValue(patientsRef, (snapshot) => {
+      setIsLoading(false)
       if (!snapshot.exists()) {
-        setAllRecords([]);
-        setFilteredRecords([]);
-        return;
+        setAllRecords([])
+        setFilteredRecords([])
+        return
       }
-      const data = snapshot.val();
-      const ipdRecords: BillingRecord[] = [];
+      const data = snapshot.val()
+      const ipdRecords: BillingRecord[] = []
 
       Object.keys(data).forEach((patientId) => {
-        const patientNode = data[patientId];
-        const patientName = patientNode.name || "Unknown";
-        const phone = patientNode.phone || "";
-        const patientAddress = patientNode.address || "";
-        const patientAge = patientNode.age || "";
-        const patientGender = patientNode.gender || "";
+        const patientNode = data[patientId]
+        const patientName = patientNode.name || "Unknown"
+        const phone = patientNode.phone || ""
+        const patientAddress = patientNode.address || ""
+        const patientAge = patientNode.age || ""
+        const patientGender = patientNode.gender || ""
 
         if (patientNode.ipd) {
           Object.keys(patientNode.ipd).forEach((ipdId) => {
-            const ipd = patientNode.ipd[ipdId];
+            const ipd = patientNode.ipd[ipdId]
 
             const servicesArray: ServiceItem[] = ipd.services
               ? ipd.services.map((svc: any) => ({
@@ -82,16 +91,16 @@ export default function PatientsPage() {
                   amount: Number(svc.amount) || 0,
                   createdAt: svc.createdAt || "",
                 }))
-              : [];
+              : []
 
-            let paymentsArray: Payment[] = [];
+            let paymentsArray: Payment[] = []
             if (ipd.payments) {
               paymentsArray = Object.keys(ipd.payments).map((k) => ({
                 id: k,
                 amount: Number(ipd.payments[k].amount) || 0,
                 paymentType: ipd.payments[k].paymentType || "cash",
                 date: ipd.payments[k].date || new Date().toISOString(),
-              }));
+              }))
             }
 
             const record: BillingRecord = {
@@ -112,38 +121,36 @@ export default function PatientsPage() {
               payments: paymentsArray,
               dischargeDate: ipd.dischargeDate,
               discount: ipd.discount ? Number(ipd.discount) : 0,
-            };
+            }
 
-            ipdRecords.push(record);
-          });
+            ipdRecords.push(record)
+          })
         }
-      });
+      })
 
-      setAllRecords(ipdRecords);
-    });
+      setAllRecords(ipdRecords)
+    })
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsubscribe()
+  }, [])
 
   /* ---------------------------
      Filtering & Sorting
   --------------------------- */
   useEffect(() => {
-    const term = searchTerm.trim().toLowerCase();
-    let records = [...allRecords];
+    const term = searchTerm.trim().toLowerCase()
+    let records = [...allRecords]
 
     // Tab filtering: non-discharged vs discharged
     if (selectedTab === "non-discharge") {
-      records = records.filter((rec) => !rec.dischargeDate);
+      records = records.filter((rec) => !rec.dischargeDate)
     } else if (selectedTab === "discharge") {
-      records = records.filter((rec) => rec.dischargeDate);
+      records = records.filter((rec) => rec.dischargeDate)
     }
 
     // Ward filtering
     if (selectedWard !== "All") {
-      records = records.filter(
-        (rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase()
-      );
+      records = records.filter((rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase())
     }
 
     // Search filtering
@@ -152,164 +159,241 @@ export default function PatientsPage() {
         (rec) =>
           rec.ipdId.toLowerCase().includes(term) ||
           rec.name.toLowerCase().includes(term) ||
-          rec.mobileNumber.toLowerCase().includes(term)
-      );
+          rec.mobileNumber.toLowerCase().includes(term),
+      )
     }
 
-    setFilteredRecords(records);
-  }, [allRecords, searchTerm, selectedTab, selectedWard]);
+    setFilteredRecords(records)
+  }, [allRecords, searchTerm, selectedTab, selectedWard])
 
   const getRecordDate = (record: BillingRecord): Date => {
     if (record.dischargeDate) {
-      return new Date(record.dischargeDate);
+      return new Date(record.dischargeDate)
     } else if (record.services.length > 0 && record.services[0].createdAt) {
-      return new Date(record.services[0].createdAt);
+      return new Date(record.services[0].createdAt)
     } else {
-      return new Date(0);
+      return new Date(0)
     }
-  };
+  }
 
-  const sortedRecords = [...filteredRecords].sort(
-    (a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime()
-  );
+  const sortedRecords = [...filteredRecords].sort((a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime())
 
   /* ---------------------------
      Navigation Handlers
   --------------------------- */
   const handleRowClick = (record: BillingRecord) => {
-    router.push(`/billing/${record.patientId}/${record.ipdId}`);
-  };
+    router.push(`/billing/${record.patientId}/${record.ipdId}`)
+  }
 
   const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
-    e.stopPropagation();
-    router.push(`/billing/edit/${record.patientId}/${record.ipdId}`);
-  };
+    e.stopPropagation()
+    router.push(`/billing/edit/${record.patientId}/${record.ipdId}`)
+  }
 
   // Get unique ward names from allRecords
-  const uniqueWards = Array.from(
-    new Set(allRecords.map((record) => record.roomType).filter((ward) => ward))
-  );
+  const uniqueWards = Array.from(new Set(allRecords.map((record) => record.roomType).filter((ward) => ward)))
+
+  // Calculate summary statistics
+  const totalPatients = filteredRecords.length
+  const totalDeposits = filteredRecords.reduce((sum, record) => sum + record.amount, 0)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold text-indigo-800 mb-8 text-center">
-          IPD Billing Management
-        </h1>
-
-        {/* Tabs */}
-        <div className="flex justify-center mb-6">
-          <div className="inline-flex shadow rounded-lg overflow-hidden" role="tablist">
-            <button
-              onClick={() => setSelectedTab("non-discharge")}
-              className={`px-6 py-3 font-medium transition-colors duration-300 ${
-                selectedTab === "non-discharge"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Non Discharged
-            </button>
-            <button
-              onClick={() => setSelectedTab("discharge")}
-              className={`px-6 py-3 font-medium transition-colors duration-300 ${
-                selectedTab === "discharge"
-                  ? "bg-indigo-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              Discharged
-            </button>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header Section */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">IPD Billing Management</h1>
+          <p className="text-slate-500">Manage and track in-patient billing records</p>
         </div>
 
-        {/* Ward Filter */}
-        <div className="flex justify-center mb-6">
-          <div className="inline-flex space-x-2">
-            <button
-              onClick={() => setSelectedWard("All")}
-              className={`px-4 py-2 rounded-md transition-colors duration-300 ${
-                selectedWard === "All"
-                  ? "bg-green-600 text-white"
-                  : "bg-white text-gray-600 hover:bg-gray-100"
-              }`}
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">Total Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center">
+                <Users className="h-5 w-5 text-emerald-500 mr-2" />
+                <span className="text-2xl font-bold">{totalPatients}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-slate-500">Total Deposits</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center">
+                <CreditCard className="h-5 w-5 text-violet-500 mr-2" />
+                <span className="text-2xl font-bold">₹{totalDeposits.toLocaleString()}</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tabs and Filters */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <Tabs
+              defaultValue="non-discharge"
+              onValueChange={(value) => setSelectedTab(value as "non-discharge" | "discharge")}
             >
-              All
-            </button>
-            {uniqueWards.map((ward) => (
-              <button
-                key={ward}
-                onClick={() => setSelectedWard(ward ?? '')}
-                className={`px-4 py-2 rounded-md transition-colors duration-300 ${
-                  selectedWard.toLowerCase() === (ward ?? '').toLowerCase()
-                    ? "bg-green-600 text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-100"
-                }`}
-              >
-                {ward}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="mb-6 flex justify-center">
-          <div className="flex items-center bg-gray-100 rounded-full px-4 py-2 w-full max-w-md shadow">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by Name, IPD ID, or Mobile"
-              className="flex-grow bg-transparent outline-none text-gray-700"
-            />
-          </div>
-        </div>
-
-        {/* Records Table */}
-        {sortedRecords.length === 0 ? (
-          <p className="text-center text-gray-500">No records found.</p>
-        ) : (
-          <div className="overflow-x-auto bg-white rounded-lg shadow-lg">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-indigo-100">
-                <tr>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Rank</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Patient Name</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Mobile Number</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Total Deposit (Rs)</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Room Type</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {sortedRecords.map((rec, index) => (
-                  <tr
-                    key={`${rec.patientId}-${rec.ipdId}`}
-                    onClick={() => handleRowClick(rec)}
-                    className="hover:bg-indigo-50 transition-colors duration-200 cursor-pointer"
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                <TabsList className="bg-slate-100">
+                  <TabsTrigger
+                    value="non-discharge"
+                    className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
                   >
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{index + 1}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.name}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.mobileNumber}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                      {rec.amount.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rec.roomType}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <button
-                        onClick={(e) => handleEditRecord(e, rec)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-150"
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                    <XCircle className="h-4 w-4 mr-2" />
+                    Non-Discharged
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="discharge"
+                    className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Discharged
+                  </TabsTrigger>
+                </TabsList>
+
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search by name, ID or mobile"
+                    className="pl-10 w-full md:w-80"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <Home className="h-4 w-4 text-slate-500" />
+                  <h3 className="font-medium text-slate-700">Filter by Ward</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Badge
+                    variant={selectedWard === "All" ? "default" : "outline"}
+                    className="cursor-pointer"
+                    onClick={() => setSelectedWard("All")}
+                  >
+                    All Wards
+                  </Badge>
+                  {uniqueWards.map((ward) => (
+                    <Badge
+                      key={ward}
+                      variant={selectedWard === ward ? "default" : "outline"}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedWard(ward ?? "")}
+                    >
+                      {ward}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              <TabsContent value="non-discharge" className="mt-0">
+                {renderPatientsTable(sortedRecords, handleRowClick, handleEditRecord, isLoading)}
+              </TabsContent>
+
+              <TabsContent value="discharge" className="mt-0">
+                {renderPatientsTable(sortedRecords, handleRowClick, handleEditRecord, isLoading)}
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
       </div>
     </div>
-  );
+  )
+}
+
+function renderPatientsTable(
+  records: BillingRecord[],
+  handleRowClick: (record: BillingRecord) => void,
+  handleEditRecord: (e: React.MouseEvent, record: BillingRecord) => void,
+  isLoading: boolean,
+) {
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-800"></div>
+      </div>
+    )
+  }
+
+  if (records.length === 0) {
+    return (
+      <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+        <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+        <h3 className="text-lg font-medium text-slate-700 mb-1">No patients found</h3>
+        <p className="text-slate-500">Try adjusting your filters or search criteria</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="px-4 py-3 text-left font-medium text-slate-500">#</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Patient Name</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Mobile Number</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Deposit (₹)</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Room Type</th>
+            <th className="px-4 py-3 text-left font-medium text-slate-500">Status</th>
+            <th className="px-4 py-3 text-right font-medium text-slate-500">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-200">
+          {records.map((record, index) => (
+            <tr
+              key={`${record.patientId}-${record.ipdId}`}
+              onClick={() => handleRowClick(record)}
+              className="hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              <td className="px-4 py-3 text-slate-700">{index + 1}</td>
+              <td className="px-4 py-3">
+                <div className="font-medium text-slate-800">{record.name}</div>
+                <div className="text-xs text-slate-500">ID: {record.ipdId}</div>
+              </td>
+              <td className="px-4 py-3 text-slate-700">{record.mobileNumber}</td>
+              <td className="px-4 py-3 font-medium text-slate-800">₹{record.amount.toLocaleString()}</td>
+              <td className="px-4 py-3">
+                <Badge variant="outline" className="bg-slate-50">
+                  {record.roomType || "Not Assigned"}
+                </Badge>
+              </td>
+              <td className="px-4 py-3">
+                {record.dischargeDate ? (
+                  <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                    Discharged
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                    Active
+                  </Badge>
+                )}
+              </td>
+              <td className="px-4 py-3 text-right">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={(e) => handleEditRecord(e, record)}
+                  className="text-slate-700 hover:text-slate-900 hover:bg-slate-100"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
