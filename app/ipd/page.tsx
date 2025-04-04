@@ -5,6 +5,8 @@ import { db } from "../../lib/firebase"; // Gautami DB
 import { db as dbMedford } from "../../lib/firebaseMedford"; // Medford DB
 import { ref, push, update, onValue, set } from "firebase/database";
 import Head from "next/head";
+
+// UPDATED IMPORTS:
 import {
   FaUser,
   FaPhone,
@@ -16,7 +18,10 @@ import {
   FaStethoscope,
   FaCheckCircle,
   FaTimesCircle,
+  FaEye,
+  FaBed,
 } from "react-icons/fa";
+
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import DatePicker from "react-datepicker";
@@ -164,7 +169,7 @@ const IPDBookingPage: React.FC = () => {
   // Auto-complete states for name
   const [patientNameInput, setPatientNameInput] = useState("");
   const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([]);
-  // New states for phone auto-complete
+  // Auto-complete states for phone
   const [patientPhoneInput, setPatientPhoneInput] = useState("");
   const [phoneSuggestions, setPhoneSuggestions] = useState<PatientSuggestion[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
@@ -177,13 +182,17 @@ const IPDBookingPage: React.FC = () => {
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
 
-  // Current selected room type from the form
+  // Watch the currently selected room type (used below)
   const selectedRoomType = watch("roomType");
 
+  // NEW: All bed data for the "View Bed Availability" popup
+  const [allBedData, setAllBedData] = useState<any>({});
+  const [showBedPopup, setShowBedPopup] = useState(false);
+
   /* -----------------------------------------------------------------
-     3A) Fetching data: Doctors, Patients, etc.
+     3A) Fetching data: Doctors, Patients, All Beds
   ------------------------------------------------------------------ */
-  // Doctors (IPD or both)
+  // Doctors
   useEffect(() => {
     const doctorsRef = ref(db, "doctors");
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
@@ -255,10 +264,23 @@ const IPDBookingPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Combine the two arrays (memoized to avoid a new array reference every render)
+  // Combine the two arrays (memoized to avoid unnecessary re-renders)
   const combinedPatients = useMemo(() => {
     return [...gautamiPatients, ...medfordPatients];
   }, [gautamiPatients, medfordPatients]);
+
+  // NEW: Fetch all bed data once for the "View Bed Availability" popup
+  useEffect(() => {
+    const allBedsRef = ref(db, "beds");
+    const unsub = onValue(allBedsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setAllBedData(snapshot.val());
+      } else {
+        setAllBedData({});
+      }
+    });
+    return () => unsub();
+  }, []);
 
   /* -----------------------------------------------------------------
      3B) Patient auto-suggest logic for Name
@@ -376,7 +398,7 @@ const IPDBookingPage: React.FC = () => {
   };
 
   /* -----------------------------------------------------------------
-     3C) Beds fetching logic depends on selectedRoomType
+     3C) Beds fetching logic if user selects a Room Type normally
   ------------------------------------------------------------------ */
   useEffect(() => {
     if (!selectedRoomType?.value) {
@@ -411,7 +433,7 @@ const IPDBookingPage: React.FC = () => {
   ------------------------------------------------------------------ */
   const sendWhatsAppMessage = async (number: string, message: string) => {
     const payload = {
-      token: "99583991572",
+      token: "99583991572", // example token
       number: `91${number}`,
       message,
     };
@@ -464,6 +486,7 @@ const IPDBookingPage: React.FC = () => {
       // 3) Create or update patient record
       let patientId: string;
       if (selectedPatient) {
+        // If the user chose an existing patient
         patientId = selectedPatient.id;
         await update(ref(db, `patients/${patientId}`), {
           name: data.name,
@@ -473,6 +496,7 @@ const IPDBookingPage: React.FC = () => {
           address: data.address || "",
         });
       } else {
+        // If the user is creating a brand-new patient
         const newId = generatePatientId();
         await set(ref(db, `patients/${newId}`), {
           name: data.name,
@@ -483,6 +507,7 @@ const IPDBookingPage: React.FC = () => {
           createdAt: new Date().toISOString(),
           uhid: newId,
         });
+        // Also add to Medford DB
         await set(ref(dbMedford, `patients/${newId}`), {
           name: data.name,
           contact: data.phone,
@@ -498,7 +523,7 @@ const IPDBookingPage: React.FC = () => {
       const newIpdRef = push(ref(db, `patients/${patientId}/ipd`));
       await update(newIpdRef, ipdData);
 
-      // 5) Construct and send WhatsApp messages using the provided format
+      // 5) Construct and send WhatsApp messages
       const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`;
       const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`;
 
@@ -551,7 +576,7 @@ const IPDBookingPage: React.FC = () => {
   };
 
   /* -----------------------------------------------------------------
-     3G) The Render
+     3G) Render
   ------------------------------------------------------------------ */
   return (
     <>
@@ -800,8 +825,16 @@ const IPDBookingPage: React.FC = () => {
 
             {/* ============== Room Type & Bed ============== */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Room Type + Icon to View All Beds */}
               <div>
-                <label className="block text-gray-700 mb-2">Room Type</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-gray-700">Room Type</label>
+                  <FaEye
+                    className="text-gray-500 hover:text-gray-700 cursor-pointer"
+                    title="View Bed Availability"
+                    onClick={() => setShowBedPopup(true)}
+                  />
+                </div>
                 <Controller
                   control={control}
                   name="roomType"
@@ -822,6 +855,8 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
+
+              {/* Bed */}
               <div>
                 <label className="block text-gray-700 mb-2">Bed</label>
                 <Controller
@@ -842,7 +877,9 @@ const IPDBookingPage: React.FC = () => {
                   )}
                 />
                 {errors.bed && (
-                  <p className="text-red-500 text-sm mt-1">{errors.bed.message}</p>
+                  <p className="text-red-500 text-sm mt-1">
+                    {errors.bed.message}
+                  </p>
                 )}
               </div>
             </div>
@@ -908,7 +945,7 @@ const IPDBookingPage: React.FC = () => {
               )}
             </div>
 
-            {/* ============== Preview & Submit ============== */}
+            {/* ============== Preview & Submit Buttons ============== */}
             <button
               type="button"
               onClick={handlePreview}
@@ -949,11 +986,13 @@ const IPDBookingPage: React.FC = () => {
                     </p>
                     {previewData.relativeAddress && (
                       <p>
-                        <strong>Relative Address:</strong> {previewData.relativeAddress}
+                        <strong>Relative Address:</strong>{" "}
+                        {previewData.relativeAddress}
                       </p>
                     )}
                     <p>
-                      <strong>Admission Date:</strong> {previewData.date.toLocaleDateString()}
+                      <strong>Admission Date:</strong>{" "}
+                      {previewData.date.toLocaleDateString()}
                     </p>
                     <p>
                       <strong>Admission Time:</strong> {previewData.time}
@@ -970,17 +1009,20 @@ const IPDBookingPage: React.FC = () => {
                     )}
                     {previewData.doctor && (
                       <p>
-                        <strong>Under Care of Doctor:</strong> {previewData.doctor.label}
+                        <strong>Under Care of Doctor:</strong>{" "}
+                        {previewData.doctor.label}
                       </p>
                     )}
                     {previewData.referDoctor && (
                       <p>
-                        <strong>Referral Doctor:</strong> {previewData.referDoctor}
+                        <strong>Referral Doctor:</strong>{" "}
+                        {previewData.referDoctor}
                       </p>
                     )}
                     {previewData.admissionType && (
                       <p>
-                        <strong>Admission Type:</strong> {previewData.admissionType.label}
+                        <strong>Admission Type:</strong>{" "}
+                        {previewData.admissionType.label}
                       </p>
                     )}
                   </div>
@@ -992,7 +1034,9 @@ const IPDBookingPage: React.FC = () => {
                     >
                       Cancel
                     </button>
+                    {/* Render your PDF button or component */}
                     {previewData && <IPDSignaturePDF data={previewData} />}
+
                     <button
                       type="submit"
                       className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 ${
@@ -1019,6 +1063,84 @@ const IPDBookingPage: React.FC = () => {
           </form>
         </div>
       </main>
+
+      {/* ============== POPUP FOR ALL BEDS & ROOMS ============== */}
+      {showBedPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-4xl max-h-[80vh] overflow-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Bed Availability</h2>
+              <button
+                onClick={() => setShowBedPopup(false)}
+                className="text-red-500 font-bold"
+              >
+                X
+              </button>
+            </div>
+
+            {Object.keys(allBedData).length === 0 && (
+              <p>No bed data available</p>
+            )}
+
+            <div className="space-y-6">
+              {Object.keys(allBedData).map((roomKey) => {
+                const roomBeds = allBedData[roomKey];
+                return (
+                  <div key={roomKey} className="border border-gray-300 p-4 rounded">
+                    <h3 className="text-lg font-semibold capitalize mb-2">
+                      {roomKey.replace("_", " ")}
+                    </h3>
+                    <div className="flex flex-wrap gap-4">
+                      {Object.keys(roomBeds).map((bedId) => {
+                        const bedInfo = roomBeds[bedId];
+                        const isAvailable = bedInfo.status === "Available";
+                        return (
+                          <div
+                            key={bedId}
+                            className={`flex flex-col items-center justify-center w-16 h-16 rounded cursor-pointer ${
+                              isAvailable ? "bg-green-100" : "bg-red-100"
+                            }`}
+                            onClick={() => {
+                              if (!isAvailable) return;
+                              // Auto-fill form with this bed & room
+                              const rtOption = RoomTypeOptions.find(
+                                (opt) => opt.value === roomKey
+                              );
+                              setValue("roomType", rtOption || null);
+                              // Overwrite the bed dropdown
+                              setBeds([
+                                {
+                                  label: `Bed ${bedInfo.bedNumber}`,
+                                  value: bedId,
+                                },
+                              ]);
+                              setValue("bed", {
+                                label: `Bed ${bedInfo.bedNumber}`,
+                                value: bedId,
+                              });
+                              setShowBedPopup(false);
+                            }}
+                          >
+                            <FaBed
+                              size={24}
+                              className={
+                                isAvailable ? "text-green-600" : "text-red-600"
+                              }
+                            />
+                            <span className="text-sm mt-1">
+                              Bed {bedInfo.bedNumber}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
