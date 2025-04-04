@@ -7,20 +7,7 @@ import { ref, push, update, onValue, set } from "firebase/database";
 import Head from "next/head";
 
 // UPDATED IMPORTS:
-import {
-  FaUser,
-  FaPhone,
-  FaTransgender,
-  FaCalendarAlt,
-  FaClock,
-  FaHome,
-  FaUserFriends,
-  FaStethoscope,
-  FaCheckCircle,
-  FaTimesCircle,
-  FaEye,
-  FaBed,
-} from "react-icons/fa";
+import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, Search, ChevronRight, AlertCircle, Send, FileText, ArrowLeft } from 'lucide-react';
 
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -188,6 +175,9 @@ const IPDBookingPage: React.FC = () => {
   // NEW: All bed data for the "View Bed Availability" popup
   const [allBedData, setAllBedData] = useState<any>({});
   const [showBedPopup, setShowBedPopup] = useState(false);
+  
+  // Form step state for multi-step form
+  const [formStep, setFormStep] = useState(0);
 
   /* -----------------------------------------------------------------
      3A) Fetching data: Doctors, Patients, All Beds
@@ -557,6 +547,7 @@ const IPDBookingPage: React.FC = () => {
       setPatientPhoneInput("");
       setSelectedPatient(null);
       setPreviewData(null);
+      setFormStep(0);
     } catch (err) {
       console.error("Error in IPD booking:", err);
       toast.error("Error: Failed to book IPD admission.", {
@@ -575,6 +566,37 @@ const IPDBookingPage: React.FC = () => {
     setPreviewData(watch());
   };
 
+  // Custom styles for react-select
+  const customSelectStyles = {
+    control: (provided: any) => ({
+      ...provided,
+      borderRadius: '0.5rem',
+      borderColor: '#e2e8f0',
+      minHeight: '48px',
+      boxShadow: 'none',
+      '&:hover': {
+        borderColor: '#3b82f6',
+      },
+    }),
+    option: (provided: any, state: any) => ({
+      ...provided,
+      backgroundColor: state.isSelected ? '#3b82f6' : state.isFocused ? '#e2e8f0' : 'white',
+      color: state.isSelected ? 'white' : '#1e293b',
+      cursor: 'pointer',
+      padding: '10px 12px',
+    }),
+    placeholder: (provided: any) => ({
+      ...provided,
+      color: '#94a3b8',
+    }),
+  };
+
+  // Custom styles for DatePicker
+  const datePickerWrapperClass = `
+    w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 
+    ${errors.date ? "border-red-500" : "border-gray-300"} transition duration-200
+  `;
+
   /* -----------------------------------------------------------------
      3G) Render
   ------------------------------------------------------------------ */
@@ -587,552 +609,768 @@ const IPDBookingPage: React.FC = () => {
 
       <ToastContainer />
 
-      <main className="min-h-screen bg-gradient-to-r from-cyan-100 to-blue-200 flex items-center justify-center p-6">
-        <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl p-10">
-          <h2 className="text-3xl font-bold text-center text-blue-700 mb-8">
-            IPD Admission
-          </h2>
+      <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4 md:p-6">
+        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-xl overflow-hidden">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl md:text-3xl font-bold">IPD Admission</h2>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs md:text-sm bg-white/20 py-1 px-3 rounded-full">
+                  {formStep === 0 ? "Patient Details" : formStep === 1 ? "Relative Details" : "Admission Details"}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 flex justify-between">
+              <div className="flex space-x-1">
+                <div className={`h-1 w-10 rounded-full ${formStep >= 0 ? "bg-white" : "bg-white/30"}`}></div>
+                <div className={`h-1 w-10 rounded-full ${formStep >= 1 ? "bg-white" : "bg-white/30"}`}></div>
+                <div className={`h-1 w-10 rounded-full ${formStep >= 2 ? "bg-white" : "bg-white/30"}`}></div>
+              </div>
+              <div className="text-sm text-white/80">Step {formStep + 1} of 3</div>
+            </div>
+          </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {/* ============== Patient Name + Suggestions ============== */}
-            <div className="relative">
-              <FaUser className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="text"
-                value={patientNameInput}
-                onChange={handlePatientNameChange}
-                placeholder="Patient Name"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.name ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
-              />
-              {errors.name && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.name.message}
-                </p>
-              )}
-
-              {patientSuggestions.length > 0 && !selectedPatient && (
-                <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
-                  {patientSuggestions.map((sug) => (
-                    <li
-                      key={sug.value}
-                      onClick={() => handleSelectPatient(sug.value)}
-                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
-                    >
-                      <span>{sug.label}</span>
-                      {sug.source === "gautami" ? (
-                        <FaCheckCircle color="green" />
-                      ) : (
-                        <FaTimesCircle color="red" />
+          <form onSubmit={handleSubmit(onSubmit)} className="p-6">
+            {/* Step 1: Patient Details */}
+            {formStep === 0 && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Patient Name + Suggestions */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
+                    <div className="relative">
+                      <User className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        value={patientNameInput}
+                        onChange={handlePatientNameChange}
+                        placeholder="Enter patient's full name"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.name ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                      {patientNameInput.length > 0 && (
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setPatientNameInput("");
+                            setValue("name", "");
+                          }}
+                          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+                        >
+                          <XCircle className="h-5 w-5" />
+                        </button>
                       )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                    </div>
+                    {errors.name && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.name.message}
+                      </p>
+                    )}
 
-            {/* ============== Phone with Auto-Complete ============== */}
-            <div className="relative">
-              <FaPhone className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="tel"
-                value={patientPhoneInput}
-                onChange={handlePatientPhoneChange}
-                placeholder="Patient Phone Number"
-                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                  errors.phone ? "border-red-500" : "border-gray-300"
-                } transition duration-200`}
-              />
-              {errors.phone && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.phone.message}
-                </p>
-              )}
-              {phoneSuggestions.length > 0 && !selectedPatient && (
-                <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
-                  {phoneSuggestions.map((sug) => (
-                    <li
-                      key={sug.value}
-                      onClick={() => handleSelectPatient(sug.value)}
-                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer flex justify-between items-center"
-                    >
-                      <span>{sug.label}</span>
-                      {sug.source === "gautami" ? (
-                        <FaCheckCircle color="green" />
-                      ) : (
-                        <FaTimesCircle color="red" />
+                    {patientSuggestions.length > 0 && !selectedPatient && (
+                      <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
+                        {patientSuggestions.map((sug) => (
+                          <li
+                            key={sug.value}
+                            onClick={() => handleSelectPatient(sug.value)}
+                            className="px-4 py-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0"
+                          >
+                            <div className="flex items-center">
+                              <UserRound className="h-5 w-5 mr-2 text-gray-400" />
+                              <span>{sug.label}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
+                                {sug.source === "gautami" ? "Gautami" : "Medford"}
+                              </span>
+                              <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Phone with Auto-Complete */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+                    <div className="relative">
+                      <Phone className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="tel"
+                        value={patientPhoneInput}
+                        onChange={handlePatientPhoneChange}
+                        placeholder="10-digit mobile number"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.phone ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                      {patientPhoneInput.length > 0 && (
+                        <button 
+                          type="button"
+                          onClick={() => {
+                            setPatientPhoneInput("");
+                            setValue("phone", "");
+                          }}
+                          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+                        >
+                          <XCircle className="h-5 w-5" />
+                        </button>
                       )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                    </div>
+                    {errors.phone && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.phone.message}
+                      </p>
+                    )}
+                    {phoneSuggestions.length > 0 && !selectedPatient && (
+                      <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
+                        {phoneSuggestions.map((sug) => (
+                          <li
+                            key={sug.value}
+                            onClick={() => handleSelectPatient(sug.value)}
+                            className="px-4 py-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0"
+                          >
+                            <div className="flex items-center">
+                              <UserRound className="h-5 w-5 mr-2 text-gray-400" />
+                              <span>{sug.label}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
+                                {sug.source === "gautami" ? "Gautami" : "Medford"}
+                              </span>
+                              <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
 
-            {/* ============== Gender ============== */}
-            <div>
-              <label className="block text-gray-700 mb-2">Gender</label>
-              <Controller
-                control={control}
-                name="gender"
-                rules={{ required: "Gender is required" }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={GenderOptions}
-                    placeholder="Select Gender"
-                    classNamePrefix="react-select"
-                    onChange={(val) => field.onChange(val)}
-                  />
-                )}
-              />
-              {errors.gender && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.gender.message}
-                </p>
-              )}
-            </div>
-
-            {/* ============== Age & Address ============== */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="relative">
-                <FaTransgender className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="number"
-                  {...register("age", {
-                    required: "Age is required",
-                    min: { value: 1, message: "Age must be positive" },
-                  })}
-                  placeholder="Age"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.age ? "border-red-500" : "border-gray-300"
-                  } transition duration-200`}
-                />
-                {errors.age && (
-                  <p className="text-red-500 text-sm mt-1">{errors.age.message}</p>
-                )}
-              </div>
-              <div className="relative">
-                <FaHome className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="text"
-                  {...register("address")}
-                  placeholder="Patient Address (Optional)"
-                  className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
-                />
-              </div>
-            </div>
-
-            {/* ============== Relative Name & Phone ============== */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="relative">
-                <FaUserFriends className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="text"
-                  {...register("relativeName", {
-                    required: "Relative name is required",
-                  })}
-                  placeholder="Relative Name"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.relativeName ? "border-red-500" : "border-gray-300"
-                  } transition duration-200`}
-                />
-                {errors.relativeName && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.relativeName.message}
-                  </p>
-                )}
-              </div>
-              <div className="relative">
-                <FaPhone className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="tel"
-                  {...register("relativePhone", {
-                    required: "Relative phone is required",
-                    pattern: {
-                      value: /^[0-9]{10}$/,
-                      message: "Must be a valid 10-digit phone number",
-                    },
-                  })}
-                  placeholder="Relative Phone Number"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.relativePhone ? "border-red-500" : "border-gray-300"
-                  } transition duration-200`}
-                />
-                {errors.relativePhone && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.relativePhone.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* ============== Relative Address (Optional) ============== */}
-            <div className="relative">
-              <FaHome className="absolute top-3 left-3 text-gray-400" />
-              <input
-                type="text"
-                {...register("relativeAddress")}
-                placeholder="Relative Address (Optional)"
-                className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
-              />
-            </div>
-
-            {/* ============== Date & Time ============== */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="relative">
-                <FaCalendarAlt className="absolute top-3 left-3 text-gray-400" />
-                <Controller
-                  control={control}
-                  name="date"
-                  rules={{ required: "Date is required" }}
-                  render={({ field }) => (
-                    <DatePicker
-                      selected={field.value}
-                      onChange={(dt) => dt && field.onChange(dt)}
-                      dateFormat="dd/MM/yyyy"
-                      placeholderText="Select Date"
-                      className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        errors.date ? "border-red-500" : "border-gray-300"
-                      } transition duration-200`}
+                  {/* Gender */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
+                    <Controller
+                      control={control}
+                      name="gender"
+                      rules={{ required: "Gender is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={GenderOptions}
+                          placeholder="Select Gender"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
                     />
-                  )}
-                />
-                {errors.date && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.date.message}
-                  </p>
-                )}
-              </div>
-              <div className="relative">
-                <FaClock className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="text"
-                  {...register("time", { required: "Time is required" })}
-                  placeholder="Time"
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                    errors.time ? "border-red-500" : "border-gray-300"
-                  } transition duration-200`}
-                  defaultValue={formatAMPM(new Date())}
-                />
-                {errors.time && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.time.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* ============== Room Type & Bed ============== */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Room Type + Icon to View All Beds */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-gray-700">Room Type</label>
-                  <FaEye
-                    className="text-gray-500 hover:text-gray-700 cursor-pointer"
-                    title="View Bed Availability"
-                    onClick={() => setShowBedPopup(true)}
-                  />
-                </div>
-                <Controller
-                  control={control}
-                  name="roomType"
-                  rules={{ required: "Room Type is required" }}
-                  render={({ field }) => (
-                    <Select
-                      {...field}
-                      options={RoomTypeOptions}
-                      placeholder="Select Room Type"
-                      classNamePrefix="react-select"
-                      onChange={(val) => field.onChange(val)}
-                    />
-                  )}
-                />
-                {errors.roomType && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.roomType.message}
-                  </p>
-                )}
-              </div>
-
-              {/* Bed */}
-              <div>
-                <label className="block text-gray-700 mb-2">Bed</label>
-                <Controller
-                  control={control}
-                  name="bed"
-                  rules={{ required: "Bed selection is required" }}
-                  render={({ field }) => (
-                    <Select
-                      {...field}
-                      options={beds}
-                      placeholder={
-                        beds.length > 0 ? "Select Bed" : "No Beds Available"
-                      }
-                      classNamePrefix="react-select"
-                      onChange={(val) => field.onChange(val)}
-                      isDisabled={!selectedRoomType || beds.length === 0}
-                    />
-                  )}
-                />
-                {errors.bed && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.bed.message}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* ============== Doctor & Referral Doctor ============== */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-gray-700 mb-2">
-                  Under Care of Doctor
-                </label>
-                <Controller
-                  control={control}
-                  name="doctor"
-                  rules={{ required: "Doctor selection is required" }}
-                  render={({ field }) => (
-                    <Select
-                      {...field}
-                      options={doctors}
-                      placeholder="Select Doctor"
-                      classNamePrefix="react-select"
-                      onChange={(val) => field.onChange(val)}
-                    />
-                  )}
-                />
-                {errors.doctor && (
-                  <p className="text-red-500 text-sm mt-1">
-                    {errors.doctor.message}
-                  </p>
-                )}
-              </div>
-              <div className="relative">
-                <FaStethoscope className="absolute top-3 left-3 text-gray-400" />
-                <input
-                  type="text"
-                  {...register("referDoctor")}
-                  placeholder="Referral Doctor (Optional)"
-                  className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
-                />
-              </div>
-            </div>
-
-            {/* ============== Admission Type ============== */}
-            <div>
-              <label className="block text-gray-700 mb-2">Admission Type</label>
-              <Controller
-                control={control}
-                name="admissionType"
-                rules={{ required: "Admission Type is required" }}
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={AdmissionTypeOptions}
-                    placeholder="Select Admission Type"
-                    classNamePrefix="react-select"
-                    onChange={(val) => field.onChange(val)}
-                  />
-                )}
-              />
-              {errors.admissionType && (
-                <p className="text-red-500 text-sm mt-1">
-                  {errors.admissionType.message}
-                </p>
-              )}
-            </div>
-
-            {/* ============== Preview & Submit Buttons ============== */}
-            <button
-              type="button"
-              onClick={handlePreview}
-              className="w-full py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500"
-            >
-              Preview
-            </button>
-
-            {previewData && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
-                  <h3 className="text-2xl font-semibold mb-4">
-                    Preview IPD Admission
-                  </h3>
-                  <div className="space-y-2">
-                    <p>
-                      <strong>Patient Name:</strong> {previewData.name}
-                    </p>
-                    <p>
-                      <strong>Phone:</strong> {previewData.phone}
-                    </p>
-                    <p>
-                      <strong>Gender:</strong> {previewData.gender?.label}
-                    </p>
-                    <p>
-                      <strong>Age:</strong> {previewData.age}
-                    </p>
-                    {previewData.address && (
-                      <p>
-                        <strong>Address:</strong> {previewData.address}
-                      </p>
-                    )}
-                    <p>
-                      <strong>Relative Name:</strong> {previewData.relativeName}
-                    </p>
-                    <p>
-                      <strong>Relative Phone:</strong> {previewData.relativePhone}
-                    </p>
-                    {previewData.relativeAddress && (
-                      <p>
-                        <strong>Relative Address:</strong>{" "}
-                        {previewData.relativeAddress}
-                      </p>
-                    )}
-                    <p>
-                      <strong>Admission Date:</strong>{" "}
-                      {previewData.date.toLocaleDateString()}
-                    </p>
-                    <p>
-                      <strong>Admission Time:</strong> {previewData.time}
-                    </p>
-                    {previewData.roomType && (
-                      <p>
-                        <strong>Room Type:</strong> {previewData.roomType.label}
-                      </p>
-                    )}
-                    {previewData.bed && (
-                      <p>
-                        <strong>Bed:</strong> {previewData.bed.label}
-                      </p>
-                    )}
-                    {previewData.doctor && (
-                      <p>
-                        <strong>Under Care of Doctor:</strong>{" "}
-                        {previewData.doctor.label}
-                      </p>
-                    )}
-                    {previewData.referDoctor && (
-                      <p>
-                        <strong>Referral Doctor:</strong>{" "}
-                        {previewData.referDoctor}
-                      </p>
-                    )}
-                    {previewData.admissionType && (
-                      <p>
-                        <strong>Admission Type:</strong>{" "}
-                        {previewData.admissionType.label}
+                    {errors.gender && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.gender.message}
                       </p>
                     )}
                   </div>
-                  <div className="mt-6 flex flex-wrap gap-4 justify-end">
+
+                  {/* Age */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
+                    <div className="relative">
+                      <UserRound className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="number"
+                        {...register("age", {
+                          required: "Age is required",
+                          min: { value: 1, message: "Age must be positive" },
+                        })}
+                        placeholder="Patient's age"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.age ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                    </div>
+                    {errors.age && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.age.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Address */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address (Optional)</label>
+                    <div className="relative">
+                      <Home className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("address")}
+                        placeholder="Patient's residential address"
+                        className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setFormStep(1)}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
+                  >
+                    Next: Relative Details
+                    <ChevronRight className="ml-2 h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Relative Details */}
+            {formStep === 1 && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Relative Name */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Relative Name</label>
+                    <div className="relative">
+                      <Users className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("relativeName", {
+                          required: "Relative name is required",
+                        })}
+                        placeholder="Enter relative's full name"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.relativeName ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                    </div>
+                    {errors.relativeName && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.relativeName.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Relative Phone */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Relative Phone Number</label>
+                    <div className="relative">
+                      <Phone className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="tel"
+                        {...register("relativePhone", {
+                          required: "Relative phone is required",
+                          pattern: {
+                            value: /^[0-9]{10}$/,
+                            message: "Must be a valid 10-digit phone number",
+                          },
+                        })}
+                        placeholder="10-digit mobile number"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.relativePhone ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                    </div>
+                    {errors.relativePhone && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.relativePhone.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Relative Address */}
+                  <div className="relative col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Relative Address (Optional)</label>
+                    <div className="relative">
+                      <Home className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("relativeAddress")}
+                        placeholder="Relative's residential address"
+                        className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 flex justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setFormStep(0)}
+                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 flex items-center"
+                  >
+                    <ArrowLeft className="mr-2 h-5 w-5" />
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormStep(2)}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
+                  >
+                    Next: Admission Details
+                    <ChevronRight className="ml-2 h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Admission Details */}
+            {formStep === 2 && (
+              <div className="space-y-6 animate-fadeIn">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Date & Time */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Date</label>
+                    <div className="relative">
+                      <Calendar className="absolute top-3 left-3 text-gray-400 h-5 w-5 z-10" />
+                      <Controller
+                        control={control}
+                        name="date"
+                        rules={{ required: "Date is required" }}
+                        render={({ field }) => (
+                          <DatePicker
+                            selected={field.value}
+                            onChange={(dt) => dt && field.onChange(dt)}
+                            dateFormat="dd/MM/yyyy"
+                            placeholderText="Select Date"
+                            className={datePickerWrapperClass}
+                          />
+                        )}
+                      />
+                    </div>
+                    {errors.date && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.date.message}
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Time</label>
+                    <div className="relative">
+                      <Clock className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("time", { required: "Time is required" })}
+                        placeholder="Time"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.time ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                        defaultValue={formatAMPM(new Date())}
+                      />
+                    </div>
+                    {errors.time && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.time.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Room Type & Bed */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700">Room Type</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowBedPopup(true)}
+                        className="text-blue-600 hover:text-blue-800 text-sm flex items-center"
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        View Availability
+                      </button>
+                    </div>
+                    <Controller
+                      control={control}
+                      name="roomType"
+                      rules={{ required: "Room Type is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={RoomTypeOptions}
+                          placeholder="Select Room Type"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.roomType && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.roomType.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bed</label>
+                    <Controller
+                      control={control}
+                      name="bed"
+                      rules={{ required: "Bed selection is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={beds}
+                          placeholder={
+                            beds.length > 0 ? "Select Bed" : "No Beds Available"
+                          }
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                          isDisabled={!selectedRoomType || beds.length === 0}
+                        />
+                      )}
+                    />
+                    {errors.bed && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.bed.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Doctor & Referral Doctor */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Under Care of Doctor
+                    </label>
+                    <Controller
+                      control={control}
+                      name="doctor"
+                      rules={{ required: "Doctor selection is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={doctors}
+                          placeholder="Select Doctor"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.doctor && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.doctor.message}
+                      </p>
+                    )}
+                  </div>
+                  
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor (Optional)</label>
+                    <div className="relative">
+                      <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("referDoctor")}
+                        placeholder="Name of referring doctor"
+                        className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Admission Type */}
+                  <div className="col-span-full">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Type</label>
+                    <Controller
+                      control={control}
+                      name="admissionType"
+                      rules={{ required: "Admission Type is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={AdmissionTypeOptions}
+                          placeholder="Select Admission Type"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.admissionType && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.admissionType.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-4 flex justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setFormStep(1)}
+                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 flex items-center"
+                  >
+                    <ArrowLeft className="mr-2 h-5 w-5" />
+                    Back
+                  </button>
+                  
+                  <div className="flex space-x-3">
                     <button
                       type="button"
-                      onClick={() => setPreviewData(null)}
-                      className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition duration-200"
+                      onClick={handlePreview}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center"
                     >
-                      Cancel
+                      <FileText className="mr-2 h-5 w-5" />
+                      Preview
                     </button>
-                    {/* Render your PDF button or component */}
-                    {previewData && <IPDSignaturePDF data={previewData} />}
-
+                    
                     <button
                       type="submit"
-                      className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 ${
+                      disabled={loading}
+                      className={`px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center ${
                         loading ? "opacity-50 cursor-not-allowed" : ""
                       }`}
-                      disabled={loading}
                     >
-                      {loading ? "Submitting..." : "Confirm & Submit"}
+                      <Send className="mr-2 h-5 w-5" />
+                      {loading ? "Submitting..." : "Submit Admission"}
                     </button>
                   </div>
                 </div>
               </div>
             )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              className={`w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                loading ? "opacity-50 cursor-not-allowed" : ""
-              }`}
-            >
-              {loading ? "Submitting..." : "Submit Admission"}
-            </button>
           </form>
         </div>
       </main>
 
-      {/* ============== POPUP FOR ALL BEDS & ROOMS ============== */}
+      {/* Preview Modal */}
+      {previewData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
+            <div className="flex justify-between items-center mb-4 border-b pb-4">
+              <h3 className="text-2xl font-semibold text-blue-700">
+                Preview IPD Admission
+              </h3>
+              <button 
+                onClick={() => setPreviewData(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+              <div className="space-y-2">
+                <h4 className="font-medium text-gray-500 text-sm">Patient Information</h4>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Name:</span>
+                  <span className="font-medium">{previewData.name}</span>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Phone:</span>
+                  <span className="font-medium">{previewData.phone}</span>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Gender:</span>
+                  <span className="font-medium">{previewData.gender?.label}</span>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Age:</span>
+                  <span className="font-medium">{previewData.age}</span>
+                </p>
+                {previewData.address && (
+                  <p className="flex justify-between">
+                    <span className="text-gray-600">Address:</span>
+                    <span className="font-medium">{previewData.address}</span>
+                  </p>
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <h4 className="font-medium text-gray-500 text-sm">Relative Information</h4>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Name:</span>
+                  <span className="font-medium">{previewData.relativeName}</span>
+                </p>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">Phone:</span>
+                  <span className="font-medium">{previewData.relativePhone}</span>
+                </p>
+                {previewData.relativeAddress && (
+                  <p className="flex justify-between">
+                    <span className="text-gray-600">Address:</span>
+                    <span className="font-medium">{previewData.relativeAddress}</span>
+                  </p>
+                )}
+              </div>
+              
+              <div className="space-y-2 col-span-full mt-4">
+                <h4 className="font-medium text-gray-500 text-sm">Admission Details</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                  <p className="flex justify-between">
+                    <span className="text-gray-600">Date:</span>
+                    <span className="font-medium">{previewData.date.toLocaleDateString()}</span>
+                  </p>
+                  <p className="flex justify-between">
+                    <span className="text-gray-600">Time:</span>
+                    <span className="font-medium">{previewData.time}</span>
+                  </p>
+                  {previewData.roomType && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Room Type:</span>
+                      <span className="font-medium">{previewData.roomType.label}</span>
+                    </p>
+                  )}
+                  {previewData.bed && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Bed:</span>
+                      <span className="font-medium">{previewData.bed.label}</span>
+                    </p>
+                  )}
+                  {previewData.doctor && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Doctor:</span>
+                      <span className="font-medium">{previewData.doctor.label}</span>
+                    </p>
+                  )}
+                  {previewData.referDoctor && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Referral Doctor:</span>
+                      <span className="font-medium">{previewData.referDoctor}</span>
+                    </p>
+                  )}
+                  {previewData.admissionType && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Admission Type:</span>
+                      <span className="font-medium">{previewData.admissionType.label}</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-8 flex flex-wrap gap-4 justify-end border-t pt-4">
+              <button
+                type="button"
+                onClick={() => setPreviewData(null)}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-200 flex items-center"
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                Cancel
+              </button>
+              
+              {/* Render your PDF button or component */}
+              {previewData && <IPDSignaturePDF data={previewData} />}
+
+              <button
+                type="button"
+                onClick={handleSubmit(onSubmit)}
+                className={`px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 flex items-center ${
+                  loading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={loading}
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                {loading ? "Submitting..." : "Confirm & Submit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bed Availability Popup */}
       {showBedPopup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-4xl max-h-[80vh] overflow-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Bed Availability</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-blue-700 flex items-center">
+                <Bed className="h-5 w-5 mr-2" />
+                Bed Availability
+              </h2>
               <button
                 onClick={() => setShowBedPopup(false)}
-                className="text-red-500 font-bold"
+                className="text-gray-500 hover:text-gray-700"
               >
-                X
+                <XCircle className="h-6 w-6" />
               </button>
             </div>
 
             {Object.keys(allBedData).length === 0 && (
-              <p>No bed data available</p>
+              <div className="flex flex-col items-center justify-center py-8">
+                <AlertCircle className="h-12 w-12 text-gray-400 mb-2" />
+                <p className="text-gray-500">No bed data available</p>
+              </div>
             )}
 
             <div className="space-y-6">
               {Object.keys(allBedData).map((roomKey) => {
                 const roomBeds = allBedData[roomKey];
+                const availableBeds = Object.values(roomBeds).filter((bed: any) => bed.status === "Available").length;
+                const totalBeds = Object.keys(roomBeds).length;
+                
                 return (
-                  <div key={roomKey} className="border border-gray-300 p-4 rounded">
-                    <h3 className="text-lg font-semibold capitalize mb-2">
-                      {roomKey.replace("_", " ")}
-                    </h3>
-                    <div className="flex flex-wrap gap-4">
-                      {Object.keys(roomBeds).map((bedId) => {
-                        const bedInfo = roomBeds[bedId];
-                        const isAvailable = bedInfo.status === "Available";
-                        return (
-                          <div
-                            key={bedId}
-                            className={`flex flex-col items-center justify-center w-16 h-16 rounded cursor-pointer ${
-                              isAvailable ? "bg-green-100" : "bg-red-100"
-                            }`}
-                            onClick={() => {
-                              if (!isAvailable) return;
-                              // Auto-fill form with this bed & room
-                              const rtOption = RoomTypeOptions.find(
-                                (opt) => opt.value === roomKey
-                              );
-                              setValue("roomType", rtOption || null);
-                              // Overwrite the bed dropdown
-                              setBeds([
-                                {
+                  <div key={roomKey} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 p-4 border-b">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-semibold capitalize">
+                          {roomKey.replace("_", " ")}
+                        </h3>
+                        <span className={`px-3 py-1 rounded-full text-sm ${
+                          availableBeds > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                        }`}>
+                          {availableBeds} of {totalBeds} available
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="p-4">
+                      <div className="flex flex-wrap gap-4">
+                        {Object.keys(roomBeds).map((bedId) => {
+                          const bedInfo = roomBeds[bedId];
+                          const isAvailable = bedInfo.status === "Available";
+                          return (
+                            <div
+                              key={bedId}
+                              className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg cursor-pointer border-2 transition-all ${
+                                isAvailable 
+                                  ? "border-green-500 bg-green-50 hover:bg-green-100" 
+                                  : "border-red-300 bg-red-50 opacity-60"
+                              }`}
+                              onClick={() => {
+                                if (!isAvailable) return;
+                                // Auto-fill form with this bed & room
+                                const rtOption = RoomTypeOptions.find(
+                                  (opt) => opt.value === roomKey
+                                );
+                                setValue("roomType", rtOption || null);
+                                // Overwrite the bed dropdown
+                                setBeds([
+                                  {
+                                    label: `Bed ${bedInfo.bedNumber}`,
+                                    value: bedId,
+                                  },
+                                ]);
+                                setValue("bed", {
                                   label: `Bed ${bedInfo.bedNumber}`,
                                   value: bedId,
-                                },
-                              ]);
-                              setValue("bed", {
-                                label: `Bed ${bedInfo.bedNumber}`,
-                                value: bedId,
-                              });
-                              setShowBedPopup(false);
-                            }}
-                          >
-                            <FaBed
-                              size={24}
-                              className={
-                                isAvailable ? "text-green-600" : "text-red-600"
-                              }
-                            />
-                            <span className="text-sm mt-1">
-                              Bed {bedInfo.bedNumber}
-                            </span>
-                          </div>
-                        );
-                      })}
+                                });
+                                setShowBedPopup(false);
+                              }}
+                            >
+                              <Bed
+                                size={24}
+                                className={
+                                  isAvailable ? "text-green-600" : "text-red-500"
+                                }
+                              />
+                              <span className="text-sm mt-1 font-medium">
+                                Bed {bedInfo.bedNumber}
+                              </span>
+                              <span className="text-xs">
+                                {isAvailable ? "Available" : "Occupied"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
