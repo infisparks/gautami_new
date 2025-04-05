@@ -1,49 +1,56 @@
-"use client";
+"use client"
 
-import React, { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { useForm, Controller } from "react-hook-form";
-import { ref, onValue, update } from "firebase/database";
-import { db } from "@/lib/firebase";
-import Select from "react-select";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import { toast } from "react-toastify";
-import { FaUser, FaPhone,  FaClock, FaHome, FaUserFriends,  FaInfoCircle } from "react-icons/fa";
+import { useState, useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { useForm, Controller } from "react-hook-form"
+import { ref, onValue, update } from "firebase/database"
+import { db } from "@/lib/firebase"
+import Select from "react-select"
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
+import { toast } from "react-toastify"
+import { User, Phone, Clock, Home, Users, Calendar, Bed, UserCheck, Check, AlertCircle } from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 
 /* ---------------------------
    Types & Options
 --------------------------- */
 export interface IPDFormInput {
-  name: string;
-  phone: string;
-  gender: { label: string; value: string } | null;
-  age: number;
-  address?: string;
-  relativeName: string;
-  relativePhone: string;
-  relativeAddress?: string;
-  date: Date;
-  time: string;
-  roomType: { label: string; value: string } | null;
-  bed: { label: string; value: string } | null;
-  doctor: { label: string; value: string } | null;
-  referDoctor?: string;
-  admissionType: { label: string; value: string } | null;
+  name: string
+  phone: string
+  gender: { label: string; value: string } | null
+  age: number
+  address?: string
+  relativeName: string
+  relativePhone: string
+  relativeAddress?: string
+  date: Date
+  time: string
+  roomType: { label: string; value: string } | null
+  bed: { label: string; value: string } | null
+  doctor: { label: string; value: string } | null
+  referDoctor?: string
+  admissionType: { label: string; value: string } | null
 }
 
 const GenderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
-];
+]
 
 const AdmissionTypeOptions = [
   { value: "general", label: "General" },
   { value: "surgery", label: "Surgery" },
   { value: "accident_emergency", label: "Accident/Emergency" },
   { value: "day_observation", label: "Day Observation" },
-];
+]
 
 const RoomTypeOptions = [
   { value: "female_ward", label: "Female Ward" },
@@ -51,31 +58,58 @@ const RoomTypeOptions = [
   { value: "male_ward", label: "Male Ward" },
   { value: "deluxe", label: "Deluxe" },
   { value: "nicu", label: "NICU" },
-];
+]
 
 function formatAMPM(date: Date): string {
-  let hours = date.getHours();
-  let minutes: string | number = date.getMinutes();
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12;
-  hours = hours || 12;
-  minutes = minutes < 10 ? "0" + minutes : minutes;
-  return `${hours}:${minutes} ${ampm}`;
+  let hours = date.getHours()
+  let minutes: string | number = date.getMinutes()
+  const ampm = hours >= 12 ? "PM" : "AM"
+  hours = hours % 12
+  hours = hours || 12
+  minutes = minutes < 10 ? "0" + minutes : minutes
+  return `${hours}:${minutes} ${ampm}`
+}
+
+// Custom styles for react-select
+const selectStyles = {
+  control: (provided: any, state: any) => ({
+    ...provided,
+    borderColor: state.isFocused ? "#6366f1" : "#e2e8f0",
+    boxShadow: state.isFocused ? "0 0 0 1px #6366f1" : "none",
+    "&:hover": {
+      borderColor: "#6366f1",
+    },
+    borderRadius: "0.375rem",
+    padding: "2px",
+    backgroundColor: "white",
+  }),
+  option: (provided: any, state: any) => ({
+    ...provided,
+    backgroundColor: state.isSelected ? "#6366f1" : state.isFocused ? "#e0e7ff" : "white",
+    color: state.isSelected ? "white" : "#1f2937",
+    cursor: "pointer",
+  }),
+}
+
+// Custom styles for date picker
+const datePickerWrapperStyles = {
+  input:
+    "w-full rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent",
 }
 
 /* ---------------------------
    Edit IPD Record Component
 --------------------------- */
 export default function EditIPDPage() {
-  const { patienteditId, ipdeditId } = useParams();
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
-  const [showBedsPopup, setShowBedsPopup] = useState(false);
-  const [allBeds, setAllBeds] = useState<any[]>([]);
+  const { patienteditId, ipdeditId } = useParams()
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([])
+  const [beds, setBeds] = useState<{ label: string; value: string }[]>([])
+  const [showBedsPopup, setShowBedsPopup] = useState(false)
+  const [allBeds, setAllBeds] = useState<any[]>([])
   // Save the originally selected bed so we can update its status if needed.
-  const [oldBedInfo, setOldBedInfo] = useState<{ roomType: string; bedId: string } | null>(null);
+  const [oldBedInfo, setOldBedInfo] = useState<{ roomType: string; bedId: string } | null>(null)
 
   const {
     control,
@@ -83,6 +117,7 @@ export default function EditIPDPage() {
     handleSubmit,
     setValue,
     watch,
+    formState: { errors },
   } = useForm<IPDFormInput>({
     defaultValues: {
       name: "",
@@ -101,159 +136,144 @@ export default function EditIPDPage() {
       referDoctor: "",
       admissionType: null,
     },
-  });
+  })
 
   /* ---------------------------
      Fetch Doctors
   --------------------------- */
   useEffect(() => {
-    const doctorsRef = ref(db, "doctors");
+    const doctorsRef = ref(db, "doctors")
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
-      if (!snapshot.exists()) return;
-      const data = snapshot.val();
+      if (!snapshot.exists()) return
+      const data = snapshot.val()
       const docsList = Object.keys(data)
         .filter((key) => {
-          const dept = String(data[key].department || "").toLowerCase();
-          return dept === "ipd" || dept === "both";
+          const dept = String(data[key].department || "").toLowerCase()
+          return dept === "ipd" || dept === "both"
         })
-        .map((key) => ({ label: data[key].name, value: key }));
-      setDoctors(docsList);
-    });
-    return () => unsubscribe();
-  }, []);
+        .map((key) => ({ label: data[key].name, value: key }))
+      setDoctors(docsList)
+    })
+    return () => unsubscribe()
+  }, [])
 
   /* ---------------------------
      Fetch Existing IPD Record Data
   --------------------------- */
   useEffect(() => {
-    if (!patienteditId || !ipdeditId) return;
-    const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`);
+    if (!patienteditId || !ipdeditId) return
+    const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`)
     const unsubscribe = onValue(ipdRef, (snapshot) => {
       if (!snapshot.exists()) {
-        toast.error("IPD record not found.");
-        return;
+        toast.error("IPD record not found.")
+        return
       }
-      const data = snapshot.val();
-      setValue("name", data.name);
-      setValue("phone", data.phone);
-      const genderMatch = GenderOptions.find(
-        (g) => g.value.toLowerCase() === (data.gender || "").toLowerCase()
-      );
-      setValue("gender", genderMatch || null);
-      setValue("age", data.age);
-      setValue("address", data.address);
-      setValue("relativeName", data.relativeName);
-      setValue("relativePhone", data.relativePhone);
-      setValue("relativeAddress", data.relativeAddress);
-      setValue("date", new Date(data.date));
-      setValue("time", data.time);
-      const roomTypeMatch = RoomTypeOptions.find(
-        (r) => r.value === data.roomType
-      );
-      setValue("roomType", roomTypeMatch || null);
-      setOldBedInfo(data.bed ? { roomType: data.roomType, bedId: data.bed } : null);
+      const data = snapshot.val()
+      setValue("name", data.name)
+      setValue("phone", data.phone)
+      const genderMatch = GenderOptions.find((g) => g.value.toLowerCase() === (data.gender || "").toLowerCase())
+      setValue("gender", genderMatch || null)
+      setValue("age", data.age)
+      setValue("address", data.address)
+      setValue("relativeName", data.relativeName)
+      setValue("relativePhone", data.relativePhone)
+      setValue("relativeAddress", data.relativeAddress)
+      setValue("date", new Date(data.date))
+      setValue("time", data.time)
+      const roomTypeMatch = RoomTypeOptions.find((r) => r.value === data.roomType)
+      setValue("roomType", roomTypeMatch || null)
+      setOldBedInfo(data.bed ? { roomType: data.roomType, bedId: data.bed } : null)
       if (data.bed) {
-        setValue("bed", { label: `Bed ${data.bed}`, value: data.bed });
+        setValue("bed", { label: `Bed ${data.bed}`, value: data.bed })
       }
-      const doctorMatch = doctors.find((d) => d.value === data.doctor);
-      setValue("doctor", doctorMatch || null);
-      setValue("referDoctor", data.referDoctor);
-      const admissionTypeMatch = AdmissionTypeOptions.find(
-        (a) => a.value === data.admissionType
-      );
-      setValue("admissionType", admissionTypeMatch || null);
-    });
-    return () => unsubscribe();
-  }, [patienteditId, ipdeditId, setValue, doctors]);
+      const doctorMatch = doctors.find((d) => d.value === data.doctor)
+      setValue("doctor", doctorMatch || null)
+      setValue("referDoctor", data.referDoctor)
+      const admissionTypeMatch = AdmissionTypeOptions.find((a) => a.value === data.admissionType)
+      setValue("admissionType", admissionTypeMatch || null)
+    })
+    return () => unsubscribe()
+  }, [patienteditId, ipdeditId, setValue, doctors])
 
   /* ---------------------------
      Fetch Beds Based on Selected Room Type
   --------------------------- */
-  const selectedRoomType = watch("roomType");
+  const selectedRoomType = watch("roomType")
   useEffect(() => {
     if (!selectedRoomType?.value) {
-      setBeds([]);
-      setValue("bed", null);
-      return;
+      setBeds([])
+      setValue("bed", null)
+      return
     }
-    const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
+    const bedsRef = ref(db, `beds/${selectedRoomType.value}`)
     const unsubscribe = onValue(bedsRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setBeds([]);
-        setValue("bed", null);
-        return;
+        setBeds([])
+        setValue("bed", null)
+        return
       }
-      const data = snapshot.val();
+      const data = snapshot.val()
       const bedList = Object.keys(data)
         // Allow available beds or the one already assigned.
-        .filter(
-          (k) =>
-            data[k].status === "Available" ||
-            (oldBedInfo && k === oldBedInfo.bedId)
-        )
+        .filter((k) => data[k].status === "Available" || (oldBedInfo && k === oldBedInfo.bedId))
         .map((k) => ({
           label: `Bed ${data[k].bedNumber}`,
           value: k,
-        }));
-      setBeds(bedList);
-      const currentBed = watch("bed");
+        }))
+      setBeds(bedList)
+      const currentBed = watch("bed")
       if (currentBed && !bedList.find((b) => b.value === currentBed.value)) {
-        setValue("bed", null);
+        setValue("bed", null)
       }
-    });
-    return () => unsubscribe();
-  }, [selectedRoomType, setValue, oldBedInfo, watch]);
+    })
+    return () => unsubscribe()
+  }, [selectedRoomType, setValue, oldBedInfo, watch])
 
   /* ---------------------------
      Beds Popup – List all beds in the selected room type
   --------------------------- */
   useEffect(() => {
-    if (!selectedRoomType?.value) return;
-    const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
+    if (!selectedRoomType?.value) return
+    const bedsRef = ref(db, `beds/${selectedRoomType.value}`)
     const unsubscribe = onValue(bedsRef, (snapshot) => {
       if (snapshot.exists()) {
-        const data = snapshot.val();
+        const data = snapshot.val()
         const list = Object.keys(data).map((k) => ({
           id: k,
           bedNumber: data[k].bedNumber,
           status: data[k].status,
-        }));
-        setAllBeds(list);
+        }))
+        setAllBeds(list)
       } else {
-        setAllBeds([]);
+        setAllBeds([])
       }
-    });
-    return () => unsubscribe();
-  }, [selectedRoomType]);
+    })
+    return () => unsubscribe()
+  }, [selectedRoomType])
 
   const toggleBedsPopup = () => {
-    setShowBedsPopup(!showBedsPopup);
-  };
+    setShowBedsPopup(!showBedsPopup)
+  }
 
   /* ---------------------------
      Form Submission
   --------------------------- */
   const onSubmit = async (data: IPDFormInput) => {
-    setLoading(true);
+    setLoading(true)
     try {
-      // If the bed has changed, update the status of the old bed to “Available” and the new one to “Occupied.”
-      if (
-        oldBedInfo &&
-        data.roomType?.value &&
-        data.bed?.value &&
-        data.bed.value !== oldBedInfo.bedId
-      ) {
-        const oldBedRef = ref(db, `beds/${oldBedInfo.roomType}/${oldBedInfo.bedId}`);
-        await update(oldBedRef, { status: "Available" });
-        const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
-        await update(newBedRef, { status: "Occupied" });
+      // If the bed has changed, update the status of the old bed to "Available" and the new one to "Occupied."
+      if (oldBedInfo && data.roomType?.value && data.bed?.value && data.bed.value !== oldBedInfo.bedId) {
+        const oldBedRef = ref(db, `beds/${oldBedInfo.roomType}/${oldBedInfo.bedId}`)
+        await update(oldBedRef, { status: "Available" })
+        const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
+        await update(newBedRef, { status: "Occupied" })
       } else if (!oldBedInfo && data.roomType?.value && data.bed?.value) {
-        const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
-        await update(newBedRef, { status: "Occupied" });
+        const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
+        await update(newBedRef, { status: "Occupied" })
       }
 
       // Update the IPD record.
-      const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`);
+      const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`)
       const ipdData = {
         name: data.name,
         phone: data.phone,
@@ -271,260 +291,431 @@ export default function EditIPDPage() {
         referDoctor: data.referDoctor || "",
         admissionType: data.admissionType?.value || "",
         updatedAt: new Date().toISOString(),
-      };
-      await update(ipdRef, ipdData);
-      toast.success("IPD record updated successfully!");
-      router.push("/billing");
+      }
+      await update(ipdRef, ipdData)
+      toast.success("IPD record updated successfully!")
+      router.push("/billing")
     } catch (err) {
-      console.error("Error updating record:", err);
-      toast.error("Error updating IPD record.");
+      console.error("Error updating record:", err)
+      toast.error("Error updating IPD record.")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-3xl mx-auto bg-white shadow-lg rounded-lg p-8">
-        <h1 className="text-3xl font-bold text-indigo-800 mb-6 flex items-center gap-2">
-          <FaInfoCircle className="text-indigo-600" />
-          Edit IPD Record
-        </h1>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Patient Basic Details */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                <FaUser className="text-gray-400" />
-              </span>
-              <input type="text" {...register("name")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                  <FaPhone className="text-gray-400" />
-                </span>
-                <input type="text" {...register("phone")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-              </div>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 p-4 md:p-8">
+      <Card className="max-w-4xl mx-auto shadow-lg border-slate-200">
+        <CardHeader className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-t-lg">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/20 rounded-full">
+              <User className="h-6 w-6" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Age</label>
-              <input type="number" {...register("age")} className="block w-full pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
+              <CardTitle className="text-2xl font-bold">Edit IPD Record</CardTitle>
+              <CardDescription className="text-indigo-100 mt-1">Update patient admission information</CardDescription>
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Gender</label>
-            <Controller
-              control={control}
-              name="gender"
-              render={({ field }) => (
-                <Select 
-                  {...field} 
-                  options={GenderOptions} 
-                  placeholder="Select Gender" 
-                  classNamePrefix="react-select" 
-                  styles={{
-                    control: (provided) => ({ ...provided, borderColor: "#D1D5DB" }),
-                  }}
-                  onChange={(val) => field.onChange(val)}
-                />
-              )}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                <FaHome className="text-gray-400" />
-              </span>
-              <input type="text" {...register("address")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-            </div>
-          </div>
-          {/* Relative Details */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Relative Name</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                  <FaUserFriends className="text-gray-400" />
-                </span>
-                <input type="text" {...register("relativeName")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Relative Phone</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                  <FaPhone className="text-gray-400" />
-                </span>
-                <input type="text" {...register("relativePhone")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-              </div>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Relative Address</label>
-            <input type="text" {...register("relativeAddress")} className="block w-full pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-          </div>
-          {/* Date & Time */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Admission Date</label>
-              <Controller
-                control={control}
-                name="date"
-                render={({ field }) => (
-                  <DatePicker
-                    selected={field.value}
-                    onChange={(dt) => dt && field.onChange(dt)}
-                    dateFormat="dd/MM/yyyy"
-                    className="block w-full pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                )}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Admission Time</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center">
-                  <FaClock className="text-gray-400" />
-                </span>
-                <input type="text" {...register("time")} className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-              </div>
-            </div>
-          </div>
-          {/* Room Type & Bed */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Room Type</label>
-              <Controller
-                control={control}
-                name="roomType"
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={RoomTypeOptions}
-                    placeholder="Select Room Type"
-                    classNamePrefix="react-select"
-                    styles={{
-                      control: (provided) => ({ ...provided, borderColor: "#D1D5DB" }),
-                    }}
-                    onChange={(val) => {
-                      field.onChange(val);
-                      setValue("bed", null);
-                    }}
-                  />
-                )}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Bed</label>
-              <Controller
-                control={control}
-                name="bed"
-                render={({ field }) => (
-                  <Select 
-                    {...field}
-                    options={beds}
-                    placeholder={beds.length ? "Select Bed" : "No Beds Available"}
-                    classNamePrefix="react-select"
-                    styles={{
-                      control: (provided) => ({ ...provided, borderColor: "#D1D5DB" }),
-                    }}
-                    onChange={(val) => field.onChange(val)}
-                    isDisabled={!selectedRoomType}
-                  />
-                )}
-              />
-              <button type="button" onClick={toggleBedsPopup} className="mt-2 text-sm text-blue-600 hover:underline flex items-center gap-1">
-                <FaInfoCircle /> View Beds
-              </button>
-            </div>
-          </div>
-          {/* Doctor & Referral */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Under Care of Doctor</label>
-              <Controller
-                control={control}
-                name="doctor"
-                render={({ field }) => (
-                  <Select
-                    {...field}
-                    options={doctors}
-                    placeholder="Select Doctor"
-                    classNamePrefix="react-select"
-                    styles={{
-                      control: (provided) => ({ ...provided, borderColor: "#D1D5DB" }),
-                    }}
-                    onChange={(val) => field.onChange(val)}
-                  />
-                )}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor</label>
-              <input type="text" {...register("referDoctor")} className="block w-full pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" />
-            </div>
-          </div>
-          {/* Admission Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Admission Type</label>
-            <Controller
-              control={control}
-              name="admissionType"
-              render={({ field }) => (
-                <Select
-                  {...field}
-                  options={AdmissionTypeOptions}
-                  placeholder="Select Admission Type"
-                  classNamePrefix="react-select"
-                  styles={{
-                    control: (provided) => ({ ...provided, borderColor: "#D1D5DB" }),
-                  }}
-                  onChange={(val) => field.onChange(val)}
-                />
-              )}
-            />
-          </div>
-          <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 text-white font-semibold rounded-md shadow hover:bg-indigo-700 transition-colors">
-            {loading ? "Updating..." : "Update Record"}
-          </button>
-        </form>
-      </div>
+        </CardHeader>
 
-      {/* Beds Popup */}
-      {showBedsPopup && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-            <h2 className="text-xl font-bold text-indigo-800 mb-4">
-              Beds in {selectedRoomType?.label}
-            </h2>
-            <table className="min-w-full">
-              <thead>
-                <tr className="bg-indigo-100">
-                  <th className="px-3 py-2 text-left text-sm font-medium">Bed Number</th>
-                  <th className="px-3 py-2 text-left text-sm font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allBeds.map((bed) => (
-                  <tr key={bed.id} className="border-b">
-                    <td className="px-3 py-2 text-sm">Bed {bed.bedNumber}</td>
-                    <td className="px-3 py-2 text-sm">{bed.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button onClick={toggleBedsPopup} className="mt-4 w-full py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors">
-              Close
-            </button>
+        <CardContent className="p-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+            {/* Patient Information Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <User className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-lg font-semibold text-slate-800">Patient Information</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-sm font-medium">
+                    Patient Name <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="name"
+                      {...register("name", { required: true })}
+                      className="pl-9"
+                      placeholder="Full name"
+                    />
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                  {errors.name && <p className="text-xs text-red-500">Name is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="phone" className="text-sm font-medium">
+                    Phone Number <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="phone"
+                      {...register("phone", { required: true })}
+                      className="pl-9"
+                      placeholder="Contact number"
+                    />
+                    <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                  {errors.phone && <p className="text-xs text-red-500">Phone is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gender" className="text-sm font-medium">
+                    Gender <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="gender"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={GenderOptions}
+                        placeholder="Select Gender"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                      />
+                    )}
+                  />
+                  {errors.gender && <p className="text-xs text-red-500">Gender is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="age" className="text-sm font-medium">
+                    Age <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="age"
+                    type="number"
+                    {...register("age", { required: true, min: 0 })}
+                    placeholder="Patient age"
+                  />
+                  {errors.age && <p className="text-xs text-red-500">Valid age is required</p>}
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="address" className="text-sm font-medium">
+                    Address
+                  </Label>
+                  <div className="relative">
+                    <Input id="address" {...register("address")} className="pl-9" placeholder="Patient address" />
+                    <Home className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Relative Information Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Users className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-lg font-semibold text-slate-800">Relative Information</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="relativeName" className="text-sm font-medium">
+                    Relative Name <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="relativeName"
+                      {...register("relativeName", { required: true })}
+                      className="pl-9"
+                      placeholder="Relative's full name"
+                    />
+                    <Users className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                  {errors.relativeName && <p className="text-xs text-red-500">Relative name is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="relativePhone" className="text-sm font-medium">
+                    Relative Phone <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="relativePhone"
+                      {...register("relativePhone", { required: true })}
+                      className="pl-9"
+                      placeholder="Relative's contact number"
+                    />
+                    <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                  {errors.relativePhone && <p className="text-xs text-red-500">Relative phone is required</p>}
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="relativeAddress" className="text-sm font-medium">
+                    Relative Address
+                  </Label>
+                  <Input id="relativeAddress" {...register("relativeAddress")} placeholder="Relative's address" />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Admission Details Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Calendar className="h-5 w-5 text-indigo-600" />
+                <h2 className="text-lg font-semibold text-slate-800">Admission Details</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="date" className="text-sm font-medium">
+                    Admission Date <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Controller
+                      control={control}
+                      name="date"
+                      rules={{ required: true }}
+                      render={({ field }) => (
+                        <div className="relative">
+                          <DatePicker
+                            selected={field.value}
+                            onChange={(date) => date && field.onChange(date)}
+                            dateFormat="dd/MM/yyyy"
+                            className={datePickerWrapperStyles.input}
+                            wrapperClassName="w-full"
+                          />
+                          <Calendar className="absolute right-3 top-2.5 h-4 w-4 text-slate-400 pointer-events-none" />
+                        </div>
+                      )}
+                    />
+                  </div>
+                  {errors.date && <p className="text-xs text-red-500">Date is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="time" className="text-sm font-medium">
+                    Admission Time <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="time"
+                      {...register("time", { required: true })}
+                      className="pl-9"
+                      placeholder="HH:MM AM/PM"
+                    />
+                    <Clock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                  {errors.time && <p className="text-xs text-red-500">Time is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="admissionType" className="text-sm font-medium">
+                    Admission Type <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="admissionType"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={AdmissionTypeOptions}
+                        placeholder="Select Admission Type"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                      />
+                    )}
+                  />
+                  {errors.admissionType && <p className="text-xs text-red-500">Admission type is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="roomType" className="text-sm font-medium">
+                    Room Type <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="roomType"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={RoomTypeOptions}
+                        placeholder="Select Room Type"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                        onChange={(val) => {
+                          field.onChange(val)
+                          setValue("bed", null)
+                        }}
+                      />
+                    )}
+                  />
+                  {errors.roomType && <p className="text-xs text-red-500">Room type is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="bed" className="text-sm font-medium">
+                      Bed <span className="text-red-500">*</span>
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={toggleBedsPopup}
+                      disabled={!selectedRoomType}
+                      className="h-8 px-2 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                    >
+                      <Bed className="h-3 w-3 mr-1" />
+                      View All Beds
+                    </Button>
+                  </div>
+                  <Controller
+                    control={control}
+                    name="bed"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={beds}
+                        placeholder={beds.length ? "Select Bed" : "No Beds Available"}
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                        isDisabled={!selectedRoomType}
+                      />
+                    )}
+                  />
+                  {errors.bed && <p className="text-xs text-red-500">Bed selection is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="doctor" className="text-sm font-medium">
+                    Under Care of Doctor <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="doctor"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={doctors}
+                        placeholder="Select Doctor"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                      />
+                    )}
+                  />
+                  {errors.doctor && <p className="text-xs text-red-500">Doctor is required</p>}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="referDoctor" className="text-sm font-medium">
+                    Referral Doctor
+                  </Label>
+                  <div className="relative">
+                    <Input
+                      id="referDoctor"
+                      {...register("referDoctor")}
+                      className="pl-9"
+                      placeholder="Referring doctor (if any)"
+                    />
+                    <UserCheck className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </CardContent>
+
+        <CardFooter className="flex flex-col sm:flex-row gap-4 justify-end bg-slate-50 p-6 border-t rounded-b-lg">
+          <Button variant="outline" onClick={() => router.push("/billing")} className="w-full sm:w-auto">
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit(onSubmit)}
+            disabled={loading}
+            className="w-full sm:w-auto bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg
+                  className="animate-spin h-4 w-4 text-white"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  ></path>
+                </svg>
+                Updating...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Check className="h-4 w-4" />
+                Update Record
+              </span>
+            )}
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* Beds Dialog */}
+      <Dialog open={showBedsPopup} onOpenChange={setShowBedsPopup}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-indigo-700">
+              <Bed className="h-5 w-5" />
+              Beds in {selectedRoomType?.label || "Selected Room"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="max-h-[60vh] overflow-auto">
+            {allBeds.length > 0 ? (
+              <div className="rounded-md border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-100 border-b">
+                      <th className="px-4 py-3 text-left font-medium text-slate-700">Bed Number</th>
+                      <th className="px-4 py-3 text-left font-medium text-slate-700">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allBeds.map((bed) => (
+                      <tr key={bed.id} className="border-b last:border-0 hover:bg-slate-50">
+                        <td className="px-4 py-3">Bed {bed.bedNumber}</td>
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={bed.status === "Available" ? "default" : "secondary"}
+                            className={`${bed.status === "Available" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}
+                          >
+                            {bed.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <AlertCircle className="h-10 w-10 text-slate-300 mb-2" />
+                <p className="text-slate-500">No beds available in this room type</p>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+
+          <DialogFooter>
+            <Button onClick={toggleBedsPopup} className="w-full sm:w-auto">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
+  )
 }
+

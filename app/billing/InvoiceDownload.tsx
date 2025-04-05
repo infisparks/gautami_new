@@ -52,7 +52,9 @@ interface BillingRecord {
 /** ========== Component Props ========== **/
 type InvoiceDownloadProps = {
   record: BillingRecord;
+  children?: React.ReactNode;
 };
+
 
 /**
  * InvoiceDownload
