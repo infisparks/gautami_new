@@ -17,6 +17,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import  logo from "./logo.png"
 
 interface NavItemProps {
   title: string;
@@ -109,6 +110,7 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
         { title: "Mortality Report", icon: <Activity size={20} />, href: "/mortalityadmin" },
         { title: "Surgery Report", icon: <Scissors size={20} />, href: "/surgeryadmin" },
         { title: "DPR", icon: <ClipboardList size={20} />, href: "/dr" },
+        { title: "Add Service", icon: <ClipboardList size={20} />, href: "/makeservice" },
       ],
     },
     {
@@ -331,7 +333,7 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
             isCollapsed && "justify-center w-full"
           )}>
             <div className="bg-white rounded-full p-1 shadow-md flex-shrink-0">
-              <Image src="/placeholder.svg?height=42&width=42" alt="Logo" width={42} height={42} className="rounded-full" />
+              <Image src={logo} alt="Logo" width={42} height={42} className="rounded-full" />
             </div>
             <span className={cn(
               "text-xl font-bold text-white ml-2 transition-opacity duration-200",

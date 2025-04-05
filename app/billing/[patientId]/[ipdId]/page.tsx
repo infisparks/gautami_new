@@ -6,10 +6,11 @@ import { ref, onValue, update, push, remove } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
-import { useForm, type SubmitHandler } from "react-hook-form"
+import { useForm, Controller, type SubmitHandler } from "react-hook-form"
 import { yupResolver } from "@hookform/resolvers/yup"
 import * as yup from "yup"
 import { motion, AnimatePresence } from "framer-motion"
+import Select from "react-select"
 import {
   Plus,
   ArrowLeft,
@@ -157,6 +158,8 @@ export default function BillingPage() {
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
+  // State to hold service options for autocomplete
+  const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
 
   // ===== Fetch Beds Data =====
   useEffect(() => {
@@ -193,6 +196,25 @@ export default function BillingPage() {
     return () => unsubscribe()
   }, [])
 
+  // ===== Fetch Service Options for AutoComplete =====
+  useEffect(() => {
+    const serviceRef = ref(db, "service")
+    const unsubscribe = onValue(serviceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val()
+        const options = Object.keys(data).map((key) => ({
+          value: key,
+          label: data[key].serviceName,
+          amount: Number(data[key].amount) || 0,
+        }))
+        setServiceOptions(options)
+      } else {
+        setServiceOptions([])
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
   // ===== Load Selected Patient Record =====
   useEffect(() => {
     if (!patientId || !ipdId) return
@@ -223,11 +245,9 @@ export default function BillingPage() {
         }))
       }
 
-      // IMPORTANT: Use the actual 'uhid' if it exists in the DB;
-      // if it's missing, fall back to the patientId so it won't show "Not assigned"
       const record: BillingRecord = {
         patientId,
-        uhid: patientData.uhid ?? patientId, // fallback to ID if no uhid
+        uhid: patientData.uhid ?? patientId,
         ipdId,
         name: patientData.name || "Unknown",
         mobileNumber: patientData.phone || "",
@@ -255,12 +275,14 @@ export default function BillingPage() {
 
   // ===== React Hook Form setups =====
 
-  // Additional Service Form
+  // Additional Service Form (with autocomplete)
   const {
     register: registerService,
     handleSubmit: handleSubmitService,
     formState: { errors: errorsService },
     reset: resetService,
+    setValue: setValueService,
+    control: serviceControl,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
     defaultValues: { serviceName: "", amount: 0 },
@@ -333,8 +355,6 @@ export default function BillingPage() {
   const consultantChargeTotal = consultantChargeItems.reduce((sum, s) => sum + s.amount, 0)
   const discountVal = selectedRecord?.discount || 0
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
-
-  // Calculate Due Amount (if deposit is less than total bill)
   const dueAmount = selectedRecord ? Math.max(totalBill - selectedRecord.amount, 0) : 0
 
   // ===== Group Consultant Charges by Doctor =====
@@ -379,7 +399,6 @@ export default function BillingPage() {
     paymentAmount: number,
     updatedDeposit: number,
   ) => {
-    // NOTE: This is a placeholder example
     const apiUrl = "https://wa.medblisss.com/send-text"
     const payload = {
       token: "99583991572",
@@ -388,7 +407,6 @@ export default function BillingPage() {
     }
 
     try {
-      // This will fail in local dev if you don't have an actual API. Modify as needed.
       const response = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -456,7 +474,6 @@ export default function BillingPage() {
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { amount: updatedDeposit })
 
-      // Attempt to send notification (may fail locally if no actual endpoint)
       await sendPaymentNotification(
         selectedRecord.mobileNumber,
         selectedRecord.name,
@@ -815,7 +832,6 @@ export default function BillingPage() {
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
                       <div className="space-y-3">
-                        {/* Wrap your button inside InvoiceDownload if desired */}
                         <InvoiceDownload record={selectedRecord}>
                           <button className="w-full flex items-center justify-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
                             <Download size={16} className="mr-2" /> Download Invoice
@@ -1081,7 +1097,7 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Add Service Form */}
+                      {/* Add Service Form with Autocomplete */}
                       {!selectedRecord.dischargeDate && (
                         <div className="lg:col-span-1">
                           <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -1089,13 +1105,38 @@ export default function BillingPage() {
                             <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
-                                <input
-                                  type="text"
-                                  {...registerService("serviceName")}
-                                  placeholder="e.g., X-Ray, Lab Test"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsService.serviceName ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                <Controller
+                                  control={serviceControl}
+                                  name="serviceName"
+                                  render={({ field }) => {
+                                    // The currently stored serviceName in the form is `field.value`.
+                                    // We must find the matching option by comparing `option.label` to `field.value`.
+                                    const selectedOption = serviceOptions.find(
+                                      (option) => option.label === field.value
+                                    ) || null
+
+                                    return (
+                                      <Select
+                                        {...field}
+                                        value={selectedOption}
+                                        options={serviceOptions}
+                                        placeholder="Select a service..."
+                                        isClearable
+                                        onChange={(selected) => {
+                                          if (selected) {
+                                            // Store the service name in the form field
+                                            field.onChange(selected.label)
+                                            // Automatically set the amount if the user picks a known service
+                                            setValueService("amount", selected.amount)
+                                          } else {
+                                            // If cleared, reset
+                                            field.onChange("")
+                                            setValueService("amount", 0)
+                                          }
+                                        }}
+                                      />
+                                    )
+                                  }}
                                 />
                                 {errorsService.serviceName && (
                                   <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
@@ -1106,7 +1147,7 @@ export default function BillingPage() {
                                 <input
                                   type="number"
                                   {...registerService("amount")}
-                                  placeholder="e.g., 1000"
+                                  placeholder="Auto-filled on selection"
                                   className={`w-full px-3 py-2 rounded-lg border ${
                                     errorsService.amount ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
@@ -1122,13 +1163,9 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
-                                  <>
-                                    <Plus size={16} className="mr-2" /> Add Service
-                                  </>
-                                )}
+                                {loading ? "Processing..." : <>
+                                  <Plus size={16} className="mr-2" /> Add Service
+                                </>}
                               </button>
                             </form>
                           </div>
@@ -1162,13 +1199,9 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
-                                  <>
-                                    <Percent size={16} className="mr-2" /> Apply Discount
-                                  </>
-                                )}
+                                {loading ? "Processing..." : <>
+                                  <Percent size={16} className="mr-2" /> Apply Discount
+                                </>}
                               </button>
                             </form>
                           </div>
@@ -1220,8 +1253,8 @@ export default function BillingPage() {
                         ) : (
                           <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
                             <table className="w-full">
-                              <thead>
-                                <tr className="bg-gray-50">
+                              <thead className="bg-gray-50">
+                                <tr>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     #
                                   </th>
@@ -1349,8 +1382,8 @@ export default function BillingPage() {
                         ) : (
                           <div className="overflow-x-auto bg-white rounded-lg border border-gray-200">
                             <table className="w-full">
-                              <thead>
-                                <tr className="bg-gray-50">
+                              <thead className="bg-gray-50">
+                                <tr>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Doctor
                                   </th>
