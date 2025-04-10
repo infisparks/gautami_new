@@ -10,7 +10,10 @@ import { useForm, Controller, type SubmitHandler } from "react-hook-form"
 import { yupResolver } from "@hookform/resolvers/yup"
 import * as yup from "yup"
 import { motion, AnimatePresence } from "framer-motion"
-import Select from "react-select"
+
+// ***** IMPORTANT: Use CreatableSelect from react-select/creatable
+import CreatableSelect from "react-select/creatable"
+
 import {
   Plus,
   ArrowLeft,
@@ -158,7 +161,8 @@ export default function BillingPage() {
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
-  // State to hold service options for autocomplete
+
+  // State to hold service options for CreatableSelect
   const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
 
   // ===== Fetch Beds Data =====
@@ -196,7 +200,7 @@ export default function BillingPage() {
     return () => unsubscribe()
   }, [])
 
-  // ===== Fetch Service Options for AutoComplete =====
+  // ===== Fetch Service Options for CreatableSelect =====
   useEffect(() => {
     const serviceRef = ref(db, "service")
     const unsubscribe = onValue(serviceRef, (snapshot) => {
@@ -275,7 +279,7 @@ export default function BillingPage() {
 
   // ===== React Hook Form setups =====
 
-  // Additional Service Form (with autocomplete)
+  // Additional Service Form (with CreatableSelect)
   const {
     register: registerService,
     handleSubmit: handleSubmitService,
@@ -283,6 +287,7 @@ export default function BillingPage() {
     reset: resetService,
     setValue: setValueService,
     control: serviceControl,
+    watch: watchService,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
     defaultValues: { serviceName: "", amount: 0 },
@@ -392,13 +397,14 @@ export default function BillingPage() {
   )
   const aggregatedConsultantChargesArray = Object.values(aggregatedConsultantCharges)
 
-  // ===== Payment Notification Helper =====
+  // ===== Payment Notification Helper (optional usage) =====
   const sendPaymentNotification = async (
     patientMobile: string,
     patientName: string,
     paymentAmount: number,
     updatedDeposit: number,
   ) => {
+    // If you have a notification API, you can integrate it here.
     const apiUrl = "https://wa.medblisss.com/send-text"
     const payload = {
       token: "99583991572",
@@ -435,6 +441,7 @@ export default function BillingPage() {
         amount: Number(data.amount),
         createdAt: new Date().toLocaleString(),
       }
+
       const updatedServices = [newItem, ...oldServices]
       const sanitizedServices = updatedServices.map((svc) => ({
         serviceName: svc.serviceName || "",
@@ -443,8 +450,10 @@ export default function BillingPage() {
         amount: svc.amount || 0,
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
+
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { services: sanitizedServices })
+
       toast.success("Additional service added successfully!")
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
       setSelectedRecord(updatedRecord)
@@ -469,11 +478,15 @@ export default function BillingPage() {
         date: new Date().toISOString(),
       }
       await update(newPaymentRef, newPayment)
+
+      // Update deposit total
       const updatedPayments = [newPayment, ...selectedRecord.payments]
       const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
+
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { amount: updatedDeposit })
 
+      // Optional: send a payment notification via your chosen method
       await sendPaymentNotification(
         selectedRecord.mobileNumber,
         selectedRecord.name,
@@ -505,8 +518,11 @@ export default function BillingPage() {
       const dischargeDate = new Date().toISOString()
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { dischargeDate })
+
+      // Mark the bed as available
       const bedRef = ref(db, `beds/${selectedRecord.roomType}/${selectedRecord.bed}`)
       await update(bedRef, { status: "Available" })
+
       toast.success("Patient discharged and bed made available!")
       const updatedRecord = { ...selectedRecord, dischargeDate }
       setSelectedRecord(updatedRecord)
@@ -526,6 +542,7 @@ export default function BillingPage() {
       const discountVal = Number(formData.discount)
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { discount: discountVal })
+
       toast.success("Discount applied successfully!")
       const updatedRecord = { ...selectedRecord, discount: discountVal }
       setSelectedRecord(updatedRecord)
@@ -565,8 +582,10 @@ export default function BillingPage() {
         amount: svc.amount || 0,
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
+
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { services: sanitizedServices })
+
       toast.success("Consultant charge added successfully!")
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
       setSelectedRecord(updatedRecord)
@@ -589,6 +608,7 @@ export default function BillingPage() {
       const updatedServices = selectedRecord.services.filter((svc) => svc !== item)
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { services: updatedServices })
+
       toast.success("Service deleted successfully!")
       const updatedRecord = { ...selectedRecord, services: updatedServices }
       setSelectedRecord(updatedRecord)
@@ -610,9 +630,12 @@ export default function BillingPage() {
         `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}/payments/${paymentId}`,
       )
       await remove(paymentRef)
+
+      // Adjust deposit after deleting payment
       const updatedDeposit = selectedRecord.amount - paymentAmount
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { amount: updatedDeposit })
+
       const updatedPayments = selectedRecord.payments.filter((p) => p.id !== paymentId)
       toast.success("Payment deleted successfully!")
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
@@ -635,6 +658,7 @@ export default function BillingPage() {
       )
       const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
       await update(recordRef, { services: updatedServices })
+
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
       const updatedRecord = { ...selectedRecord, services: updatedServices }
       setSelectedRecord(updatedRecord)
@@ -711,7 +735,9 @@ export default function BillingPage() {
                       <div className="inline-flex items-center px-3 py-1 rounded-full bg-white/20 text-white text-sm">
                         <Bed size={14} className="mr-2" />
                         {selectedRecord.roomType || "No Room"} •{" "}
-                        {selectedRecord.roomType && selectedRecord.bed && beds[selectedRecord.roomType]?.[selectedRecord.bed]?.bedNumber
+                        {selectedRecord.roomType &&
+                        selectedRecord.bed &&
+                        beds[selectedRecord.roomType]?.[selectedRecord.bed]?.bedNumber
                           ? beds[selectedRecord.roomType][selectedRecord.bed].bedNumber
                           : "Unknown Bed"}
                       </div>
@@ -1097,43 +1123,52 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Add Service Form with Autocomplete */}
+                      {/* Add Service Form (with manual typing or selection) */}
                       {!selectedRecord.dischargeDate && (
                         <div className="lg:col-span-1">
                           <div className="bg-white rounded-lg border border-gray-200 p-6">
                             <h3 className="text-lg font-semibold text-gray-800 mb-4">Add Hospital Service</h3>
                             <form onSubmit={handleSubmitService(onSubmitAdditionalService)} className="space-y-4">
+                              {/* Service Name Field with CreatableSelect */}
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Service Name</label>
                                 <Controller
                                   control={serviceControl}
                                   name="serviceName"
                                   render={({ field }) => {
-                                    // The currently stored serviceName in the form is `field.value`.
-                                    // We must find the matching option by comparing `option.label` to `field.value`.
-                                    const selectedOption = serviceOptions.find(
-                                      (option) => option.label === field.value
-                                    ) || null
+                                    // If the typed-in service is not in the array, we create an object so CreatableSelect won't complain
+                                    const selectedOption =
+                                      serviceOptions.find(
+                                        (option) =>
+                                          option.label.toLowerCase() === field.value.toLowerCase(),
+                                      ) || {
+                                        label: field.value,
+                                        value: field.value,
+                                      }
 
                                     return (
-                                      <Select
+                                      <CreatableSelect
                                         {...field}
-                                        value={selectedOption}
-                                        options={serviceOptions}
-                                        placeholder="Select a service..."
                                         isClearable
+                                        options={serviceOptions}
+                                        placeholder="Select or type a service..."
                                         onChange={(selected) => {
                                           if (selected) {
-                                            // Store the service name in the form field
+                                            // If user chose an existing service, auto-fill the amount
                                             field.onChange(selected.label)
-                                            // Automatically set the amount if the user picks a known service
-                                            setValueService("amount", selected.amount)
+                                            // If that option has a known amount, set it
+                                            const foundOption = serviceOptions.find(
+                                              (opt) => opt.label === selected.label
+                                            )
+                                            if (foundOption) {
+                                              setValueService("amount", foundOption.amount)
+                                            }
                                           } else {
-                                            // If cleared, reset
                                             field.onChange("")
                                             setValueService("amount", 0)
                                           }
                                         }}
+                                        value={selectedOption}
                                       />
                                     )
                                   }}
@@ -1142,12 +1177,14 @@ export default function BillingPage() {
                                   <p className="text-red-500 text-xs mt-1">{errorsService.serviceName.message}</p>
                                 )}
                               </div>
+
+                              {/* Amount Field */}
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Amount (₹)</label>
                                 <input
                                   type="number"
                                   {...registerService("amount")}
-                                  placeholder="Auto-filled on selection"
+                                  placeholder="Auto-filled on selection, or type your own"
                                   className={`w-full px-3 py-2 rounded-lg border ${
                                     errorsService.amount ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
@@ -1156,6 +1193,7 @@ export default function BillingPage() {
                                   <p className="text-red-500 text-xs mt-1">{errorsService.amount.message}</p>
                                 )}
                               </div>
+
                               <button
                                 type="submit"
                                 disabled={loading}
@@ -1163,9 +1201,11 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? "Processing..." : <>
-                                  <Plus size={16} className="mr-2" /> Add Service
-                                </>}
+                                {loading ? "Processing..." : (
+                                  <>
+                                    <Plus size={16} className="mr-2" /> Add Service
+                                  </>
+                                )}
                               </button>
                             </form>
                           </div>
@@ -1199,9 +1239,11 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? "Processing..." : <>
-                                  <Percent size={16} className="mr-2" /> Apply Discount
-                                </>}
+                                {loading ? "Processing..." : (
+                                  <>
+                                    <Percent size={16} className="mr-2" /> Apply Discount
+                                  </>
+                                )}
                               </button>
                             </form>
                           </div>
@@ -1279,9 +1321,7 @@ export default function BillingPage() {
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       {payment.amount.toLocaleString()}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                                      {payment.paymentType}
-                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
@@ -1352,9 +1392,7 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
+                                {loading ? "Processing..." : (
                                   <>
                                     <Plus size={16} className="mr-2" /> Add Payment
                                   </>
@@ -1489,9 +1527,7 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? (
-                                  "Processing..."
-                                ) : (
+                                {loading ? "Processing..." : (
                                   <>
                                     <Plus size={16} className="mr-2" /> Add Consultant Charge
                                   </>
