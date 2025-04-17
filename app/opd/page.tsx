@@ -28,12 +28,25 @@ import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition"
 import Joyride, { type CallBackProps, STATUS } from "react-joyride"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -385,7 +398,9 @@ const OPDBookingPage: React.FC = () => {
     {
       command: "payment method *",
       callback: (method: string) => {
-        const option = PaymentOptions.find((opt) => opt.label.toLowerCase() === method.toLowerCase())
+        const option = PaymentOptions.find(
+          (opt) => opt.label.toLowerCase() === method.toLowerCase(),
+        )
         if (option) {
           setValue("paymentMethod", option.value, { shouldValidate: true })
           toast.info(`Payment method set to: ${option.label}`)
@@ -437,9 +452,13 @@ const OPDBookingPage: React.FC = () => {
       command: "select doctor *",
       callback: (doctorName: string) => {
         const normalizedDoctorName = doctorName.trim().toLowerCase()
-        let selectedDoctor = doctors.find((doc) => doc.name.toLowerCase() === normalizedDoctorName)
+        let selectedDoctor = doctors.find(
+          (doc) => doc.name.toLowerCase() === normalizedDoctorName,
+        )
         if (!selectedDoctor) {
-          selectedDoctor = doctors.find((doc) => doc.name.toLowerCase().includes(normalizedDoctorName))
+          selectedDoctor = doctors.find((doc) =>
+            doc.name.toLowerCase().includes(normalizedDoctorName),
+          )
         }
         if (selectedDoctor) {
           setValue("doctor", selectedDoctor.id, { shouldValidate: true })
@@ -637,12 +656,14 @@ const OPDBookingPage: React.FC = () => {
     }
   }, [selectedDoctorId, setValue, fetchDoctorAmount])
 
-  /** ---------------------------------------------------------
+  /**
+   * ----------------------------------------------------------------------
    *  SUBMISSION LOGIC:
-   *  1. If an existing patient is selected, push OPD data.
-   *  2. Otherwise, create a new patient record in Gautami DB (full details)
-   *     and a minimal record in Medford DB, then push OPD data.
-   *  ---------------------------------------------------------
+   *   1. If an existing patient is selected, push OPD data.
+   *   2. Otherwise, create a new patient record in Gautami DB (full details)
+   *      and a minimal record in Medford DB, then push OPD data.
+   *   3. After DB writes, send a professional WhatsApp message to the patient.
+   * ----------------------------------------------------------------------
    */
   const onSubmit = async (data: IFormInput) => {
     setLoading(true)
@@ -660,6 +681,7 @@ const OPDBookingPage: React.FC = () => {
 
       let patientId = ""
       if (selectedPatient) {
+        // Existing patient: update basic info
         patientId = selectedPatient.id
         const patientRef = ref(db, `patients/${patientId}`)
         await update(patientRef, {
@@ -670,6 +692,7 @@ const OPDBookingPage: React.FC = () => {
           gender: data.gender,
         })
       } else {
+        // New patient: create fresh record in both DBs
         const newPatientId = generatePatientId()
         const newPatientData = {
           name: data.name,
@@ -692,15 +715,58 @@ const OPDBookingPage: React.FC = () => {
         patientId = newPatientId
       }
 
+      // Push OPD appointment under the patient node
       const opdRef = ref(db, `patients/${patientId}/opd`)
       const newOpdRef = push(opdRef)
       await update(newOpdRef, appointmentData)
+
+      // ----------------------
+      // Send WhatsApp message
+      // ----------------------
+      try {
+        const selectedDocName =
+          doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
+        const formattedDate = data.date.toLocaleDateString("en-IN") // e.g. DD/MM/YYYY
+        const professionalMessage = `Hello ${data.name}, 
+Your OPD appointment at Gautami Hospital has been successfully booked.
+
+Appointment Details:
+• Patient Name: ${data.name}
+• Date: ${formattedDate}
+• Time: ${data.time}
+• Doctor: ${selectedDocName}
+• Service: ${data.serviceName}
+• Payment: ${data.paymentMethod.toUpperCase()} (₹${data.amount})
+
+We look forward to serving you!
+Thank you,
+Gautami Hospital
+`
+
+        // IMPORTANT: If your phone numbers do not already have country codes,
+        // you may need to prepend "91" or the correct country code here.
+        const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
+
+        await fetch("https://wa.medblisss.com/send-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token: "99583991573",
+            number: phoneWithCountryCode,
+            message: professionalMessage,
+          }),
+        })
+      } catch (whatsappError) {
+        console.error("Error sending WhatsApp message:", whatsappError)
+        // We won't fail the entire booking for a WhatsApp error; just log it.
+      }
 
       toast.success("Appointment booked successfully!", {
         position: "top-right",
         autoClose: 5000,
       })
 
+      // Reset the form and state
       reset({
         name: "",
         phone: "",
@@ -792,7 +858,9 @@ const OPDBookingPage: React.FC = () => {
             <CardHeader className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="text-2xl md:text-3xl font-bold">OPD Booking System</CardTitle>
+                  <CardTitle className="text-2xl md:text-3xl font-bold">
+                    OPD Booking System
+                  </CardTitle>
                   <CardDescription className="text-emerald-100">
                     Book appointments quickly and efficiently
                   </CardDescription>
@@ -810,7 +878,12 @@ const OPDBookingPage: React.FC = () => {
             </CardHeader>
 
             <CardContent className="p-0">
-              <Tabs defaultValue="form" value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <Tabs
+                defaultValue="form"
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="w-full"
+              >
                 <TabsList className="w-full grid grid-cols-2 rounded-none">
                   <TabsTrigger value="form" className="text-sm md:text-base">
                     Appointment Form
@@ -836,7 +909,9 @@ const OPDBookingPage: React.FC = () => {
                             value={patientNameInput}
                             onChange={(e) => {
                               setPatientNameInput(e.target.value)
-                              setValue("name", e.target.value, { shouldValidate: true })
+                              setValue("name", e.target.value, {
+                                shouldValidate: true,
+                              })
                               setSelectedPatient(null)
                             }}
                             placeholder="Enter patient name"
@@ -849,20 +924,32 @@ const OPDBookingPage: React.FC = () => {
                                   <div
                                     key={suggestion.id}
                                     className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-md cursor-pointer"
-                                    onClick={() => handlePatientSuggestionClick(suggestion)}
+                                    onClick={() =>
+                                      handlePatientSuggestionClick(suggestion)
+                                    }
                                   >
                                     <div className="flex items-center gap-2">
                                       <Avatar className="h-6 w-6">
                                         <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                          {suggestion.name.substring(0, 2).toUpperCase()}
+                                          {suggestion.name
+                                            .substring(0, 2)
+                                            .toUpperCase()}
                                         </AvatarFallback>
                                       </Avatar>
-                                      <span className="font-medium">{suggestion.name}</span>
+                                      <span className="font-medium">
+                                        {suggestion.name}
+                                      </span>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
+                                      <span className="text-sm text-gray-500">
+                                        {suggestion.phone || "No phone"}
+                                      </span>
                                       <Badge
-                                        variant={suggestion.source === "gautami" ? "default" : "secondary"}
+                                        variant={
+                                          suggestion.source === "gautami"
+                                            ? "default"
+                                            : "secondary"
+                                        }
                                         className="text-xs"
                                       >
                                         {suggestion.source}
@@ -875,7 +962,9 @@ const OPDBookingPage: React.FC = () => {
                           )}
                         </div>
                         {errors.name && (
-                          <p className="text-sm text-red-500">{errors.name.message || "Name is required"}</p>
+                          <p className="text-sm text-red-500">
+                            {errors.name.message || "Name is required"}
+                          </p>
                         )}
                       </div>
 
@@ -895,8 +984,12 @@ const OPDBookingPage: React.FC = () => {
                               setPatientPhoneInput(val)
                               setValue("phone", val, { shouldValidate: true })
                               if (val.trim().length >= 2) {
-                                const suggestions = [...gautamiPatients, ...medfordPatients].filter(
-                                  (p) => p.phone && p.phone.includes(val),
+                                const suggestions = [
+                                  ...gautamiPatients,
+                                  ...medfordPatients,
+                                ].filter(
+                                  (p) =>
+                                    p.phone && p.phone.includes(val.trim()),
                                 )
                                 setPhoneSuggestions(suggestions)
                               } else {
@@ -914,21 +1007,33 @@ const OPDBookingPage: React.FC = () => {
                               {phoneSuggestions.map((suggestion) => (
                                 <div
                                   key={suggestion.id}
-                                  onClick={() => handlePatientSuggestionClick(suggestion)}
+                                  onClick={() =>
+                                    handlePatientSuggestionClick(suggestion)
+                                  }
                                   className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 cursor-pointer"
                                 >
                                   <div className="flex items-center gap-2">
                                     <Avatar className="h-6 w-6">
                                       <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                        {suggestion.name.substring(0, 2).toUpperCase()}
+                                        {suggestion.name
+                                          .substring(0, 2)
+                                          .toUpperCase()}
                                       </AvatarFallback>
                                     </Avatar>
-                                    <span className="font-medium">{suggestion.name}</span>
+                                    <span className="font-medium">
+                                      {suggestion.name}
+                                    </span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
+                                    <span className="text-sm text-gray-500">
+                                      {suggestion.phone || "No phone"}
+                                    </span>
                                     <Badge
-                                      variant={suggestion.source === "gautami" ? "default" : "secondary"}
+                                      variant={
+                                        suggestion.source === "gautami"
+                                          ? "default"
+                                          : "secondary"
+                                      }
                                       className="text-xs"
                                     >
                                       {suggestion.source}
@@ -940,7 +1045,9 @@ const OPDBookingPage: React.FC = () => {
                           )}
                         </div>
                         {errors.phone && (
-                          <p className="text-sm text-red-500">{errors.phone.message || "Phone number is required"}</p>
+                          <p className="text-sm text-red-500">
+                            {errors.phone.message || "Phone number is required"}
+                          </p>
                         )}
                       </div>
 
@@ -962,7 +1069,11 @@ const OPDBookingPage: React.FC = () => {
                             className="pl-10"
                           />
                         </div>
-                        {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
+                        {errors.age && (
+                          <p className="text-sm text-red-500">
+                            {errors.age.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Gender Field */}
@@ -975,7 +1086,10 @@ const OPDBookingPage: React.FC = () => {
                           name="gender"
                           rules={{ required: "Gender is required" }}
                           render={({ field }) => (
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                            >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select gender" />
                               </SelectTrigger>
@@ -989,7 +1103,11 @@ const OPDBookingPage: React.FC = () => {
                             </Select>
                           )}
                         />
-                        {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
+                        {errors.gender && (
+                          <p className="text-sm text-red-500">
+                            {errors.gender.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Address Field */}
@@ -1022,7 +1140,9 @@ const OPDBookingPage: React.FC = () => {
                             render={({ field }) => (
                               <DatePicker
                                 selected={field.value}
-                                onChange={(date: Date | null) => date && field.onChange(date)}
+                                onChange={(date: Date | null) =>
+                                  date && field.onChange(date)
+                                }
                                 dateFormat="dd/MM/yyyy"
                                 placeholderText="Select Date"
                                 className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 border-gray-300 dark:border-gray-600 dark:bg-gray-800"
@@ -1030,7 +1150,11 @@ const OPDBookingPage: React.FC = () => {
                             )}
                           />
                         </div>
-                        {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
+                        {errors.date && (
+                          <p className="text-sm text-red-500">
+                            {errors.date.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Time Field */}
@@ -1043,18 +1167,27 @@ const OPDBookingPage: React.FC = () => {
                           <Input
                             id="time"
                             type="text"
-                            {...register("time", { required: "Time is required" })}
+                            {...register("time", {
+                              required: "Time is required",
+                            })}
                             placeholder="e.g. 10:30 AM"
                             className="pl-10"
                             defaultValue={formatAMPM(new Date())}
                           />
                         </div>
-                        {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
+                        {errors.time && (
+                          <p className="text-sm text-red-500">
+                            {errors.time.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Payment Method Field */}
                       <div className="space-y-2" data-tour="paymentMethod">
-                        <Label htmlFor="paymentMethod" className="text-sm font-medium">
+                        <Label
+                          htmlFor="paymentMethod"
+                          className="text-sm font-medium"
+                        >
                           Payment Method <span className="text-red-500">*</span>
                         </Label>
                         <Controller
@@ -1062,7 +1195,10 @@ const OPDBookingPage: React.FC = () => {
                           name="paymentMethod"
                           rules={{ required: "Payment method is required" }}
                           render={({ field }) => (
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                            >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select payment method" />
                               </SelectTrigger>
@@ -1076,7 +1212,11 @@ const OPDBookingPage: React.FC = () => {
                             </Select>
                           )}
                         />
-                        {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
+                        {errors.paymentMethod && (
+                          <p className="text-sm text-red-500">
+                            {errors.paymentMethod.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Service Name Field */}
@@ -1096,7 +1236,11 @@ const OPDBookingPage: React.FC = () => {
                             className="pl-10"
                           />
                         </div>
-                        {errors.serviceName && <p className="text-sm text-red-500">{errors.serviceName.message}</p>}
+                        {errors.serviceName && (
+                          <p className="text-sm text-red-500">
+                            {errors.serviceName.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Doctor Selection Field */}
@@ -1109,21 +1253,31 @@ const OPDBookingPage: React.FC = () => {
                           name="doctor"
                           rules={{ required: "Doctor selection is required" }}
                           render={({ field }) => (
-                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <Select
+                              onValueChange={field.onChange}
+                              defaultValue={field.value}
+                            >
                               <SelectTrigger>
                                 <SelectValue placeholder="Select doctor" />
                               </SelectTrigger>
                               <SelectContent>
                                 {doctors.map((doctor) => (
                                   <SelectItem key={doctor.id} value={doctor.id}>
-                                    {doctor.name} {doctor.specialty ? `(${doctor.specialty})` : ""}
+                                    {doctor.name}{" "}
+                                    {doctor.specialty
+                                      ? `(${doctor.specialty})`
+                                      : ""}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           )}
                         />
-                        {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
+                        {errors.doctor && (
+                          <p className="text-sm text-red-500">
+                            {errors.doctor.message}
+                          </p>
+                        )}
                       </div>
 
                       {/* Amount Field */}
@@ -1144,7 +1298,11 @@ const OPDBookingPage: React.FC = () => {
                             className="pl-10"
                           />
                         </div>
-                        {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
+                        {errors.amount && (
+                          <p className="text-sm text-red-500">
+                            {errors.amount.message}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1165,7 +1323,12 @@ const OPDBookingPage: React.FC = () => {
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                      <Button type="button" variant="outline" className="flex-1" onClick={() => setPreviewOpen(true)}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setPreviewOpen(true)}
+                      >
                         Preview
                       </Button>
                       <Button
@@ -1186,18 +1349,27 @@ const OPDBookingPage: React.FC = () => {
                         Voice Control
                       </h3>
                       <p className="text-gray-600 dark:text-gray-300 mb-4">
-                        Use voice commands to fill the form hands‑free. Click the button below to start or stop voice
-                        recognition.
+                        Use voice commands to fill the form hands‑free. Click
+                        the button below to start or stop voice recognition.
                       </p>
 
-                      <div className="flex flex-wrap gap-4 mb-6" data-tour="voice-control">
+                      <div
+                        className="flex flex-wrap gap-4 mb-6"
+                        data-tour="voice-control"
+                      >
                         <Button
                           type="button"
                           onClick={toggleListening}
                           variant={isListening ? "destructive" : "default"}
-                          className={isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"}
+                          className={
+                            isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"
+                          }
                         >
-                          {isListening ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                          {isListening ? (
+                            <MicOff className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Mic className="mr-2 h-4 w-4" />
+                          )}
                           {isListening ? "Stop Listening" : "Start Voice Control"}
                         </Button>
                         <Button
@@ -1222,7 +1394,9 @@ const OPDBookingPage: React.FC = () => {
                             <h4 className="font-medium">Listening...</h4>
                           </div>
                           <ScrollArea className="h-40 w-full rounded-md border p-2">
-                            <p className="text-gray-700 dark:text-gray-300">{transcript}</p>
+                            <p className="text-gray-700 dark:text-gray-300">
+                              {transcript}
+                            </p>
                           </ScrollArea>
                         </div>
                       )}
@@ -1233,38 +1407,44 @@ const OPDBookingPage: React.FC = () => {
                         </h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">Patient Information</p>
+                            <p className="font-medium mb-1">
+                              Patient Information
+                            </p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>&amp;quot;name [patient name]&amp;quot;</li>
-                              <li>&amp;quot;number [phone number]&amp;quot;</li>
-                              <li>&amp;quot;age [number]&amp;quot;</li>
-                              <li>&amp;quot;gender [male/female/other]&amp;quot;</li>
-                              <li>&amp;quot;address [address details]&amp;quot;</li>
+                              <li>"name [patient name]"</li>
+                              <li>"number [phone number]"</li>
+                              <li>"age [number]"</li>
+                              <li>"gender [male/female/other]"</li>
+                              <li>"address [address details]"</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">Appointment Details</p>
+                            <p className="font-medium mb-1">
+                              Appointment Details
+                            </p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>&amp;quot;set date to [date]&amp;quot;</li>
-                              <li>&amp;quot;set time to [time]&amp;quot;</li>
-                              <li>&amp;quot;message [your message]&amp;quot;</li>
-                              <li>&amp;quot;service [service name]&amp;quot;</li>
-                              <li>&amp;quot;select doctor [doctor name]&amp;quot;</li>
+                              <li>"set date to [date]"</li>
+                              <li>"set time to [time]"</li>
+                              <li>"message [your message]"</li>
+                              <li>"service [service name]"</li>
+                              <li>"select doctor [doctor name]"</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">Payment</p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>&amp;quot;payment method [cash/online/card/upi]&amp;quot;</li>
-                              <li>&amp;quot;amount [number]&amp;quot;</li>
+                              <li>
+                                "payment method [cash/online/card/upi]"
+                              </li>
+                              <li>"amount [number]"</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">Form Actions</p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>&amp;quot;preview&amp;quot; - Preview the form</li>
-                              <li>&amp;quot;cancel&amp;quot; - Cancel preview</li>
-                              <li>&amp;quot;submit&amp;quot; - Submit the form</li>
+                              <li>"preview" - Preview the form</li>
+                              <li>"cancel" - Cancel preview</li>
+                              <li>"submit" - Submit the form</li>
                             </ul>
                           </div>
                         </div>
@@ -1282,10 +1462,16 @@ const OPDBookingPage: React.FC = () => {
                     <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     <span className="text-sm font-medium">
                       Patient selected:{" "}
-                      <span className="text-emerald-600 dark:text-emerald-400">{selectedPatient.name}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        {selectedPatient.name}
+                      </span>
                     </span>
                   </div>
-                  <Badge variant={selectedPatient.source === "gautami" ? "default" : "secondary"}>
+                  <Badge
+                    variant={
+                      selectedPatient.source === "gautami" ? "default" : "secondary"
+                    }
+                  >
                     {selectedPatient.source.toUpperCase()}
                   </Badge>
                 </div>
@@ -1305,9 +1491,15 @@ const OPDBookingPage: React.FC = () => {
                   variant={isListening ? "destructive" : "default"}
                   size="sm"
                   onClick={toggleListening}
-                  className={isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"}
+                  className={
+                    isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"
+                  }
                 >
-                  {isListening ? <MicOff className="mr-2 h-4 w-4" /> : <Mic className="mr-2 h-4 w-4" />}
+                  {isListening ? (
+                    <MicOff className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Mic className="mr-2 h-4 w-4" />
+                  )}
                   {isListening ? "Stop" : "Voice"}
                 </Button>
               </div>
@@ -1321,7 +1513,9 @@ const OPDBookingPage: React.FC = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Appointment Preview</DialogTitle>
-            <DialogDescription>Review your appointment details before submitting</DialogDescription>
+            <DialogDescription>
+              Review your appointment details before submitting
+            </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
@@ -1336,7 +1530,12 @@ const OPDBookingPage: React.FC = () => {
               <div>{watch("age")}</div>
 
               <div className="font-medium">Gender:</div>
-              <div>{GenderOptions.find((g) => g.value === watch("gender"))?.label || watch("gender")}</div>
+              <div>
+                {
+                  GenderOptions.find((g) => g.value === watch("gender"))
+                    ?.label || watch("gender")
+                }
+              </div>
 
               {watch("address") && (
                 <>
@@ -1355,11 +1554,18 @@ const OPDBookingPage: React.FC = () => {
               <div>{watch("serviceName")}</div>
 
               <div className="font-medium">Doctor:</div>
-              <div>{doctors.find((d) => d.id === watch("doctor"))?.name || "No Doctor"}</div>
+              <div>
+                {doctors.find((d) => d.id === watch("doctor"))?.name ||
+                  "No Doctor"}
+              </div>
 
               <div className="font-medium">Payment Method:</div>
               <div>
-                {PaymentOptions.find((p) => p.value === watch("paymentMethod"))?.label || watch("paymentMethod")}
+                {
+                  PaymentOptions.find(
+                    (p) => p.value === watch("paymentMethod"),
+                  )?.label || watch("paymentMethod")
+                }
               </div>
 
               <div className="font-medium">Amount:</div>
@@ -1375,7 +1581,11 @@ const OPDBookingPage: React.FC = () => {
           </div>
 
           <DialogFooter className="sm:justify-between">
-            <Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPreviewOpen(false)}
+            >
               Cancel
             </Button>
             <Button
