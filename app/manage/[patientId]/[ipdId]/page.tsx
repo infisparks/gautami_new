@@ -48,36 +48,37 @@ export default function ManagePatientPageTabs() {
             )
           }
         >
-          {/* Using flex wrap on TabsList to allow automatic breaking to the next line */}
-          <TabsList className="flex flex-wrap gap-2">
-            <TabsTrigger value="charge" className="px-4 py-2">
-              Patient Charge Sheet
-            </TabsTrigger>
-            <TabsTrigger value="glucose" className="px-4 py-2">
-              Glucose Monitoring Sheet
-            </TabsTrigger>
-            <TabsTrigger value="admission" className="px-4 py-2">
-              Patient Admission Assessment
-            </TabsTrigger>
-            <TabsTrigger value="investigation" className="px-4 py-2">
-              Investigation Sheet
-            </TabsTrigger>
-            <TabsTrigger value="clinic" className="px-4 py-2">
-              Clinic Note
-            </TabsTrigger>
-            <TabsTrigger value="progress" className="px-4 py-2">
-              Progress Notes
-            </TabsTrigger>
-            <TabsTrigger value="nurse" className="px-4 py-2">
-              Nurse Note
-            </TabsTrigger>
-            <TabsTrigger value="vital" className="px-4 py-2">
-              Vital Observations
-            </TabsTrigger>
-            <TabsTrigger value="doctor" className="px-4 py-2">
-              Doctor Visits
-            </TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-400">
+            <TabsList className="flex space-x-2 whitespace-nowrap">
+              <TabsTrigger value="charge" className="px-4 py-2 flex-shrink-0">
+                Patient Charge Sheet
+              </TabsTrigger>
+              <TabsTrigger value="glucose" className="px-4 py-2 flex-shrink-0">
+                Glucose Monitoring Sheet
+              </TabsTrigger>
+              <TabsTrigger value="admission" className="px-4 py-2 flex-shrink-0">
+                Patient Admission Assessment
+              </TabsTrigger>
+              <TabsTrigger value="investigation" className="px-4 py-2 flex-shrink-0">
+                Investigation Sheet
+              </TabsTrigger>
+              <TabsTrigger value="clinic" className="px-4 py-2 flex-shrink-0">
+                Clinic Note
+              </TabsTrigger>
+              <TabsTrigger value="progress" className="px-4 py-2 flex-shrink-0">
+                Progress Notes
+              </TabsTrigger>
+              <TabsTrigger value="nurse" className="px-4 py-2 flex-shrink-0">
+                Nurse Note
+              </TabsTrigger>
+              <TabsTrigger value="vital" className="px-4 py-2 flex-shrink-0">
+                Vital Observations
+              </TabsTrigger>
+              <TabsTrigger value="doctor" className="px-4 py-2 flex-shrink-0">
+                Doctor Visits
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           <TabsContent value="charge" className="mt-4">
             <PatientCharges />
