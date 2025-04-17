@@ -287,7 +287,7 @@ export default function BillingPage() {
     reset: resetService,
     setValue: setValueService,
     control: serviceControl,
-    watch: watchService,
+    // watch: watchService,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
     defaultValues: { serviceName: "", amount: 0 },
