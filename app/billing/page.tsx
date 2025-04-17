@@ -60,9 +60,7 @@ export default function PatientsPage() {
   const [allRecords, setAllRecords] = useState<BillingRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">(
-    "non-discharge"
-  );
+  const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge");
   const [selectedWard, setSelectedWard] = useState("All");
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
@@ -296,22 +294,25 @@ export default function PatientsPage() {
               }
             >
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-                <TabsList className="bg-slate-100">
-                  <TabsTrigger
-                    value="non-discharge"
-                    className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
-                  >
-                    <XCircle className="h-4 w-4 mr-2" />
-                    Non-Discharged
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="discharge"
-                    className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Discharged
-                  </TabsTrigger>
-                </TabsList>
+                {/* Responsive Tabs: Wrapping the TabsList in an overflow container */}
+                <div className="overflow-x-auto">
+                  <TabsList className="bg-slate-100 flex gap-2 whitespace-nowrap">
+                    <TabsTrigger
+                      value="non-discharge"
+                      className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
+                    >
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Non-Discharged
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="discharge"
+                      className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
+                    >
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Discharged
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
 
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
