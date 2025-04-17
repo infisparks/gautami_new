@@ -1411,11 +1411,11 @@ Gautami Hospital
                               Patient Information
                             </p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>"name [patient name]"</li>
-                              <li>"number [phone number]"</li>
-                              <li>"age [number]"</li>
-                              <li>"gender [male/female/other]"</li>
-                              <li>"address [address details]"</li>
+                              <li>name [patient name]</li>
+                              <li>number [phone number]</li>
+                              <li>age [number]</li>
+                              <li>gender [male/female/other]</li>
+                              <li>address [address details]</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
@@ -1423,28 +1423,28 @@ Gautami Hospital
                               Appointment Details
                             </p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>"set date to [date]"</li>
-                              <li>"set time to [time]"</li>
-                              <li>"message [your message]"</li>
-                              <li>"service [service name]"</li>
-                              <li>"select doctor [doctor name]"</li>
+                              <li>set date to [date]</li>
+                              <li>set time to [time]</li>
+                              <li>message [your message]</li>
+                              <li>service [service name]</li>
+                              <li>select doctor [doctor name]</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">Payment</p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
                               <li>
-                                "payment method [cash/online/card/upi]"
+                                payment method [cash/online/card/upi]
                               </li>
-                              <li>"amount [number]"</li>
+                              <li>amount [number]</li>
                             </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">Form Actions</p>
                             <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>"preview" - Preview the form</li>
-                              <li>"cancel" - Cancel preview</li>
-                              <li>"submit" - Submit the form</li>
+                              <li>preview - Preview the form</li>
+                              <li>cancel - Cancel preview</li>
+                              <li>submit - Submit the form</li>
                             </ul>
                           </div>
                         </div>
