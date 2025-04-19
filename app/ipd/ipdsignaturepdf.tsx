@@ -1,229 +1,366 @@
-"use client";
-import React from "react";
-import jsPDF from "jspdf";
-import { IPDFormInput } from "./page";
-
-// Make sure letterhead is a valid import for your Next.js project:
-import letterhead from "@/public/letterhead.png";
-
-interface IPDSignaturePDFProps {
-  data: IPDFormInput;
-}
-
-const IPDSignaturePDF: React.FC<IPDSignaturePDFProps> = ({ data }) => {
-  const generatePDF = () => {
-    const doc = new jsPDF({
-      orientation: "p",
-      unit: "pt",
-      format: "A4",
-    });
-
-    // --- Page Dimensions & Margins ---
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    let currentY = 120; // start 120px down from the top
-    const leftMargin = 50;
-    const rightMargin = pageWidth - 50;
-    const lineHeight = 14;
-
-    // --- Helper: Add new page + letterhead ---
-    const addNewPage = () => {
-      doc.addPage();
-      // Add your letterhead as background on every new page
-      doc.addImage(letterhead.src, "PNG", 0, 0, pageWidth, pageHeight);
-      currentY = 120; // reset to 120px from the top on new page
-    };
-
-    // --- Put letterhead on the first page immediately ---
-    doc.addImage(letterhead.src, "PNG", 0, 0, pageWidth, pageHeight);
-
-    // --- Helper: if we exceed a page, create a new one
-    const checkPageBounds = () => {
-      if (currentY > pageHeight - 50) {
-        addNewPage();
-      }
-    };
-
-    // --- Draw a horizontal separator line ---
-    const drawSeparator = () => {
-      doc.setDrawColor(180, 180, 180);
-      doc.setLineWidth(0.5);
-      doc.line(leftMargin, currentY, rightMargin, currentY);
-      currentY += lineHeight;
-      checkPageBounds();
-    };
-
-    // --- Add a label-value field ---
-    const addField = (label: string, value?: string) => {
-      doc.setFont("Helvetica", "bold");
-      doc.setTextColor(0, 0, 0);
-      doc.text(label, leftMargin, currentY);
-
-      doc.setFont("Helvetica", "normal");
-      doc.setTextColor(60, 60, 60);
-      doc.text(value || "N/A", leftMargin + 120, currentY);
-
-      currentY += lineHeight;
-      checkPageBounds();
-    };
-
-    // --- Add a Section Title + separator ---
-    const addSectionTitle = (title: string) => {
-      currentY += 20; // extra spacing before section
-      checkPageBounds();
-
-      doc.setFont("Helvetica", "bold");
-      doc.setFontSize(11);
-      doc.setTextColor(0, 0, 128);
-      doc.text(title, leftMargin, currentY);
-
-      currentY += 4;
-      drawSeparator();
-
-      // Reset font for content
-      doc.setFont("Helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(0, 0, 0);
-    };
-
-    // --- MAIN TITLE ---
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 128);
-    doc.text("Patient's Admission Summary", pageWidth / 2, currentY, {
-      align: "center",
-    });
-    currentY += lineHeight + 8;
-    checkPageBounds();
-
-    // --- FIRST SEPARATOR ---
-    doc.setDrawColor(180, 180, 180);
-    doc.setLineWidth(0.7);
-    doc.line(leftMargin, currentY, rightMargin, currentY);
-    currentY += lineHeight;
-    checkPageBounds();
-
-    // Reset for body text
-    doc.setFont("Helvetica", "normal");
-    doc.setFontSize(10);
-    doc.setTextColor(0, 0, 0);
-    doc.setLineWidth(0.5);
-
-    // --- PATIENT DETAILS ---
-    addSectionTitle("Patient Details");
-    addField("Patient Name", data.name || "NA");
-    addField(
-      "Age / Sex",
-      `${data.age || 35} Yrs / ${data.gender?.label || "NA"}`
-    );
-    addField("Under Care of Doctor", data.doctor?.label || "NA");
-    addField("Address", data.address || "NA");
-    addField("Number", data.phone || "NA");
-
-    // --- ADMISSION DETAILS ---
-    addSectionTitle("Admission Details");
-
-    // Construct the date/time string
-    const admissionDate = data?.date ? data.date.toLocaleDateString() : "24-03-2025";
-    // If your form includes data.time, use it; otherwise fallback on toLocaleTimeString()
-    const admissionTime = data?.time
-      ? data.time
-      : data?.date
-      ? data.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-      : "NA";
-
-    addField("Admission Date/Time", `${admissionDate} - ${admissionTime}`);
-
-    addField("Referral Doctor", data.referDoctor || "NA");
-
-    // --- ROOM / WARD DETAILS ---
-    addSectionTitle("Room / Ward");
-    addField("Room / Ward", data.roomType?.label || "NA");
-    addField("Bed No", data.bed?.label || "NA");
-
-    // --- INSTRUCTIONS ---
-    addSectionTitle("Instructions");
-    const instructions = [
-      "Please have an attendant to accompany you till discharge.",
-      "Billing Cycle will be of 24 hours from the date and time of admission.",
-      "Consultant Visit charges will be charged as per their visits.",
-      "Any investigations like Sonography, Blood/Urine Test, X-Ray, 2D-Echo, etc. will be charged extra.",
-      "In package, oral medicines and non-medical items are payable by the patient.",
-      "All other services like Oxygen, Nebulizer, Monitor, Syringe pump, Ventilator, BiPAP, etc., are chargeable.",
-      "Any other visiting consultants other than the treating doctor will be charged extra.",
-      "Normal delivery basic package consists of 1 induction; if more than that, it will be charged.",
-      "Normal delivery basic package includes 1 pediatric visit.",
-      "Consumption of alcohol, smoking, chewing gum, and spitting are strictly prohibited.",
-      "Patients are advised not to carry cash or wear/keep any jewelry during hospitalization. The hospital is not responsible for any kind of loss.",
-      "Photography is prohibited on hospital premises.",
-      "If the patient is required to be transferred to the ICU/Room/Ward, the room/bed they were occupying prior to transfer is to be vacated by the attendants.",
-      "For any further assistance, you may reach us on 9769000091 / 9769000092",
-    ];
-
-    instructions.forEach((instr) => {
-      const splitted = doc.splitTextToSize(instr, rightMargin - leftMargin - 15);
-      doc.setFont("Helvetica", "bold");
-      doc.setTextColor(0, 0, 128);
-      doc.text("•", leftMargin, currentY);
-      doc.setFont("Helvetica", "normal");
-      doc.setTextColor(60, 60, 60);
-
-      splitted.forEach((line: string) => {
-        doc.text(line, leftMargin + 15, currentY);
-        currentY += lineHeight;
-        checkPageBounds();
-      });
-    });
-
-    // --- FINAL ACKNOWLEDGMENT ---
-    currentY += lineHeight;
-    checkPageBounds();
-
-    doc.setFont("Helvetica", "bold");
-    doc.setTextColor(0, 0, 0);
-    doc.text(
-      "I have read all the information mentioned above and hereby acknowledge and confirm:",
-      leftMargin,
-      currentY
-    );
-    currentY += lineHeight * 2;
-    checkPageBounds();
-
-    // --- SIGNATURE BLOCK ---
-    doc.setFont("Helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-
-    // Row 1: Signatures
-    doc.text("Signature: ______________", leftMargin, currentY, {
-      align: "left",
-    });
-    doc.text("Billing Executive: ______________", rightMargin, currentY, {
-      align: "right",
-    });
-    currentY += lineHeight * 2;
-    checkPageBounds();
-
-    // Row 2: Name
-    doc.text("Name: ______________", leftMargin, currentY);
-    currentY += lineHeight * 1.5;
-    checkPageBounds();
-
-    // Row 3: Relation
-    doc.text("Relation with Patient: ______________", leftMargin, currentY);
-
-    // --- SAVE PDF ---
-    doc.save(`IPD_Admission_Letter_${data.name || "Patient"}.pdf`);
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={generatePDF}
-      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition duration-200"
-    >
-      Download Letter
-    </button>
-  );
-};
-
-export default IPDSignaturePDF;
+/* ------------------------------------------------------------------
+   IPDSignaturePDF.tsx
+   ------------------------------------------------------------------ */
+   "use client";
+   import React from "react";
+   import jsPDF from "jspdf";
+   import { IPDFormInput } from "./page";
+   
+   // Make sure these paths resolve in your Next.js project
+   import letterhead from "@/public/letterhead.png";
+   
+   interface IPDSignaturePDFProps {
+     data: IPDFormInput;
+   }
+   
+   export default function IPDSignaturePDF({ data }: IPDSignaturePDFProps) {
+     /* ----------------------------------------
+        Load Hindi font (Noto Sans Devanagari)
+        ---------------------------------------- */
+     const loadHindiFont = (doc: jsPDF): Promise<void> =>
+       new Promise((resolve, reject) => {
+         fetch("/font/NotoSansDevanagari_Condensed-Medium.ttf")
+           .then((res) => res.blob())
+           .then((blob) => {
+             const reader = new FileReader();
+             reader.onload = () => {
+               const base64 = (reader.result as string).split(",")[1];
+               doc.addFileToVFS(
+                 "NotoSansDevanagari_Condensed-Medium.ttf",
+                 base64
+               );
+               doc.addFont(
+                 "NotoSansDevanagari_Condensed-Medium.ttf",
+                 "NotoSansDev",
+                 "normal"
+               );
+               resolve();
+             };
+             reader.onerror = reject;
+             reader.readAsDataURL(blob);
+           })
+           .catch(reject);
+       });
+   
+     /* ----------------------------------------
+        Helpers shared by both generators
+        ---------------------------------------- */
+     const initializeDoc = () => {
+       const doc = new jsPDF({ orientation: "p", unit: "pt", format: "A4" });
+       const pageWidth = doc.internal.pageSize.getWidth();
+       const pageHeight = doc.internal.pageSize.getHeight();
+       doc.addImage(letterhead.src, "PNG", 0, 0, pageWidth, pageHeight);
+       return { doc, pageWidth, pageHeight };
+     };
+   
+     /* ================================================================
+        ===============  ENGLISH‑LANGUAGE PDF  ==========================
+        ================================================================ */
+     const generatePDF = () => {
+       const { doc, pageWidth, pageHeight } = initializeDoc();
+       let y = 120;
+       const left = 50;
+       const right = pageWidth - 50;
+       const lh = 14;
+   
+       const newPageIfNeeded = () => {
+         if (y > pageHeight - 50) {
+           doc.addPage();
+           doc.addImage(letterhead.src, "PNG", 0, 0, pageWidth, pageHeight);
+           y = 120;
+         }
+       };
+   
+       const sep = () => {
+         doc.setDrawColor(180);
+         doc.setLineWidth(0.6);
+         doc.line(left, y, right, y);
+         y += lh;
+         newPageIfNeeded();
+       };
+   
+       const addField = (label: string, value?: string) => {
+         doc.setFont("Helvetica", "bold").setFontSize(10).text(label, left, y);
+         doc.setFont("Helvetica", "normal").text(value || "N/A", left + 120, y);
+         y += lh;
+         newPageIfNeeded();
+       };
+   
+       const addSection = (title: string) => {
+         y += 20;
+         newPageIfNeeded();
+         doc
+           .setFont("Helvetica", "bold")
+           .setFontSize(11)
+           .setTextColor(0, 0, 128)
+           .text(title, left, y);
+         y += 4;
+         sep();
+         doc.setFont("Helvetica", "normal").setFontSize(10).setTextColor(0);
+       };
+   
+       /* ---------- Title ---------- */
+       doc
+         .setFont("Helvetica", "bold")
+         .setFontSize(14)
+         .setTextColor(0, 0, 128)
+         .text("Patient's Admission Summary", pageWidth / 2, y, { align: "center" });
+       y += lh + 8;
+       sep();
+   
+       /* ---------- Patient details ---------- */
+       addSection("Patient Details");
+       addField("Patient Name", data.name || "NA");
+       addField("Age / Sex", `${data.age || "NA"} Yrs / ${data.gender?.label || "NA"}`);
+       addField("Under Care of Doctor", data.doctor?.label || "NA");
+       addField("Address", data.address || "NA");
+       addField("Number", data.phone || "NA");
+   
+       /* ---------- Admission ---------- */
+       addSection("Admission Details");
+       const adDate = data.date
+         ? data.date.toLocaleDateString()
+         : "24‑03‑2025";
+       const adTime =
+         data.time ||
+         (data.date
+           ? data.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+           : "NA");
+       addField("Admission Date / Time", `${adDate} - ${adTime}`);
+       addField("Referral Doctor", data.referDoctor || "NA");
+   
+       /* ---------- Room / Ward ---------- */
+       addSection("Room / Ward");
+       addField("Room / Ward", data.roomType?.label || "NA");
+       addField("Bed No", data.bed?.label || "NA");
+   
+       /* ---------- Instructions ---------- */
+       addSection("Instructions");
+       const instructions = [
+         "Please have an attendant to accompany you till discharge.",
+         "Billing Cycle will be of 24 hours from the date and time of admission.",
+         "Consultant Visit charges will be charged as per their visits.",
+         "Any investigations like Sonography, Blood/Urine Test, X‑Ray, 2D‑Echo, etc. will be charged extra.",
+         "In package, oral medicines and non‑medical items are payable by the patient.",
+         "All other services like Oxygen, Nebulizer, Monitor, Syringe pump, Ventilator, BiPAP, etc., are chargeable.",
+         "Any other visiting consultants other than the treating doctor will be charged extra.",
+         "Normal delivery basic package consists of 1 induction; if more than that, it will be charged.",
+         "Normal delivery basic package includes 1 pediatric visit.",
+         "Consumption of alcohol, smoking, chewing gum, and spitting are strictly prohibited.",
+         "Patients are advised not to carry cash or wear/keep any jewelry during hospitalization. The hospital is not responsible for any kind of loss.",
+         "Photography is prohibited on hospital premises.",
+         "If the patient is required to be transferred to the ICU/Room/Ward, the room/bed they were occupying prior to transfer is to be vacated by the attendants.",
+         "For any further assistance, you may reach us on 9769000091 / 9769000092",
+       ];
+       instructions.forEach((txt) => {
+         doc.setFont("Helvetica", "bold").setTextColor(0, 0, 128).text("•", left, y);
+         doc
+           .setFont("Helvetica", "normal")
+           .setTextColor(60)
+           .splitTextToSize(txt, right - left - 15)
+           .forEach((line: string | string[]) => {
+             doc.text(line, left + 15, y);
+             y += lh;
+             newPageIfNeeded();
+           });
+       });
+   
+       /* ---------- Acknowledgment & Sign ---------- */
+       y += lh;
+       newPageIfNeeded();
+       doc
+         .setFont("Helvetica", "bold")
+         .setTextColor(0)
+         .text(
+           "I have read all the information mentioned above and hereby acknowledge and confirm:",
+           left,
+           y
+         );
+       y += lh * 2;
+       newPageIfNeeded();
+   
+       doc
+         .setFont("Helvetica", "normal")
+         .text("Signature: ______________", left, y)
+         .text("Billing Executive: ______________", right, y, { align: "right" });
+       y += lh * 2;
+       newPageIfNeeded();
+       doc.text("Name: ______________", left, y);
+       y += lh * 1.5;
+       newPageIfNeeded();
+       doc.text("Relation with Patient: ______________", left, y);
+   
+       doc.save(`IPD_Admission_Letter_${data.name || "Patient"}.pdf`);
+     };
+   
+     /* ================================================================
+        ===============  HINDI‑LANGUAGE PDF  ============================
+        ================================================================ */
+     const generatePDFHindi = async () => {
+       const { doc, pageWidth, pageHeight } = initializeDoc();
+       let y = 120;
+       const left = 50;
+       const right = pageWidth - 50;
+       const lh = 14;
+   
+       await loadHindiFont(doc);
+   
+       const newPageIfNeeded = () => {
+         if (y > pageHeight - 50) {
+           doc.addPage();
+           doc.addImage(letterhead.src, "PNG", 0, 0, pageWidth, pageHeight);
+           y = 120;
+         }
+       };
+   
+       const sep = () => {
+         doc.setDrawColor(180).setLineWidth(0.6).line(left, y, right, y);
+         y += lh;
+         newPageIfNeeded();
+       };
+   
+       /* ---------- Section title (Hindi) ---------- */
+       const addSectionHI = (title: string) => {
+         y += 20;
+         newPageIfNeeded();
+         doc
+           .setFont("NotoSansDev", "normal")
+           .setFontSize(11)
+           .setTextColor(0, 0, 128)
+           .text(title, left, y);
+         y += 4;
+         sep();
+         doc.setFontSize(10).setTextColor(0);
+       };
+   
+       /* ---------- Field (English labels + values) ---------- */
+       const addFieldEN = (label: string, value?: string) => {
+         doc
+           .setFont("Helvetica", "bold")
+           .text(label, left, y)
+           .setFont("Helvetica", "normal")
+           .text(value || "N/A", left + 120, y);
+         y += lh;
+         newPageIfNeeded();
+       };
+   
+       /* ---------- Bullet in Hindi ---------- */
+       const addBulletHI = (txt: string) => {
+         doc.setFont("NotoSansDev", "normal").text("•", left, y);
+         doc
+           .splitTextToSize(txt, right - left - 15)
+           .forEach((line: string | string[]) => {
+             doc.text(line, left + 15, y);
+             y += lh;
+             newPageIfNeeded();
+           });
+       };
+   
+       /* ---------- Title ---------- */
+       doc
+         .setFont("NotoSansDev", "normal")
+         .setFontSize(14)
+         .setTextColor(0, 0, 128)
+         .text("रोगी का प्रवेश सारांश", pageWidth / 2, y, { align: "center" });
+       y += lh + 8;
+       sep();
+   
+       /* ---------- Patient details (labels & values in English) ---------- */
+       addSectionHI("रोगी विवरण / PATIENT DETAILS");
+       addFieldEN("Patient Name", data.name || "NA");
+       addFieldEN("Age / Sex", `${data.age || "NA"} Yrs / ${data.gender?.label || "NA"}`);
+       addFieldEN("Under Care of Doctor", data.doctor?.label || "NA");
+       addFieldEN("Address", data.address || "NA");
+       addFieldEN("Number", data.phone || "NA");
+   
+       /* ---------- Admission details ---------- */
+       addSectionHI("भर्ती विवरण / ADMISSION DETAILS");
+       const adDate = data.date
+         ? data.date.toLocaleDateString()
+         : "24‑03‑2025";
+       const adTime =
+         data.time ||
+         (data.date
+           ? data.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+           : "NA");
+       addFieldEN("Admission Date / Time", `${adDate} - ${adTime}`);
+       addFieldEN("Referral Doctor", data.referDoctor || "NA");
+   
+       /* ---------- Room / Ward ---------- */
+       addSectionHI("कक्ष / वार्ड");
+       addFieldEN("Room / Ward", data.roomType?.label || "NA");
+       addFieldEN("Bed No", data.bed?.label || "NA");
+   
+       /* ---------- Instructions ---------- */
+       addSectionHI("निर्देश");
+       [
+         "कृपया डिस्चार्ज तक एक परिचारक आपके साथ रहे।",
+         "भर्ती की तारीख और समय से 24 घंटे का बिलिंग चक्र होगा।",
+         "परामर्शदाता की विजिट चार्जेज उनकी विजिट के अनुसार लगाए जाएंगे।",
+         "सोनोग्राफी, रक्त/मूत्र परीक्षण, एक्स‑रे, 2D‑इको जैसी जांचें अतिरिक्त शुल्क पर होंगी।",
+         "पैकेज में मौखिक एवं गैर‑चिकित्सा वस्तुएँ रोगी द्वारा भुगतान योग्य हैं।",
+         "ऑक्सीजन, नेबुलाइज़र, मॉनिटर, सिरिंज पंप, वेंटीलेटर, BiPAP आदि चार्जेबल सेवाएँ हैं।",
+         "इलाज करने वाले डॉक्टर के अलावा अन्य परामर्शदाता की विजिट पर अतिरिक्त शुल्क लगेगा।",
+         "साधारण प्रसव पैकेज में 1 इंडक्शन शामिल है; अधिक होने पर शुल्क लगेगा।",
+         "साधारण प्रसव में 1 बाल रोग विशेषज्ञ की विजिट शामिल है।",
+         "अस्पताल परिसर में शराब, धूम्रपान, च्यूइंग गम एवं थूकना वर्जित है।",
+         "अस्पताल में नकदी या आभूषण न रखें; किसी भी हानि के लिए अस्पताल उत्तरदायी नहीं है।",
+         "अस्पताल परिसर में फोटोग्राफी वर्जित है।",
+         "ICU/कक्ष/वार्ड में स्थानांतरण पर पूर्व बिस्तर खाली करें।",
+         "अन्य सहायता हेतु 9769000091 / 9769000092 पर संपर्क करें।",
+       ].forEach(addBulletHI);
+   
+       /* ---------- Acknowledgment & Sign ---------- */
+       y += lh;
+       doc
+         .setFont("NotoSansDev", "normal")
+         .text(
+           "मैंने उपरोक्त सभी जानकारी पढ़ ली है एवं पुष्टि करता हूँ:",
+           left,
+           y
+         );
+       y += lh * 2;
+       newPageIfNeeded();
+   
+       doc
+         .setFont("NotoSansDev", "normal")
+         .text("हस्ताक्षर: ______________", left, y);
+       doc.text(
+         "बिलिंग कार्यकारी: ______________",
+         right,
+         y,
+         { align: "right" }
+       );
+       y += lh * 2;
+       newPageIfNeeded();
+       doc.text("नाम: ______________", left, y);
+       y += lh * 1.5;
+       newPageIfNeeded();
+       doc.text("रोगी के साथ संबंध: ______________", left, y);
+   
+       doc.save(`IPD_Admission_Letter_${data.name || "Patient"}_HI.pdf`);
+     };
+   
+     /* ================================================================
+        ===============  RENDER PDF BUTTONS  ============================
+        ================================================================ */
+     return (
+       <div className="flex gap-4">
+         <button
+           type="button"
+           onClick={generatePDF}
+           className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition duration-200"
+         >
+           Download Letter
+         </button>
+         <button
+           type="button"
+           onClick={generatePDFHindi}
+           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200"
+         >
+           पत्र डाउनलोड करें
+         </button>
+       </div>
+     );
+   }
+   

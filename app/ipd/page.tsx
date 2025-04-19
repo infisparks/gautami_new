@@ -145,7 +145,7 @@ const IPDBookingPage: React.FC = () => {
       bed: null,
       doctor: null,
       referDoctor: "",
-      admissionType: null,
+      admissionType: AdmissionTypeOptions.find(opt => opt.value === "general") || null,
     },
   });
 
