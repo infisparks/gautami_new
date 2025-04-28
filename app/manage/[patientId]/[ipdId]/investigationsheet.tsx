@@ -1,296 +1,629 @@
-"use client";
+/* ------------------------------------------------------------------ */
+/*  app/manage/[patientId]/[ipdId]/investigationsheet.tsx             */
+/* ------------------------------------------------------------------ */
+/*  ✔ Compress image ≤ 200 KB before upload                           */
+/*  ✔ Callback-ref so RHF gets FileList                               */
+/*  ✔ Progress bar, error logs, full feature set                      */
+/* ------------------------------------------------------------------ */
 
-import React, { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { useForm, SubmitHandler } from "react-hook-form";
-import { ref, onValue, push, set, update } from "firebase/database";
-import { db, auth } from "@/lib/firebase";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-// import { Calendar } from "lucide-react";
-import { format } from "date-fns/format";
+"use client"
 
+import React, { useEffect, useState, useRef } from "react"
+import { useParams } from "next/navigation"
+import { useForm, type SubmitHandler } from "react-hook-form"
+import {
+  ref as dbRef,
+  push,
+  set,
+  update,
+  onValue,
+} from "firebase/database"
+import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from "firebase/storage"
+import { db, auth, storage } from "@/lib/firebase"
+
+import {
+  Card, CardContent, CardHeader, CardTitle,
+} from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
+} from "@/components/ui/carousel"
+
+import { format } from "date-fns/format"
+import { jsPDF } from "jspdf"
+import { Eye, Download, X, FileImage, Loader2 } from "lucide-react"
+
+/* ───────── Types ───────── */
 interface InvestigationEntry {
-  dateTime: string;
-  message: string;
+  dateTime: string
+  value: string
+  type: "text" | "image"
 }
-
 interface InvestigationRecord {
-  id?: string;
-  testName: string;
-  entries: InvestigationEntry[];
-  enteredBy: string;
+  id?: string
+  testName: string
+  entries: InvestigationEntry[]
+  enteredBy: string
 }
-
 interface InvestigationFormInputs {
-  testName: string;
-  dateTime: string;
-  message: string;
+  testName: string
+  dateTime: string
+  value: string
+  image?: FileList
+  entryType: "text" | "image"
 }
+interface AdditionalEntryFormInputs
+  extends Omit<InvestigationFormInputs, "testName"> {}
 
-interface AdditionalEntryFormInputs {
-  dateTime: string;
-  message: string;
-}
-
+/* ───────── Test list ───────── */
 const testOptions = [
-  "HIV",
-  "HBsAg",
-  "HCV",
-  "HU",
-  "pH",
-  "pCO2",
-  "pO2",
-  "HCO3",
-  "SAT",
-  "Mode",
-  "TV",
-  "RR",
-  "FLO2",
-  "PEEP/EPAP",
-  "iPAD",
-  "HB",
-  "WBC",
-  "PLATELET",
-  "CRP",
-  "ESR",
-  "PT",
-  "INR",
-  "PTT",
-  "S. CREATININE",
-  "FIBRINOGEN",
-  "FDP",
-  "BILIRUBIN",
-  "SGOT",
-  "SGPT",
-  "ALK PHOSPHATE",
-  "TOTAL PROTEIN",
-  "ALBUMIN",
-  "GLOBULIN",
-  "SODIUM",
-  "POTASSIUM",
-  "CHLORIDE",
-  "BUN",
-  "BS",
-  "PPBS",
-  "CALCIUM",
-  "PHOSPHORUS",
-  "URIC ACID",
-  "LACTATE",
-  "MAGNESIUM",
-  "CKMB",
-  "CPK",
-  "LDH",
-  "CHOLESTEROL",
-  "TRIGLYCERIDE",
-  "LDL",
-  "TROP T / TROP I",
-  "BNP"
-];
+  "HIV", "HBsAg", "HCV", "HB", "WBC", "PLATELET",
+  "CRP", "ESR", "PT", "INR", "PTT", "BNP",
+]
 
+/* ───────── Image-compression helper ───────── */
+const compressImage = (
+  file: File,
+  maxKB = 200,
+  maxW = 1200,
+): Promise<File> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > maxW) {
+          height = (height * maxW) / width
+          width = maxW
+        }
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext("2d")!
+        ctx.drawImage(img, 0, 0, width, height)
+
+        /* iterative quality reduction */
+        const attempt = (q: number) => {
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) return reject("Compression failed")
+              if (blob.size / 1024 <= maxKB || q <= 0.4) {
+                resolve(
+                  new File(
+                    [blob],
+                    file.name.replace(/\.[^/.]+$/, ".jpg"),
+                    { type: "image/jpeg" },
+                  ),
+                )
+              } else {
+                attempt(q - 0.1)
+              }
+            },
+            "image/jpeg",
+            q,
+          )
+        }
+        attempt(0.8)
+      }
+      img.onerror = () => reject("Image load error")
+      img.src = e.target!.result as string
+    }
+    reader.onerror = () => reject("File read error")
+    reader.readAsDataURL(file)
+  })
+
+/* =================================================================== */
 export default function InvestigationSheet() {
-  const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string };
-  
-  const [investigations, setInvestigations] = useState<InvestigationRecord[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  // To track which record has its "Add More" form open
-  const [activeAdditionalEntryRecord, setActiveAdditionalEntryRecord] = useState<string | null>(null);
+  /* URL params */
+  const { patientId, ipdId } =
+    useParams() as { patientId: string; ipdId: string }
 
-  // Form for creating a new investigation record
-  const { register, handleSubmit, reset } = useForm<InvestigationFormInputs>({
+  /* State */
+  const [investigations, setInvestigations] =
+    useState<InvestigationRecord[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadPct, setUploadPct] = useState(0)
+  const [imgPrev, setImgPrev] = useState<string | null>(null)
+
+  const [addRowId, setAddRowId] = useState<string | null>(null)
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [selectedRec, setSelectedRec] =
+    useState<InvestigationRecord | null>(null)
+  const [fullImg, setFullImg] = useState<string | null>(null)
+  const [pdfBusy, setPdfBusy] = useState(false)
+
+  /* Refs */
+  const mainFileRef = useRef<HTMLInputElement | null>(null)
+  const addFileRef  = useRef<HTMLInputElement | null>(null)
+
+  /* RHF main form */
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+  } = useForm<InvestigationFormInputs>({
     defaultValues: {
       testName: "",
-      dateTime: new Date().toISOString().slice(0, 16), // for datetime-local input
-      message: ""
-    }
-  });
-  
-  // Form for adding an additional entry to an existing record
-  const { register: registerAdditional, handleSubmit: handleSubmitAdditional, reset: resetAdditional } = useForm<AdditionalEntryFormInputs>({
+      dateTime: new Date().toISOString().slice(0, 16),
+      value: "",
+      entryType: "text",
+    },
+  })
+  const entryType = watch("entryType")
+
+  /* RHF add-entry form */
+  const {
+    register: rAdd,
+    handleSubmit: hAdd,
+    reset: resetAdd,
+    watch: wAdd,
+    setValue: setValAdd,
+  } = useForm<AdditionalEntryFormInputs>({
     defaultValues: {
       dateTime: new Date().toISOString().slice(0, 16),
-      message: ""
-    }
-  });
+      value: "",
+      entryType: "text",
+    },
+  })
+  const entryTypeAdd = wAdd("entryType")
 
-  // ----------------- Fetch Investigation Records ----------------- //
+  /* Fetch list */
   useEffect(() => {
-    const invRef = ref(db, `patients/${patientId}/ipd/${ipdId}/investigations`);
-    const unsubscribe = onValue(invRef, (snapshot) => {
-      setIsLoading(false);
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const records: InvestigationRecord[] = Object.keys(data).map((key) => ({
-          id: key,
-          ...data[key],
-        }));
-        setInvestigations(records);
-      } else {
-        setInvestigations([]);
-      }
-    });
-    return () => unsubscribe();
-  }, [patientId, ipdId]);
+    const ref = dbRef(db, `patients/${patientId}/ipd/${ipdId}/investigations`)
+    return onValue(ref, (snap) => {
+      setIsLoading(false)
+      if (!snap.exists()) return setInvestigations([])
+      const list: InvestigationRecord[] = Object.entries(snap.val()).map(
+        ([id, rec]: any) => ({
+          id,
+          ...rec,
+          entries: Array.isArray(rec.entries) ? rec.entries : [rec.entries],
+        }),
+      )
+      setInvestigations(list)
+    })
+  }, [patientId, ipdId])
 
-  // ----------------- Submit New Investigation Record ----------------- //
-  const onSubmitInvestigation: SubmitHandler<InvestigationFormInputs> = async (data) => {
+  /* Fake progress helper */
+  const tickProgress = () => {
+    setUploadPct(0)
+    const iv = setInterval(() => {
+      setUploadPct((p) => (p >= 85 ? p : p + 10))
+    }, 200)
+    return () => clearInterval(iv)
+  }
+
+  /* Upload helper */
+  const uploadImageAndGetUrl = async (file: File) => {
+    setIsUploading(true)
+    const stop = tickProgress()
+
     try {
-      const loggedInEmail = auth.currentUser?.email || "unknown";
-      const invRef = ref(db, `patients/${patientId}/ipd/${ipdId}/investigations`);
-      const newInvRef = push(invRef);
-      const newRecord: InvestigationRecord = {
-        testName: data.testName,
-        entries: [{
-          dateTime: data.dateTime,
-          message: data.message
-        }],
-        enteredBy: loggedInEmail
-      };
-      await set(newInvRef, newRecord);
+      const compressed = await compressImage(file, 200, 1200)
+      const name = `${Date.now()}_${compressed.name}`
+      const ref  = storageRef(storage,
+        `patients/${patientId}/ipd/${ipdId}/images/${name}`,
+      )
+
+      /* 1️⃣ upload */
+      const snap = await uploadBytes(ref, compressed)
+
+      /* 2️⃣ url */
+      const url = await getDownloadURL(snap.ref)
+
+      stop()
+      setUploadPct(100)
+      await new Promise((r) => setTimeout(r, 300))
+      return url
+    } catch (err) {
+      stop()
+      console.error("🔥 upload error:", err)
+      alert("Image upload failed – see console for details.")
+      throw err
+    } finally {
+      setIsUploading(false)
+      setUploadPct(0)
+    }
+  }
+
+  /* Submit NEW */
+  const onSubmit: SubmitHandler<InvestigationFormInputs> = async (d) => {
+    try {
+      const file = d.image?.[0]
+      const wantsImg = d.entryType === "image"
+
+      if (wantsImg && !file) {
+        alert("Select an image before submitting.")
+        return
+      }
+
+      let value = d.value
+      let type: "text" | "image" = "text"
+
+      if (wantsImg && file) {
+        value = await uploadImageAndGetUrl(file)
+        type  = "image"
+      }
+
+      const entry: InvestigationEntry = { dateTime: d.dateTime, value, type }
+
+      await set(
+        push(dbRef(db,
+          `patients/${patientId}/ipd/${ipdId}/investigations`,
+        )),
+        { testName: d.testName, entries: [entry], enteredBy: auth.currentUser?.email ?? "unknown" },
+      )
+
       reset({
         testName: "",
         dateTime: new Date().toISOString().slice(0, 16),
-        message: ""
-      });
-    } catch (error) {
-      console.error("Error saving investigation record:", error);
+        value: "",
+        entryType: "text",
+      })
+      mainFileRef.current && (mainFileRef.current.value = "")
+      setImgPrev(null)
+    } catch (err) {
+      console.error("🔥 NEW record error:", err)
     }
-  };
+  }
 
-  // ----------------- Submit Additional Entry for an Existing Record ----------------- //
-  const onSubmitAdditional: SubmitHandler<AdditionalEntryFormInputs> = async (data) => {
+  /* Submit ADD */
+  const onSubmitAdd: SubmitHandler<AdditionalEntryFormInputs> = async (d) => {
     try {
-      if (!activeAdditionalEntryRecord) return;
-      const record = investigations.find(inv => inv.id === activeAdditionalEntryRecord);
-      if (!record) return;
-      const updatedEntries = [
-        ...record.entries,
-        { dateTime: data.dateTime, message: data.message }
-      ];
-      const recordRef = ref(db, `patients/${patientId}/ipd/${ipdId}/investigations/${activeAdditionalEntryRecord}`);
-      await update(recordRef, { entries: updatedEntries });
-      setInvestigations(investigations.map(r => 
-        r.id === activeAdditionalEntryRecord ? { ...r, entries: updatedEntries } : r
-      ));
-      resetAdditional({
-        dateTime: new Date().toISOString().slice(0, 16),
-        message: ""
-      });
-      setActiveAdditionalEntryRecord(null);
-    } catch (error) {
-      console.error("Error adding additional entry:", error);
-    }
-  };
+      if (!addRowId) return
+      const rec = investigations.find((r) => r.id === addRowId)!
+      const file = d.image?.[0]
+      const wantsImg = d.entryType === "image"
 
+      if (wantsImg && !file) {
+        alert("Select an image before submitting.")
+        return
+      }
+
+      let value = d.value
+      let type: "text" | "image" = "text"
+
+      if (wantsImg && file) {
+        value = await uploadImageAndGetUrl(file)
+        type  = "image"
+      }
+
+      const updated = [
+        ...rec.entries,
+        { dateTime: d.dateTime, value, type },
+      ]
+
+      await update(
+        dbRef(db,
+          `patients/${patientId}/ipd/${ipdId}/investigations/${addRowId}`,
+        ),
+        { entries: updated },
+      )
+
+      resetAdd({
+        dateTime: new Date().toISOString().slice(0, 16),
+        value: "",
+        entryType: "text",
+      })
+      addFileRef.current && (addFileRef.current.value = "")
+      setImgPrev(null)
+      setAddRowId(null)
+    } catch (err) {
+      console.error("🔥 ADD entry error:", err)
+    }
+  }
+
+  /* Preview */
+  const preview = (e: React.ChangeEvent<HTMLInputElement>, add = false) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const rd = new FileReader()
+    rd.onloadend = () => setImgPrev(rd.result as string)
+    rd.readAsDataURL(f)
+    add ? setValAdd("entryType", "image") : setValue("entryType", "image")
+  }
+
+  /* Generate PDF (unchanged) */
+  const generatePDF = async () => {
+    if (!selectedRec) return
+    setPdfBusy(true)
+    try {
+      const imgs = selectedRec.entries.filter((e) => e.type === "image")
+      if (imgs.length === 0) return alert("No images to export.")
+      const pdf = new jsPDF()
+      let y = 20
+      const pH = pdf.internal.pageSize.height
+      pdf.setFontSize(16).text(`${selectedRec.testName} – Images`, 20, y)
+      y += 15
+
+      for (const e of imgs) {
+        pdf.setFontSize(12)
+          .text(`Date: ${format(new Date(e.dateTime), "PPpp")}`, 20, y)
+        y += 10
+        const img = new Image()
+        img.src = e.value
+        await new Promise((r) => (img.onload = r))
+        const w = 170
+        const h = (img.height * w) / img.width
+        if (y + h > pH - 20) { pdf.addPage(); y = 20 }
+        pdf.addImage(e.value, "JPEG", 20, y, w, h)
+        y += h + 20
+      }
+      pdf.save(`${selectedRec.testName}_Images.pdf`)
+    } finally {
+      setPdfBusy(false)
+    }
+  }
+
+  /* ImgBtn */
+  const ImgBtn = ({ url }: { url: string }) => (
+    <Button variant="ghost" size="sm"
+      className="flex items-center text-xs" onClick={() => setFullImg(url)}>
+      <FileImage size={14} className="mr-1" />View Image
+    </Button>
+  )
+
+  /* ================================================================ */
   return (
-    <div>
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle className="text-xl font-semibold text-slate-800">Add New Investigation</CardTitle>
+    <div className="container mx-auto px-4 py-6">
+      {/* New-investigation form */}
+      <Card className="mb-8 shadow">
+        <CardHeader className="bg-slate-50">
+          <CardTitle>Add New Investigation</CardTitle>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmitInvestigation)} className="space-y-4">
+        <CardContent className="space-y-4 py-6">
+          <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1">
+                <label className="text-sm font-medium">Test</label>
+                <select {...register("testName")} className="w-full border rounded p-2">
+                  <option value="">Select Test</option>
+                  {testOptions.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="text-sm font-medium">Date &amp; Time</label>
+                <Input type="datetime-local" {...register("dateTime")} />
+              </div>
+            </div>
+
+            {/* entry type radio */}
             <div>
-              <label className="block text-sm font-medium text-slate-700">Test Name</label>
-              <select {...register("testName")} className="w-full border rounded p-2">
-                <option value="">Select Test</option>
-                {testOptions.map((test, idx) => (
-                  <option key={idx} value={test}>
-                    {test}
-                  </option>
+              <label className="text-sm font-medium">Entry Type</label>
+              <div className="flex space-x-6 mt-1">
+                {["text", "image"].map((t) => (
+                  <label key={t} className="flex items-center">
+                    <input type="radio" value={t} {...register("entryType")}
+                      onChange={() => setValue("entryType", t as any)}
+                      checked={entryType === t} className="mr-2" />
+                    {t[0].toUpperCase() + t.slice(1)}
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Date &amp; Time</label>
-              <Input type="datetime-local" {...register("dateTime")} className="w-full" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Message</label>
-              <Textarea
-                placeholder="Enter any additional details"
-                {...register("message")}
-                className="w-full"
-              />
-            </div>
-            <Button type="submit" className="w-full">Add Investigation</Button>
+
+            {/* value / image */}
+            {entryType === "text" ? (
+              <>
+                <label className="text-sm font-medium">Value</label>
+                <Input type="text" {...register("value")} />
+              </>
+            ) : (
+              <>
+                <label className="text-sm font-medium">Upload Image</label>
+                <Input
+                  type="file"
+                  accept="image/*"
+                  {...register("image")}
+                  ref={(el) => {
+                    register("image").ref(el)
+                    mainFileRef.current = el
+                  }}
+                  onChange={preview}
+                  disabled={isUploading}
+                />
+                {isUploading && <p className="text-xs mt-1">{uploadPct}%</p>}
+                {imgPrev && <img src={imgPrev} className="h-24 mt-2 rounded" />}
+              </>
+            )}
+
+            <Button type="submit" disabled={isUploading} className="w-full">
+              {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Add Investigation
+            </Button>
           </form>
         </CardContent>
       </Card>
 
-      {/* Display Investigation Records */}
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800 mb-4">Investigation Records</h2>
-        {isLoading ? (
-          <p className="text-center">Loading...</p>
-        ) : investigations.length === 0 ? (
-          <p className="text-center">No investigation records found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border">
-              <thead className="bg-slate-50">
-                <tr>
-                  <th className="px-4 py-2 border">Test Name</th>
-                  <th className="px-4 py-2 border">Date &amp; Time</th>
-                  <th className="px-4 py-2 border">Message</th>
-                  <th className="px-4 py-2 border">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {investigations.map(record => (
-                  <React.Fragment key={record.id}>
-                    {record.entries.map((entry, idx) => (
-                      <tr key={idx} className="hover:bg-slate-100">
-                        {idx === 0 && (
-                          <td className="px-4 py-2 border" rowSpan={record.entries.length}>
-                            {record.testName}
+      {/* Records table */}
+      <h2 className="text-xl font-bold mb-2">Investigation Records</h2>
+      {isLoading ? (
+        <p>Loading…</p>
+      ) : investigations.length === 0 ? (
+        <p>No records.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="border px-4 py-2">Test</th>
+                <th className="border px-4 py-2">Date &amp; Time</th>
+                <th className="border px-4 py-2">Value / Image</th>
+                <th className="border px-4 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {investigations.map((rec) => {
+                const hasImg = rec.entries.some((e) => e.type === "image")
+                return (
+                  <React.Fragment key={rec.id}>
+                    {rec.entries.map((e, i) => (
+                      <tr key={i} className="odd:bg-slate-50 hover:bg-slate-100">
+                        {i === 0 && (
+                          <td className="border px-4 py-2 align-top" rowSpan={rec.entries.length}>
+                            {rec.testName}
+                            {hasImg && (
+                              <Button variant="outline" size="sm"
+                                className="flex items-center text-xs mt-2"
+                                onClick={() => { setSelectedRec(rec); setGalleryOpen(true) }}>
+                                <Eye size={14} className="mr-1" />Gallery
+                              </Button>
+                            )}
                           </td>
                         )}
-                        <td className="px-4 py-2 border">
-                          {format(new Date(entry.dateTime), "PPpp")}
+                        <td className="border px-4 py-2">
+                          {format(new Date(e.dateTime), "PPpp")}
                         </td>
-                        <td className="px-4 py-2 border">{entry.message}</td>
-                        {idx === 0 && (
-                          <td className="px-4 py-2 border" rowSpan={record.entries.length}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setActiveAdditionalEntryRecord(record.id || null)}
-                            >
+                        <td className="border px-4 py-2">
+                          {e.type === "text" ? e.value : <ImgBtn url={e.value} />}
+                        </td>
+                        {i === 0 && (
+                          <td className="border px-4 py-2 align-top" rowSpan={rec.entries.length}>
+                            <Button variant="outline" size="sm"
+                              onClick={() => {
+                                setAddRowId(rec.id!)
+                                resetAdd({
+                                  dateTime: new Date().toISOString().slice(0, 16),
+                                  value: "",
+                                  entryType: "text",
+                                })
+                              }}>
                               Add More
                             </Button>
                           </td>
                         )}
                       </tr>
                     ))}
-                    {activeAdditionalEntryRecord === record.id && (
-                      <tr className="bg-slate-50">
-                        <td colSpan={4} className="px-4 py-2">
-                          <form onSubmit={handleSubmitAdditional(onSubmitAdditional)} className="flex flex-col md:flex-row gap-4 items-center">
-                            <div className="flex-1">
-                              <label className="block text-sm font-medium text-slate-700">Date &amp; Time</label>
-                              <Input type="datetime-local" {...registerAdditional("dateTime")} className="w-full" />
+
+                    {/* inline add-row */}
+                    {addRowId === rec.id && (
+                      <tr className="bg-slate-100">
+                        <td colSpan={4} className="p-4">
+                          <form className="space-y-4" onSubmit={hAdd(onSubmitAdd)}>
+                            <div className="flex flex-col md:flex-row gap-4">
+                              <Input type="datetime-local" {...rAdd("dateTime")} className="flex-1" />
+                              <div className="flex-1 flex space-x-6">
+                                {["text", "image"].map((t) => (
+                                  <label key={t} className="flex items-center">
+                                    <input type="radio" value={t} {...rAdd("entryType")}
+                                      onChange={() => setValAdd("entryType", t as any)}
+                                      checked={entryTypeAdd === t} className="mr-2" />
+                                    {t[0].toUpperCase() + t.slice(1)}
+                                  </label>
+                                ))}
+                              </div>
                             </div>
-                            <div className="flex-1">
-                              <label className="block text-sm font-medium text-slate-700">Message</label>
-                              <Input type="text" {...registerAdditional("message")} placeholder="Enter additional message" className="w-full" />
-                            </div>
-                            <div>
-                              <Button type="submit" className="w-full">Save</Button>
+
+                            {entryTypeAdd === "text" ? (
+                              <Input type="text" {...rAdd("value")} placeholder="Value" />
+                            ) : (
+                              <>
+                                <Input
+                                  type="file"
+                                  accept="image/*"
+                                  {...rAdd("image")}
+                                  ref={(el) => {
+                                    rAdd("image").ref(el)
+                                    addFileRef.current = el
+                                  }}
+                                  onChange={(e) => preview(e, true)}
+                                  disabled={isUploading}
+                                />
+                                {isUploading && <p className="text-xs">{uploadPct}%</p>}
+                                {imgPrev && <img src={imgPrev} className="h-20 rounded mt-2" />}
+                              </>
+                            )}
+
+                            <div className="flex space-x-2">
+                              <Button size="sm" disabled={isUploading}>
+                                {isUploading && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                                Save
+                              </Button>
+                              <Button variant="ghost" size="sm"
+                                onClick={() => { setAddRowId(null); setImgPrev(null) }}>
+                                Cancel
+                              </Button>
                             </div>
                           </form>
                         </td>
                       </tr>
                     )}
                   </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Gallery dialog */}
+      <Dialog open={galleryOpen} onOpenChange={setGalleryOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex justify-between items-center">
+              <span>{selectedRec?.testName} – Images</span>
+              <Button variant="outline" size="sm" className="flex items-center"
+                disabled={pdfBusy} onClick={generatePDF}>
+                <Download size={14} className="mr-1" />
+                {pdfBusy ? "Generating…" : "Download PDF"}
+              </Button>
+            </DialogTitle>
+          </DialogHeader>
+          {selectedRec && (
+            <Carousel className="w-full">
+              <CarouselContent>
+                {selectedRec.entries
+                  .filter((e) => e.type === "image")
+                  .sort((a, b) => +new Date(b.dateTime) - +new Date(a.dateTime))
+                  .map((e, i) => (
+                    <CarouselItem key={i}>
+                      <div className="p-1">
+                        <img src={e.value}
+                          className="max-h-[70vh] w-full object-contain cursor-pointer"
+                          onClick={() => setFullImg(e.value)} />
+                        <p className="text-center text-sm text-gray-600 mt-2">
+                          {format(new Date(e.dateTime), "PPpp")}
+                        </p>
+                      </div>
+                    </CarouselItem>
+                  ))}
+              </CarouselContent>
+              <CarouselPrevious />
+              <CarouselNext />
+            </Carousel>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Full-screen image */}
+      <Dialog open={!!fullImg} onOpenChange={(o) => !o && setFullImg(null)}>
+        <DialogContent className="max-w-7xl h-[90vh] flex items-center justify-center p-0">
+          <div className="relative w-full h-full flex items-center justify-center bg-black">
+            <Button variant="ghost" size="icon"
+              className="absolute top-4 right-4 text-white bg-black/50"
+              onClick={() => setFullImg(null)}>
+              <X />
+            </Button>
+            {fullImg && (
+              <img src={fullImg} className="max-w-full max-h-full object-contain" />
+            )}
           </div>
-        )}
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
-  );
+  )
 }
+ 

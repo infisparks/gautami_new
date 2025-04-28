@@ -1,7 +1,15 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
+import { ref, get } from "firebase/database"
+import { db } from "../../../../lib/firebase"
+
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { ChevronLeft, Phone, Building, Bed, User } from "lucide-react"
+
 import PatientCharges from "./patientchareges"
 import GlucoseMonitoring from "./glucosemonitoring"
 import PatientAdmissionAssessment from "./patientadmissionassessment"
@@ -23,117 +31,182 @@ type TabValue =
   | "vital"
   | "doctor"
 
-export default function ManagePatientPageTabs() {
-  const [activeTab, setActiveTab] = useState<TabValue>("charge")
+interface PatientInfo {
+  name: string
+  phone: string
+  ward: string
+  bed: string
+}
 
+export default function ManagePatientPageTabs() {
+  const router = useRouter()
+
+  /* ---------- URL parameters ---------- */
+  const { patientId, ipdId } = useParams<{
+    patientId: string
+    ipdId: string
+  }>()
+
+  /* ---------- state ---------- */
+  const [activeTab, setActiveTab] = useState<TabValue>("charge")
+  const [patientInfo, setPatientInfo] = useState<PatientInfo | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  /* ---------- fetch patient header data ---------- */
+  useEffect(() => {
+    if (!patientId || !ipdId) return
+
+    setIsLoading(true)
+    const ipdRef = ref(db, `patients/${patientId}/ipd/${ipdId}`)
+    get(ipdRef)
+      .then((snap) => {
+        if (snap.exists()) {
+          const d = snap.val()
+          setPatientInfo({
+            name: d.name ?? "Patient",
+            phone: d.phone ?? "-",
+            ward: (d.roomType ?? "-").replace(/_/g, " "),
+            bed: d.bed ?? "-",
+          })
+        }
+        setIsLoading(false)
+      })
+      .catch((err) => {
+        console.error("Error fetching patient data:", err)
+        setIsLoading(false)
+      })
+  }, [patientId, ipdId])
+
+  /* ---------- tab metadata ---------- */
   const tabs = [
-    { value: "charge", label: "Patient Charge Sheet" },
-    { value: "glucose", label: "Glucose Monitoring" },
-    { value: "admission", label: "Patient Admission" },
-    { value: "investigation", label: "Investigation Sheet" },
-    { value: "clinic", label: "Clinic Note" },
-    { value: "progress", label: "Progress Notes" },
-    { value: "nurse", label: "Nurse Note" },
-    { value: "vital", label: "Vital Observations" },
-    { value: "doctor", label: "Doctor Visits" },
+    { value: "charge", label: "Charges" },
+    { value: "glucose", label: "Glucose" },
+    { value: "admission", label: "Admission" },
+    { value: "investigation", label: "Investigation" },
+    { value: "clinic", label: "Clinic" },
+    { value: "progress", label: "Progress" },
+    { value: "nurse", label: "Nurse" },
+    { value: "vital", label: "Vitals" },
+    { value: "doctor", label: "Doctor" },
   ]
 
+  const handleGoBack = () => {
+    router.back()
+  }
+
+  /* ---------- UI ---------- */
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      <div className="container mx-auto px-4 py-6 md:py-8">
-        <div className="mb-6 md:mb-8">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold text-slate-800 mb-2">
-            Patient Records
-          </h1>
-          <p className="text-slate-600 text-sm md:text-base">Manage and view comprehensive patient information</p>
-        </div>
+      <div className="container mx-auto px-4 py-4 md:py-6">
+        {/* Back button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleGoBack}
+          className="mb-4 text-slate-600 hover:text-slate-900 -ml-2"
+        >
+          <ChevronLeft className="h-4 w-4 mr-1" />
+          Back
+        </Button>
 
-        <div className="bg-white rounded-xl shadow-md p-4 md:p-6">
-          <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as TabValue)} className="w-full">
-            <div className="relative mb-4">
-              <div className="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none md:hidden">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-slate-400"
-                >
-                  <polyline points="9 18 3 12 9 6"></polyline>
-                </svg>
-              </div>
-              <div className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none md:hidden">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="text-slate-400"
-                >
-                  <polyline points="15 18 21 12 15 6"></polyline>
-                </svg>
-              </div>
+        {/* Patient header */}
+        {isLoading ? (
+          <div className="h-24 animate-pulse bg-slate-200 rounded-lg mb-6"></div>
+        ) : (
+          <Card className="mb-6 overflow-hidden border-none shadow-md">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 md:p-6">
+              <div className="flex items-center">
+                <div className="bg-white/20 p-2 rounded-full mr-4">
+                  <User className="h-8 w-8 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">
+                    {patientInfo?.name || "Patient"}
+                  </h1>
 
-              <div className="overflow-x-auto scrollbar-hide pb-2">
-                <TabsList className="flex space-x-1 sm:space-x-2 whitespace-nowrap p-1 bg-slate-100/80 rounded-lg">
-                  {tabs.map((tab) => (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                    {patientInfo?.phone && (
+                      <div className="flex items-center text-white/90 text-sm">
+                        <Phone className="h-3 w-3 mr-1" />
+                        {patientInfo.phone}
+                      </div>
+                    )}
+                    {patientInfo?.ward && (
+                      <div className="flex items-center text-white/90 text-sm">
+                        <Building className="h-3 w-3 mr-1" />
+                        {patientInfo.ward}
+                      </div>
+                    )}
+                    {patientInfo?.bed && (
+                      <div className="flex items-center text-white/90 text-sm">
+                        <Bed className="h-3 w-3 mr-1" />
+                        Bed: {patientInfo.bed}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* tabs */}
+        <Card className="shadow-md border-none overflow-hidden">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabValue)} className="w-full">
+            {/* tab bar */}
+            <div className="relative px-4 pt-4 pb-2 bg-white border-b">
+              <div className="overflow-x-auto scrollbar-hide pb-1">
+                <TabsList className="flex space-x-1 whitespace-nowrap bg-slate-100/80 rounded-lg p-1">
+                  {tabs.map((t) => (
                     <TabsTrigger
-                      key={tab.value}
-                      value={tab.value}
-                      className={`px-3 py-2 text-xs sm:text-sm md:text-base flex-shrink-0 rounded-md transition-all duration-200 ${
-                        activeTab === tab.value
+                      key={t.value}
+                      value={t.value}
+                      className={`px-3 py-1.5 text-xs sm:text-sm flex-shrink-0 rounded-md transition-all duration-200 ${
+                        activeTab === t.value
                           ? "bg-white shadow-sm text-blue-700 font-medium"
                           : "text-slate-700 hover:bg-slate-200/50"
                       }`}
                     >
-                      {tab.label}
+                      {t.label}
                     </TabsTrigger>
                   ))}
                 </TabsList>
               </div>
             </div>
 
-            <div className="mt-4 bg-slate-50 rounded-lg p-3 md:p-5">
-              <TabsContent value="charge" className="focus:outline-none">
+            {/* tab panels */}
+            <div className="p-4 md:p-6 bg-white">
+              <TabsContent value="charge" className="mt-0">
                 <PatientCharges />
               </TabsContent>
-              <TabsContent value="glucose" className="focus:outline-none">
+              <TabsContent value="glucose" className="mt-0">
                 <GlucoseMonitoring />
               </TabsContent>
-              <TabsContent value="admission" className="focus:outline-none">
+              <TabsContent value="admission" className="mt-0">
                 <PatientAdmissionAssessment />
               </TabsContent>
-              <TabsContent value="investigation" className="focus:outline-none">
+              <TabsContent value="investigation" className="mt-0">
                 <InvestigationSheet />
               </TabsContent>
-              <TabsContent value="clinic" className="focus:outline-none">
+              <TabsContent value="clinic" className="mt-0">
                 <ClinicNote />
               </TabsContent>
-              <TabsContent value="progress" className="focus:outline-none">
-                <ProgressNotes />
-              </TabsContent>
-              <TabsContent value="nurse" className="focus:outline-none">
-                <NurseNoteComponent />
-              </TabsContent>
-              <TabsContent value="vital" className="focus:outline-none">
+              <TabsContent value="vital" className="mt-0">
                 <VitalObservations />
               </TabsContent>
-              <TabsContent value="doctor" className="focus:outline-none">
+              <TabsContent value="progress" className="mt-0">
+                <ProgressNotes />
+              </TabsContent>
+              <TabsContent value="nurse" className="mt-0">
+                <NurseNoteComponent />
+              </TabsContent>
+             
+              <TabsContent value="doctor" className="mt-0">
                 <DoctorVisits />
               </TabsContent>
             </div>
           </Tabs>
-        </div>
+        </Card>
       </div>
     </div>
   )
