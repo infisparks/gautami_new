@@ -645,8 +645,7 @@ const IPDBookingPage: React.FC = () => {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">
-            <div className="space-y-8">
+          <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">            <div className="space-y-8">
               {/* Section: Patient Information */}
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                 <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
@@ -949,33 +948,34 @@ const IPDBookingPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Referral Doctor - Always visible */}
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Referral Doctor{" "}
-                      {selectedAdmissionSource?.value === "referral" && <span className="text-red-500">*</span>}
-                    </label>
+                  {/* Referral Doctor - Conditional Field */}
+                  {selectedAdmissionSource?.value === "referral" && (
                     <div className="relative">
-                      <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
-                      <input
-                        type="text"
-                        {...register("referDoctor", {
-                          required:
-                            selectedAdmissionSource?.value === "referral" ? "Referral doctor name is required" : false,
-                        })}
-                        placeholder="Name of referring doctor"
-                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                          errors.referDoctor ? "border-red-500" : "border-gray-300"
-                        } transition duration-200`}
-                      />
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor</label>
+                      <div className="relative">
+                        <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                        <input
+                          type="text"
+                          {...register("referDoctor", {
+                            required:
+                              selectedAdmissionSource?.value === "referral"
+                                ? "Referral doctor name is required"
+                                : false,
+                          })}
+                          placeholder="Name of referring doctor"
+                          className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            errors.referDoctor ? "border-red-500" : "border-gray-300"
+                          } transition duration-200`}
+                        />
+                      </div>
+                      {errors.referDoctor && (
+                        <p className="text-red-500 text-sm mt-1 flex items-center">
+                          <AlertCircle className="h-4 w-4 mr-1" />
+                          {errors.referDoctor.message}
+                        </p>
+                      )}
                     </div>
-                    {errors.referDoctor && (
-                      <p className="text-red-500 text-sm mt-1 flex items-center">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {errors.referDoctor.message}
-                      </p>
-                    )}
-                  </div>
+                  )}
 
                   {/* Admission Type */}
                   <div>
