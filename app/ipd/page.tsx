@@ -1,81 +1,102 @@
-"use client";
-import React, { useState, useEffect, useMemo } from "react";
-import { useForm, SubmitHandler, Controller } from "react-hook-form";
-import { db } from "@/lib/firebase"; // Gautami DB
-import { db as dbMedford } from "@/lib/firebaseMedford"; // Medford DB
-import { ref, push, update, onValue, set } from "firebase/database";
-import Head from "next/head";
+"use client"
+import type React from "react"
+import { useState, useEffect, useMemo } from "react"
+import { useForm, type SubmitHandler, Controller } from "react-hook-form"
+import { db } from "@/lib/firebase" // Gautami DB
+import { db as dbMedford } from "@/lib/firebaseMedford" // Medford DB
+import { ref, push, update, onValue, set } from "firebase/database"
+import Head from "next/head"
 
 // UPDATED IMPORTS:
-import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, ChevronRight, AlertCircle, Send, FileText, ArrowLeft, UserPlus, Clipboard, Building, UserCheck } from 'lucide-react';
+import {
+  User,
+  Phone,
+  UserRound,
+  Calendar,
+  Clock,
+  Home,
+  Users,
+  Stethoscope,
+  CheckCircle,
+  XCircle,
+  Eye,
+  Bed,
+  ChevronRight,
+  AlertCircle,
+  FileText,
+  UserPlus,
+  Clipboard,
+  Building,
+  UserCheck,
+} from "lucide-react"
 
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import Select from "react-select";
-import IPDSignaturePDF from "./ipdsignaturepdf"; // If you're using a PDF component
+import { ToastContainer, toast } from "react-toastify"
+import "react-toastify/dist/ReactToastify.css"
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
+import Select from "react-select"
+import IPDSignaturePDF from "./ipdsignaturepdf" // If you're using a PDF component
 
 /* ---------------------------------------------------------------------
   1) Types & Interfaces
 ------------------------------------------------------------------------ */
 export interface IPDFormInput {
   // Basic Patient
-  name: string;
-  phone: string;
-  gender: { label: string; value: string } | null;
-  age: number;
-  address?: string;
+  name: string
+  phone: string
+  gender: { label: string; value: string } | null
+  age: number
+  address?: string
 
   // Relative
-  relativeName: string;
-  relativePhone: string;
-  relativeAddress?: string;
+  relativeName: string
+  relativePhone: string
+  relativeAddress?: string
 
   // IPD
-  date: Date;
-  time: string;
-  roomType: { label: string; value: string } | null;
-  bed: { label: string; value: string } | null;
-  doctor: { label: string; value: string } | null;
-  referDoctor?: string;
-  admissionType: { label: string; value: string } | null;
-  
+  date: Date
+  time: string
+  roomType: { label: string; value: string } | null
+  bed: { label: string; value: string } | null
+  doctor: { label: string; value: string } | null
+  referDoctor?: string
+  admissionType: { label: string; value: string } | null
+
   // New fields
-  admissionSource: { label: string; value: string } | null;
+  admissionSource: { label: string; value: string } | null
 }
 
 interface PatientRecord {
-  id: string;
-  name: string;
-  phone: string;
-  gender?: string;
-  age?: number;
-  address?: string;
-  createdAt?: string;
+  id: string
+  name: string
+  phone: string
+  gender?: string
+  age?: number
+  address?: string
+  createdAt?: string
 }
 
 interface MedfordPatient {
-  patientId: string;
-  name: string;
-  contact: string;
-  dob: string;
-  gender: string;
-  hospitalName: string;
+  patientId: string
+  name: string
+  contact: string
+  dob: string
+  gender: string
+  hospitalName: string
 }
 
 interface CombinedPatient {
-  id: string;
-  name: string;
-  phone?: string;
-  source: "gautami" | "other";
-  data: PatientRecord | MedfordPatient;
+  id: string
+  name: string
+  phone?: string
+  source: "gautami" | "other"
+  data: PatientRecord | MedfordPatient
 }
 
 interface PatientSuggestion {
-  label: string;
-  value: string;
-  source: "gautami" | "other";
+  label: string
+  value: string
+  source: "gautami" | "other"
 }
 
 /* ---------------------------------------------------------------------
@@ -85,20 +106,20 @@ const GenderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
-];
+]
 
 const AdmissionTypeOptions = [
   { value: "general", label: "General" },
   { value: "surgery", label: "Surgery" },
   { value: "accident_emergency", label: "Accident/Emergency" },
   { value: "day_observation", label: "Day Observation" },
-];
+]
 
 const AdmissionSourceOptions = [
   { value: "opd", label: "OPD" },
   { value: "casualty", label: "Casualty" },
   { value: "referral", label: "Referral" },
-];
+]
 
 const RoomTypeOptions = [
   { value: "female_ward", label: "Female Ward" },
@@ -106,26 +127,26 @@ const RoomTypeOptions = [
   { value: "male_ward", label: "Male Ward" },
   { value: "deluxe", label: "Deluxe" },
   { value: "nicu", label: "NICU" },
-];
+]
 
 function formatAMPM(date: Date): string {
-  let hours = date.getHours();
-  let minutes: string | number = date.getMinutes();
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12;
-  hours = hours || 12; // hour '0' => '12'
-  minutes = minutes < 10 ? "0" + minutes : minutes;
-  return `${hours}:${minutes} ${ampm}`;
+  let hours = date.getHours()
+  let minutes: string | number = date.getMinutes()
+  const ampm = hours >= 12 ? "PM" : "AM"
+  hours = hours % 12
+  hours = hours || 12 // hour '0' => '12'
+  minutes = minutes < 10 ? "0" + minutes : minutes
+  return `${hours}:${minutes} ${ampm}`
 }
 
 /** Generate a random 10-char alphanumeric ID */
 function generatePatientId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let result = ""
   for (let i = 0; i < 10; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
-  return result;
+  return result
 }
 
 /* ---------------------------------------------------------------------
@@ -156,75 +177,75 @@ const IPDBookingPage: React.FC = () => {
       bed: null,
       doctor: null,
       referDoctor: "",
-      admissionType: AdmissionTypeOptions.find(opt => opt.value === "general") || null,
-      admissionSource: AdmissionSourceOptions.find(opt => opt.value === "opd") || null,
+      admissionType: AdmissionTypeOptions.find((opt) => opt.value === "general") || null,
+      admissionSource: AdmissionSourceOptions.find((opt) => opt.value === "opd") || null,
     },
-  });
+  })
 
   // Loading / preview states
-  const [loading, setLoading] = useState(false);
-  const [previewData, setPreviewData] = useState<IPDFormInput | null>(null);
+  const [loading, setLoading] = useState(false)
+  const [previewData, setPreviewData] = useState<IPDFormInput | null>(null)
 
   // Auto-complete states for name
-  const [patientNameInput, setPatientNameInput] = useState("");
-  const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([]);
+  const [patientNameInput, setPatientNameInput] = useState("")
+  const [patientSuggestions, setPatientSuggestions] = useState<PatientSuggestion[]>([])
   // Auto-complete states for phone
-  const [patientPhoneInput, setPatientPhoneInput] = useState("");
-  const [phoneSuggestions, setPhoneSuggestions] = useState<PatientSuggestion[]>([]);
-  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null);
+  const [patientPhoneInput, setPatientPhoneInput] = useState("")
+  const [phoneSuggestions, setPhoneSuggestions] = useState<PatientSuggestion[]>([])
+  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null)
 
   // Doctor & Bed data
-  const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([]);
-  const [beds, setBeds] = useState<{ label: string; value: string }[]>([]);
+  const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([])
+  const [beds, setBeds] = useState<{ label: string; value: string }[]>([])
 
   // Patient lists from both DBs
-  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
-  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([])
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([])
 
   // Watch the currently selected room type and admission source (used below)
-  const selectedRoomType = watch("roomType");
-  const selectedAdmissionSource = watch("admissionSource");
+  const selectedRoomType = watch("roomType")
+  const selectedAdmissionSource = watch("admissionSource")
 
   // NEW: All bed data for the "View Bed Availability" popup
-  const [allBedData, setAllBedData] = useState<any>({});
-  const [showBedPopup, setShowBedPopup] = useState(false);
+  const [allBedData, setAllBedData] = useState<any>({})
+  const [showBedPopup, setShowBedPopup] = useState(false)
 
   /* -----------------------------------------------------------------
      3A) Fetching data: Doctors, Patients, All Beds
   ------------------------------------------------------------------ */
   // Doctors
   useEffect(() => {
-    const doctorsRef = ref(db, "doctors");
+    const doctorsRef = ref(db, "doctors")
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setDoctors([]);
-        return;
+        setDoctors([])
+        return
       }
-      const data = snapshot.val();
+      const data = snapshot.val()
       const docsList = Object.keys(data)
         .filter((key) => {
-          const department = String(data[key].department || "").toLowerCase();
-          return department === "ipd" || department === "both";
+          const department = String(data[key].department || "").toLowerCase()
+          return department === "ipd" || department === "both"
         })
         .map((key) => ({
           label: data[key].name,
           value: key,
-        }));
-      setDoctors(docsList);
-    });
-    return () => unsubscribe();
-  }, []);
+        }))
+      setDoctors(docsList)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Gautami Patients
   useEffect(() => {
-    const patientsRef = ref(db, "patients");
+    const patientsRef = ref(db, "patients")
     const unsubscribe = onValue(patientsRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setGautamiPatients([]);
-        return;
+        setGautamiPatients([])
+        return
       }
-      const data = snapshot.val();
-      const loaded: CombinedPatient[] = [];
+      const data = snapshot.val()
+      const loaded: CombinedPatient[] = []
       for (const key in data) {
         loaded.push({
           id: key,
@@ -232,201 +253,193 @@ const IPDBookingPage: React.FC = () => {
           phone: data[key].phone,
           source: "gautami",
           data: { ...data[key], id: key },
-        });
+        })
       }
-      setGautamiPatients(loaded);
-    });
-    return () => unsubscribe();
-  }, []);
+      setGautamiPatients(loaded)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Medford Patients
   useEffect(() => {
-    const medfordRef = ref(dbMedford, "patients");
+    const medfordRef = ref(dbMedford, "patients")
     const unsubscribe = onValue(medfordRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setMedfordPatients([]);
-        return;
+        setMedfordPatients([])
+        return
       }
-      const data = snapshot.val();
-      const loaded: CombinedPatient[] = [];
+      const data = snapshot.val()
+      const loaded: CombinedPatient[] = []
       for (const key in data) {
-        const rec: MedfordPatient = data[key];
+        const rec: MedfordPatient = data[key]
         loaded.push({
           id: rec.patientId,
           name: rec.name,
           phone: rec.contact,
           source: "other",
           data: rec,
-        });
+        })
       }
-      setMedfordPatients(loaded);
-    });
-    return () => unsubscribe();
-  }, []);
+      setMedfordPatients(loaded)
+    })
+    return () => unsubscribe()
+  }, [])
 
   // Combine the two arrays (memoized to avoid unnecessary re-renders)
   const combinedPatients = useMemo(() => {
-    return [...gautamiPatients, ...medfordPatients];
-  }, [gautamiPatients, medfordPatients]);
+    return [...gautamiPatients, ...medfordPatients]
+  }, [gautamiPatients, medfordPatients])
 
   // NEW: Fetch all bed data once for the "View Bed Availability" popup
   useEffect(() => {
-    const allBedsRef = ref(db, "beds");
+    const allBedsRef = ref(db, "beds")
     const unsub = onValue(allBedsRef, (snapshot) => {
       if (snapshot.exists()) {
-        setAllBedData(snapshot.val());
+        setAllBedData(snapshot.val())
       } else {
-        setAllBedData({});
+        setAllBedData({})
       }
-    });
-    return () => unsub();
-  }, []);
+    })
+    return () => unsub()
+  }, [])
 
   /* -----------------------------------------------------------------
      3B) Patient auto-suggest logic for Name
   ------------------------------------------------------------------ */
   function filterPatientSuggestions(name: string) {
     if (name.length < 2) {
-      if (patientSuggestions.length > 0) setPatientSuggestions([]);
-      return;
+      if (patientSuggestions.length > 0) setPatientSuggestions([])
+      return
     }
-    const lower = name.toLowerCase();
-    const matched = combinedPatients.filter((p) =>
-      p.name.toLowerCase().includes(lower)
-    );
+    const lower = name.toLowerCase()
+    const matched = combinedPatients.filter((p) => p.name.toLowerCase().includes(lower))
     const suggestions: PatientSuggestion[] = matched.map((p) => ({
       label: `${p.name} - ${p.phone || ""}`,
       value: p.id,
       source: p.source,
-    }));
+    }))
     if (
       suggestions.length !== patientSuggestions.length ||
       suggestions.some((s, i) => s.value !== patientSuggestions[i]?.value)
     ) {
-      setPatientSuggestions(suggestions);
+      setPatientSuggestions(suggestions)
     }
   }
 
   useEffect(() => {
     if (selectedPatient) {
       if (patientNameInput !== selectedPatient.name) {
-        setSelectedPatient(null);
+        setSelectedPatient(null)
       }
-      setPatientSuggestions([]);
-      return;
+      setPatientSuggestions([])
+      return
     }
-    filterPatientSuggestions(patientNameInput);
-  }, [patientNameInput, combinedPatients, selectedPatient]);
+    filterPatientSuggestions(patientNameInput)
+  }, [patientNameInput, combinedPatients, selectedPatient])
 
   const handlePatientNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setPatientNameInput(val);
-    setValue("name", val);
-  };
+    const val = e.target.value
+    setPatientNameInput(val)
+    setValue("name", val)
+  }
 
   /* -----------------------------------------------------------------
      3B2) Patient auto-suggest logic for Phone
   ------------------------------------------------------------------ */
   function filterPatientSuggestionsByPhone(phone: string) {
     if (phone.length < 2) {
-      if (phoneSuggestions.length > 0) setPhoneSuggestions([]);
-      return;
+      if (phoneSuggestions.length > 0) setPhoneSuggestions([])
+      return
     }
-    const matched = combinedPatients.filter((p) =>
-      p.phone && p.phone.includes(phone)
-    );
+    const matched = combinedPatients.filter((p) => p.phone && p.phone.includes(phone))
     const suggestions: PatientSuggestion[] = matched.map((p) => ({
       label: `${p.name} - ${p.phone || ""}`,
       value: p.id,
       source: p.source,
-    }));
+    }))
     if (
       suggestions.length !== phoneSuggestions.length ||
       suggestions.some((s, i) => s.value !== phoneSuggestions[i]?.value)
     ) {
-      setPhoneSuggestions(suggestions);
+      setPhoneSuggestions(suggestions)
     }
   }
 
   useEffect(() => {
     if (selectedPatient) {
       if (patientPhoneInput !== selectedPatient.phone) {
-        setSelectedPatient(null);
+        setSelectedPatient(null)
       }
-      setPhoneSuggestions([]);
-      return;
+      setPhoneSuggestions([])
+      return
     }
-    filterPatientSuggestionsByPhone(patientPhoneInput);
-  }, [patientPhoneInput, combinedPatients, selectedPatient]);
+    filterPatientSuggestionsByPhone(patientPhoneInput)
+  }, [patientPhoneInput, combinedPatients, selectedPatient])
 
   const handlePatientPhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setPatientPhoneInput(val);
-    setValue("phone", val);
-  };
+    const val = e.target.value
+    setPatientPhoneInput(val)
+    setValue("phone", val)
+  }
 
   const handleSelectPatient = (patientId: string) => {
-    const found = combinedPatients.find((p) => p.id === patientId);
-    if (!found) return;
-    setSelectedPatient(found);
-    setPatientNameInput(found.name);
-    setPatientPhoneInput(found.phone || "");
-    setValue("name", found.name);
-    setValue("phone", found.phone || "");
+    const found = combinedPatients.find((p) => p.id === patientId)
+    if (!found) return
+    setSelectedPatient(found)
+    setPatientNameInput(found.name)
+    setPatientPhoneInput(found.phone || "")
+    setValue("name", found.name)
+    setValue("phone", found.phone || "")
     if (found.source === "gautami") {
-      const rec = found.data as PatientRecord;
-      setValue("age", rec.age || 0);
-      setValue("address", rec.address || "");
+      const rec = found.data as PatientRecord
+      setValue("age", rec.age || 0)
+      setValue("address", rec.address || "")
       if (rec.gender) {
-        const match = GenderOptions.find(
-          (g) => g.value.toLowerCase() === rec.gender?.toLowerCase()
-        );
-        setValue("gender", match || null);
+        const match = GenderOptions.find((g) => g.value.toLowerCase() === rec.gender?.toLowerCase())
+        setValue("gender", match || null)
       }
     } else {
-      const med = found.data as MedfordPatient;
+      const med = found.data as MedfordPatient
       if (med.gender) {
-        const match = GenderOptions.find(
-          (g) => g.value.toLowerCase() === med.gender.toLowerCase()
-        );
-        setValue("gender", match || null);
+        const match = GenderOptions.find((g) => g.value.toLowerCase() === med.gender.toLowerCase())
+        setValue("gender", match || null)
       }
     }
-    setPatientSuggestions([]);
-    setPhoneSuggestions([]);
-    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`);
-  };
+    setPatientSuggestions([])
+    setPhoneSuggestions([])
+    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`)
+  }
 
   /* -----------------------------------------------------------------
      3C) Beds fetching logic if user selects a Room Type normally
   ------------------------------------------------------------------ */
   useEffect(() => {
     if (!selectedRoomType?.value) {
-      setBeds([]);
-      setValue("bed", null);
-      return;
+      setBeds([])
+      setValue("bed", null)
+      return
     }
-    const bedsRef = ref(db, `beds/${selectedRoomType.value}`);
+    const bedsRef = ref(db, `beds/${selectedRoomType.value}`)
     const unsubscribe = onValue(bedsRef, (snapshot) => {
       if (!snapshot.exists()) {
-        setBeds([]);
-        setValue("bed", null);
-        return;
+        setBeds([])
+        setValue("bed", null)
+        return
       }
-      const data = snapshot.val();
+      const data = snapshot.val()
       const bedList = Object.keys(data)
         .filter((k) => data[k].status === "Available")
         .map((k) => ({
           label: `Bed ${data[k].bedNumber}`,
           value: k,
-        }));
-      setBeds(bedList);
+        }))
+      setBeds(bedList)
       if (bedList.length === 0) {
-        setValue("bed", null);
+        setValue("bed", null)
       }
-    });
-    return () => unsubscribe();
-  }, [selectedRoomType, setValue]);
+    })
+    return () => unsubscribe()
+  }, [selectedRoomType, setValue])
 
   /* -----------------------------------------------------------------
      3D) Helper: WhatsApp message sender function
@@ -436,31 +449,31 @@ const IPDBookingPage: React.FC = () => {
       token: "99583991572", // example token
       number: `91${number}`,
       message,
-    };
+    }
     try {
       const response = await fetch("https://wa.medblisss.com/send-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      });
+      })
       if (!response.ok) {
-        console.error("Failed to send message", await response.text());
+        console.error("Failed to send message", await response.text())
       }
     } catch (err) {
-      console.error("Error sending message", err);
+      console.error("Error sending message", err)
     }
-  };
+  }
 
   /* -----------------------------------------------------------------
      3E) Submission Logic
   ------------------------------------------------------------------ */
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
-    setLoading(true);
+    setLoading(true)
     try {
       // 1) Occupy the selected bed
       if (data.roomType?.value && data.bed?.value) {
-        const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`);
-        await update(bedRef, { status: "Occupied" });
+        const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
+        await update(bedRef, { status: "Occupied" })
       }
 
       // 2) Prepare IPD data
@@ -482,23 +495,23 @@ const IPDBookingPage: React.FC = () => {
         admissionType: data.admissionType?.value || "",
         admissionSource: data.admissionSource?.value || "",
         createdAt: new Date().toISOString(),
-      };
+      }
 
       // 3) Create or update patient record
-      let patientId: string;
+      let patientId: string
       if (selectedPatient) {
         // If the user chose an existing patient
-        patientId = selectedPatient.id;
+        patientId = selectedPatient.id
         await update(ref(db, `patients/${patientId}`), {
           name: data.name,
           phone: data.phone,
           gender: data.gender?.value || "",
           age: data.age,
           address: data.address || "",
-        });
+        })
       } else {
         // If the user is creating a brand-new patient
-        const newId = generatePatientId();
+        const newId = generatePatientId()
         await set(ref(db, `patients/${newId}`), {
           name: data.name,
           phone: data.phone,
@@ -507,7 +520,7 @@ const IPDBookingPage: React.FC = () => {
           address: data.address || "",
           createdAt: new Date().toISOString(),
           uhid: newId,
-        });
+        })
         // Also add to Medford DB
         await set(ref(dbMedford, `patients/${newId}`), {
           name: data.name,
@@ -516,25 +529,25 @@ const IPDBookingPage: React.FC = () => {
           dob: "",
           patientId: newId,
           hospitalName: "other",
-        });
-        patientId = newId;
+        })
+        patientId = newId
       }
 
       // 4) Push IPD data under that patient in Gautami
-      const newIpdRef = push(ref(db, `patients/${patientId}/ipd`));
-      await update(newIpdRef, ipdData);
+      const newIpdRef = push(ref(db, `patients/${patientId}/ipd`))
+      await update(newIpdRef, ipdData)
 
       // 5) Construct and send WhatsApp messages
-      const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`;
-      const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`;
+      const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`
+      const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
 
-      await sendWhatsAppMessage(data.phone, patientMessage);
-      await sendWhatsAppMessage(data.relativePhone, relativeMessage);
+      await sendWhatsAppMessage(data.phone, patientMessage)
+      await sendWhatsAppMessage(data.relativePhone, relativeMessage)
 
       toast.success("IPD Admission created successfully!", {
         position: "top-right",
         autoClose: 5000,
-      });
+      })
 
       // 6) Reset the form
       reset({
@@ -553,60 +566,60 @@ const IPDBookingPage: React.FC = () => {
         doctor: null,
         referDoctor: "",
         admissionType: null,
-        admissionSource: AdmissionSourceOptions.find(opt => opt.value === "opd") || null,
-      });
-      setPatientNameInput("");
-      setPatientPhoneInput("");
-      setSelectedPatient(null);
-      setPreviewData(null);
+        admissionSource: AdmissionSourceOptions.find((opt) => opt.value === "opd") || null,
+      })
+      setPatientNameInput("")
+      setPatientPhoneInput("")
+      setSelectedPatient(null)
+      setPreviewData(null)
     } catch (err) {
-      console.error("Error in IPD booking:", err);
+      console.error("Error in IPD booking:", err)
       toast.error("Error: Failed to book IPD admission.", {
         position: "top-right",
         autoClose: 5000,
-      });
+      })
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   /* -----------------------------------------------------------------
      3F) Preview Handling
   ------------------------------------------------------------------ */
   const handlePreview = () => {
-    setPreviewData(watch());
-  };
+    setPreviewData(watch())
+  }
 
   // Custom styles for react-select
   const customSelectStyles = {
     control: (provided: any) => ({
       ...provided,
-      borderRadius: '0.5rem',
-      borderColor: '#e2e8f0',
-      minHeight: '48px',
-      boxShadow: 'none',
-      '&:hover': {
-        borderColor: '#3b82f6',
+      borderRadius: "0.5rem",
+      borderColor: "#e2e8f0",
+      minHeight: "48px",
+      boxShadow: "none",
+      "&:hover": {
+        borderColor: "#3b82f6",
       },
     }),
     option: (provided: any, state: any) => ({
       ...provided,
-      backgroundColor: state.isSelected ? '#3b82f6' : state.isFocused ? '#e2e8f0' : 'white',
-      color: state.isSelected ? 'white' : '#1e293b',
-      cursor: 'pointer',
-      padding: '10px 12px',
+      backgroundColor: state.isSelected ? "#3b82f6" : state.isFocused ? "#e2e8f0" : "white",
+      color: state.isSelected ? "white" : "#1e293b",
+      cursor: "pointer",
+      padding: "10px 12px",
     }),
     placeholder: (provided: any) => ({
       ...provided,
-      color: '#94a3b8',
+      color: "#94a3b8",
     }),
-  };
+  }
 
   // Custom styles for DatePicker
   const datePickerWrapperClass = `
     w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 
     ${errors.date ? "border-red-500" : "border-gray-300"} transition duration-200
-  `;
+  `
 
   /* -----------------------------------------------------------------
      3G) Render
@@ -629,9 +642,7 @@ const IPDBookingPage: React.FC = () => {
                 <UserPlus className="h-8 w-8" />
                 <h2 className="text-2xl md:text-3xl font-bold">IPD Admission</h2>
               </div>
-              <div className="bg-white/20 py-1 px-3 rounded-full text-sm">
-                Complete all fields in one form
-              </div>
+              <div className="bg-white/20 py-1 px-3 rounded-full text-sm">Complete all fields in one form</div>
             </div>
           </div>
 
@@ -643,7 +654,7 @@ const IPDBookingPage: React.FC = () => {
                   <User className="mr-2 h-5 w-5" />
                   Patient Information
                 </h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Patient Name + Suggestions */}
                   <div className="relative md:col-span-2">
@@ -660,11 +671,11 @@ const IPDBookingPage: React.FC = () => {
                         } transition duration-200`}
                       />
                       {patientNameInput.length > 0 && (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => {
-                            setPatientNameInput("");
-                            setValue("name", "");
+                            setPatientNameInput("")
+                            setValue("name", "")
                           }}
                           className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
                         >
@@ -692,7 +703,9 @@ const IPDBookingPage: React.FC = () => {
                               <span>{sug.label}</span>
                             </div>
                             <div className="flex items-center">
-                              <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
+                              <span
+                                className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}
+                              >
                                 {sug.source === "gautami" ? "Gautami" : "other"}
                               </span>
                               <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
@@ -718,11 +731,11 @@ const IPDBookingPage: React.FC = () => {
                         } transition duration-200`}
                       />
                       {patientPhoneInput.length > 0 && (
-                        <button 
+                        <button
                           type="button"
                           onClick={() => {
-                            setPatientPhoneInput("");
-                            setValue("phone", "");
+                            setPatientPhoneInput("")
+                            setValue("phone", "")
                           }}
                           className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
                         >
@@ -749,7 +762,9 @@ const IPDBookingPage: React.FC = () => {
                               <span>{sug.label}</span>
                             </div>
                             <div className="flex items-center">
-                              <span className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}>
+                              <span
+                                className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}
+                              >
                                 {sug.source === "gautami" ? "Gautami" : "other"}
                               </span>
                               <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
@@ -832,7 +847,7 @@ const IPDBookingPage: React.FC = () => {
                   <Users className="mr-2 h-5 w-5" />
                   Relative Information
                 </h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Relative Name */}
                   <div className="relative">
@@ -908,7 +923,7 @@ const IPDBookingPage: React.FC = () => {
                   <Clipboard className="mr-2 h-5 w-5" />
                   Admission Details
                 </h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   {/* Admission Source - NEW FIELD */}
                   <div>
@@ -935,31 +950,33 @@ const IPDBookingPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Referral Doctor - Conditional Field */}
-                  {selectedAdmissionSource?.value === "referral" && (
+                  {/* Referral Doctor - Always visible */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Referral Doctor{" "}
+                      {selectedAdmissionSource?.value === "referral" && <span className="text-red-500">*</span>}
+                    </label>
                     <div className="relative">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor</label>
-                      <div className="relative">
-                        <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
-                        <input
-                          type="text"
-                          {...register("referDoctor", {
-                            required: selectedAdmissionSource?.value === "referral" ? "Referral doctor name is required" : false,
-                          })}
-                          placeholder="Name of referring doctor"
-                          className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                            errors.referDoctor ? "border-red-500" : "border-gray-300"
-                          } transition duration-200`}
-                        />
-                      </div>
-                      {errors.referDoctor && (
-                        <p className="text-red-500 text-sm mt-1 flex items-center">
-                          <AlertCircle className="h-4 w-4 mr-1" />
-                          {errors.referDoctor.message}
-                        </p>
-                      )}
+                      <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        {...register("referDoctor", {
+                          required:
+                            selectedAdmissionSource?.value === "referral" ? "Referral doctor name is required" : false,
+                        })}
+                        placeholder="Name of referring doctor"
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.referDoctor ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
                     </div>
-                  )}
+                    {errors.referDoctor && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.referDoctor.message}
+                      </p>
+                    )}
+                  </div>
 
                   {/* Admission Type */}
                   <div>
@@ -1013,7 +1030,7 @@ const IPDBookingPage: React.FC = () => {
                       </p>
                     )}
                   </div>
-                  
+
                   {/* Time */}
                   <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Admission Time</label>
@@ -1039,9 +1056,7 @@ const IPDBookingPage: React.FC = () => {
 
                   {/* Doctor */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Under Care of Doctor
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Under Care of Doctor</label>
                     <Controller
                       control={control}
                       name="doctor"
@@ -1072,7 +1087,7 @@ const IPDBookingPage: React.FC = () => {
                   <Building className="mr-2 h-5 w-5" />
                   Room & Bed Assignment
                 </h3>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Room Type */}
                   <div>
@@ -1120,9 +1135,7 @@ const IPDBookingPage: React.FC = () => {
                         <Select
                           {...field}
                           options={beds}
-                          placeholder={
-                            beds.length > 0 ? "Select Bed" : "No Beds Available"
-                          }
+                          placeholder={beds.length > 0 ? "Select Bed" : "No Beds Available"}
                           styles={customSelectStyles}
                           onChange={(val) => field.onChange(val)}
                           isDisabled={!selectedRoomType || beds.length === 0}
@@ -1150,7 +1163,7 @@ const IPDBookingPage: React.FC = () => {
                 <FileText className="mr-2 h-5 w-5" />
                 Preview
               </button>
-              
+
               <button
                 type="submit"
                 disabled={loading}
@@ -1180,17 +1193,12 @@ const IPDBookingPage: React.FC = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-3xl overflow-auto max-h-screen">
             <div className="flex justify-between items-center mb-4 border-b pb-4">
-              <h3 className="text-2xl font-semibold text-blue-700">
-                Preview IPD Admission
-              </h3>
-              <button 
-                onClick={() => setPreviewData(null)}
-                className="text-gray-500 hover:text-gray-700"
-              >
+              <h3 className="text-2xl font-semibold text-blue-700">Preview IPD Admission</h3>
+              <button onClick={() => setPreviewData(null)} className="text-gray-500 hover:text-gray-700">
                 <XCircle className="h-6 w-6" />
               </button>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
               <div className="space-y-2">
                 <h4 className="font-medium text-gray-500 text-sm">Patient Information</h4>
@@ -1217,7 +1225,7 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-              
+
               <div className="space-y-2">
                 <h4 className="font-medium text-gray-500 text-sm">Relative Information</h4>
                 <p className="flex justify-between">
@@ -1235,7 +1243,7 @@ const IPDBookingPage: React.FC = () => {
                   </p>
                 )}
               </div>
-              
+
               <div className="space-y-2 col-span-full mt-4">
                 <h4 className="font-medium text-gray-500 text-sm">Admission Details</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
@@ -1286,7 +1294,7 @@ const IPDBookingPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            
+
             <div className="mt-8 flex flex-wrap gap-4 justify-end border-t pt-4">
               <button
                 type="button"
@@ -1296,7 +1304,7 @@ const IPDBookingPage: React.FC = () => {
                 <XCircle className="h-4 w-4 mr-2" />
                 Cancel
               </button>
-              
+
               {/* Render your PDF button or component */}
               {previewData && <IPDSignaturePDF data={previewData} />}
 
@@ -1325,10 +1333,7 @@ const IPDBookingPage: React.FC = () => {
                 <Bed className="h-5 w-5 mr-2" />
                 Bed Availability
               </h2>
-              <button
-                onClick={() => setShowBedPopup(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
+              <button onClick={() => setShowBedPopup(false)} className="text-gray-500 hover:text-gray-700">
                 <XCircle className="h-6 w-6" />
               </button>
             </div>
@@ -1342,85 +1347,74 @@ const IPDBookingPage: React.FC = () => {
 
             <div className="space-y-6">
               {Object.keys(allBedData).map((roomKey) => {
-                const roomBeds = allBedData[roomKey];
-                const availableBeds = Object.values(roomBeds).filter((bed: any) => bed.status === "Available").length;
-                const totalBeds = Object.keys(roomBeds).length;
-                
+                const roomBeds = allBedData[roomKey]
+                const availableBeds = Object.values(roomBeds).filter((bed: any) => bed.status === "Available").length
+                const totalBeds = Object.keys(roomBeds).length
+
                 return (
                   <div key={roomKey} className="border border-gray-200 rounded-lg overflow-hidden">
                     <div className="bg-gray-50 p-4 border-b">
                       <div className="flex justify-between items-center">
-                        <h3 className="text-lg font-semibold capitalize">
-                          {roomKey.replace("_", " ")}
-                        </h3>
-                        <span className={`px-3 py-1 rounded-full text-sm ${
-                          availableBeds > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                        }`}>
+                        <h3 className="text-lg font-semibold capitalize">{roomKey.replace("_", " ")}</h3>
+                        <span
+                          className={`px-3 py-1 rounded-full text-sm ${
+                            availableBeds > 0 ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+                          }`}
+                        >
                           {availableBeds} of {totalBeds} available
                         </span>
                       </div>
                     </div>
-                    
+
                     <div className="p-4">
                       <div className="flex flex-wrap gap-4">
                         {Object.keys(roomBeds).map((bedId) => {
-                          const bedInfo = roomBeds[bedId];
-                          const isAvailable = bedInfo.status === "Available";
+                          const bedInfo = roomBeds[bedId]
+                          const isAvailable = bedInfo.status === "Available"
                           return (
                             <div
                               key={bedId}
                               className={`flex flex-col items-center justify-center w-20 h-20 rounded-lg cursor-pointer border-2 transition-all ${
-                                isAvailable 
-                                  ? "border-green-500 bg-green-50 hover:bg-green-100" 
+                                isAvailable
+                                  ? "border-green-500 bg-green-50 hover:bg-green-100"
                                   : "border-red-300 bg-red-50 opacity-60"
                               }`}
                               onClick={() => {
-                                if (!isAvailable) return;
+                                if (!isAvailable) return
                                 // Auto-fill form with this bed & room
-                                const rtOption = RoomTypeOptions.find(
-                                  (opt) => opt.value === roomKey
-                                );
-                                setValue("roomType", rtOption || null);
+                                const rtOption = RoomTypeOptions.find((opt) => opt.value === roomKey)
+                                setValue("roomType", rtOption || null)
                                 // Overwrite the bed dropdown
                                 setBeds([
                                   {
                                     label: `Bed ${bedInfo.bedNumber}`,
                                     value: bedId,
                                   },
-                                ]);
+                                ])
                                 setValue("bed", {
                                   label: `Bed ${bedInfo.bedNumber}`,
                                   value: bedId,
-                                });
-                                setShowBedPopup(false);
+                                })
+                                setShowBedPopup(false)
                               }}
                             >
-                              <Bed
-                                size={24}
-                                className={
-                                  isAvailable ? "text-green-600" : "text-red-500"
-                                }
-                              />
-                              <span className="text-sm mt-1 font-medium">
-                                Bed {bedInfo.bedNumber}
-                              </span>
-                              <span className="text-xs">
-                                {isAvailable ? "Available" : "Occupied"}
-                              </span>
+                              <Bed size={24} className={isAvailable ? "text-green-600" : "text-red-500"} />
+                              <span className="text-sm mt-1 font-medium">Bed {bedInfo.bedNumber}</span>
+                              <span className="text-xs">{isAvailable ? "Available" : "Occupied"}</span>
                             </div>
-                          );
+                          )
                         })}
                       </div>
                     </div>
                   </div>
-                );
+                )
               })}
             </div>
           </div>
         </div>
       )}
     </>
-  );
-};
+  )
+}
 
-export default IPDBookingPage;
+export default IPDBookingPage

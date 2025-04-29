@@ -10,30 +10,11 @@ import { useForm, Controller, type SubmitHandler } from "react-hook-form"
 import { yupResolver } from "@hookform/resolvers/yup"
 import * as yup from "yup"
 import { motion, AnimatePresence } from "framer-motion"
-
+import  { CheckCircle } from "lucide-react";
 // ***** IMPORTANT: Use CreatableSelect from react-select/creatable
 import CreatableSelect from "react-select/creatable"
 
-import {
-  Plus,
-  ArrowLeft,
-  AlertTriangle,
-  History,
-  Trash,
-  Calendar,
-  User,
-  Phone,
-  MapPin,
-  CreditCard,
-  Bed,
-  Users,
-  FileText,
-  Download,
-  ChevronRight,
-  Percent,
-  UserPlus,
-  X,
-} from "lucide-react"
+import { Plus, ArrowLeft, AlertTriangle, History, Trash, Calendar, User, Phone, MapPin, CreditCard, Bed, Users, FileText, Download, ChevronRight, Percent, UserPlus, X, DollarSign, Tag, Save, RefreshCw } from 'lucide-react'
 import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
 import InvoiceDownload from "./../../InvoiceDownload"
@@ -161,6 +142,8 @@ export default function BillingPage() {
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
+  const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
+  const [discountUpdated, setDiscountUpdated] = useState(false)
 
   // State to hold service options for CreatableSelect
   const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
@@ -273,6 +256,11 @@ export default function BillingPage() {
       }
 
       setSelectedRecord(record)
+      
+      // Initialize discount form with existing discount value
+      if (record.discount) {
+        resetDiscount({ discount: record.discount })
+      }
     })
     return () => unsubscribe()
   }, [patientId, ipdId])
@@ -310,10 +298,14 @@ export default function BillingPage() {
     handleSubmit: handleSubmitDiscount,
     formState: { errors: errorsDiscount },
     reset: resetDiscount,
+    watch: watchDiscount,
   } = useForm<DiscountForm>({
     resolver: yupResolver(discountSchema),
     defaultValues: { discount: 0 },
   })
+
+  // Watch discount value for animation
+  const currentDiscount = watchDiscount("discount")
 
   // Consultant Charge Form
   const {
@@ -361,6 +353,11 @@ export default function BillingPage() {
   const discountVal = selectedRecord?.discount || 0
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
   const dueAmount = selectedRecord ? Math.max(totalBill - selectedRecord.amount, 0) : 0
+
+  // Calculate discount percentage for display
+  const discountPercentage = hospitalServiceTotal + consultantChargeTotal > 0 
+    ? ((discountVal / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1) 
+    : "0.0"
 
   // ===== Group Consultant Charges by Doctor =====
   const aggregatedConsultantCharges = consultantChargeItems.reduce(
@@ -546,7 +543,12 @@ export default function BillingPage() {
       toast.success("Discount applied successfully!")
       const updatedRecord = { ...selectedRecord, discount: discountVal }
       setSelectedRecord(updatedRecord)
-      resetDiscount({ discount: discountVal })
+      setDiscountUpdated(true)
+      
+      // Close the modal after successful update
+      setTimeout(() => {
+        setIsDiscountModalOpen(false)
+      }, 1000)
     } catch (error) {
       console.error("Error applying discount:", error)
       toast.error("Failed to apply discount. Please try again.")
@@ -777,7 +779,9 @@ export default function BillingPage() {
                         </div>
                         {discountVal > 0 && (
                           <div className="flex justify-between text-green-600">
-                            <span>Discount:</span>
+                            <span className="flex items-center">
+                              <Tag size={14} className="mr-1" /> Discount ({discountPercentage}%):
+                            </span>
                             <span className="font-medium">-₹{discountVal.toLocaleString()}</span>
                           </div>
                         )}
@@ -798,6 +802,17 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
+                      
+                      {/* Discount Quick Action Button */}
+                      {!selectedRecord.dischargeDate && (
+                        <button
+                          onClick={() => setIsDiscountModalOpen(true)}
+                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-all shadow-sm transform hover:scale-[1.02]"
+                        >
+                          <Percent size={16} className="mr-2" /> 
+                          {discountVal > 0 ? "Update Discount" : "Add Discount"}
+                        </button>
+                      )}
                     </div>
 
                     {/* Patient Details */}
@@ -1210,42 +1225,48 @@ export default function BillingPage() {
                             </form>
                           </div>
 
-                          {/* Discount Form */}
-                          <div className="bg-white rounded-lg border border-gray-200 p-6 mt-6">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                              <Percent size={16} className="mr-2 text-teal-600" /> Apply Discount
+                          {/* Enhanced Discount Card */}
+                          <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-200 p-6 mt-6 shadow-sm">
+                            <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
+                              <Percent size={18} className="mr-2 text-emerald-600" /> Discount
                             </h3>
-                            <form onSubmit={handleSubmitDiscount(onSubmitDiscount)} className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Discount Amount (₹)
-                                </label>
-                                <input
-                                  type="number"
-                                  {...registerDiscount("discount")}
-                                  placeholder="e.g., 1000"
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsDiscount.discount ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                />
-                                {errorsDiscount.discount && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsDiscount.discount.message}</p>
-                                )}
+                            
+                            {discountVal > 0 ? (
+                              <div className="space-y-4">
+                                <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
+                                  <div className="flex justify-between items-center">
+                                    <div>
+                                      <p className="text-sm text-gray-500">Current Discount</p>
+                                      <p className="text-2xl font-bold text-emerald-600">₹{discountVal.toLocaleString()}</p>
+                                    </div>
+                                    <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
+                                      {discountPercentage}% off
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                <button
+                                  onClick={() => setIsDiscountModalOpen(true)}
+                                  className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
+                                >
+                                  <RefreshCw size={16} className="mr-2" /> Update Discount
+                                </button>
                               </div>
-                              <button
-                                type="submit"
-                                disabled={loading}
-                                className={`w-full py-2 px-4 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors flex items-center justify-center ${
-                                  loading ? "opacity-50 cursor-not-allowed" : ""
-                                }`}
-                              >
-                                {loading ? "Processing..." : (
-                                  <>
-                                    <Percent size={16} className="mr-2" /> Apply Discount
-                                  </>
-                                )}
-                              </button>
-                            </form>
+                            ) : (
+                              <div className="space-y-4">
+                                <div className="bg-white rounded-lg p-4 shadow-sm border border-dashed border-emerald-200 text-center">
+                                  <p className="text-gray-500 mb-2">No discount applied yet</p>
+                                  <DollarSign size={24} className="mx-auto text-emerald-300" />
+                                </div>
+                                
+                                <button
+                                  onClick={() => setIsDiscountModalOpen(true)}
+                                  className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
+                                >
+                                  <Percent size={16} className="mr-2" /> Add Discount
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1649,6 +1670,128 @@ export default function BillingPage() {
                   >
                     Close
                   </button>
+                </div>
+              </Dialog.Panel>
+            </Transition.Child>
+          </div>
+        </Dialog>
+      </Transition>
+
+      {/* Discount Modal */}
+      <Transition appear show={isDiscountModalOpen} as={React.Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setIsDiscountModalOpen(false)}>
+          <Transition.Child
+            as={React.Fragment}
+            enter="ease-out duration-200"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-150"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black bg-opacity-40" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto flex items-center justify-center p-4">
+            <Transition.Child
+              as={React.Fragment}
+              enter="ease-out duration-200"
+              enterFrom="opacity-0 scale-95"
+              enterTo="opacity-100 scale-100"
+              leave="ease-in duration-150"
+              leaveFrom="opacity-100 scale-100"
+              leaveTo="opacity-0 scale-95"
+            >
+              <Dialog.Panel className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full">
+                <div className="flex items-center justify-between mb-4">
+                  <Dialog.Title className="text-xl font-bold text-gray-800 flex items-center">
+                    <Percent size={20} className="mr-2 text-emerald-600" />
+                    {discountVal > 0 ? "Update Discount" : "Add Discount"}
+                  </Dialog.Title>
+                  <button
+                    onClick={() => setIsDiscountModalOpen(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="mb-6">
+                  <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg p-4 mb-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-sm text-gray-600">Total Bill Amount</p>
+                        <p className="text-xl font-bold text-gray-800">₹{(hospitalServiceTotal + consultantChargeTotal).toLocaleString()}</p>
+                      </div>
+                      {discountVal > 0 && (
+                        <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
+                          Current: ₹{discountVal.toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSubmitDiscount(onSubmitDiscount)} className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Discount Amount (₹)</label>
+                      <div className="relative">
+                        <DollarSign className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                        <input
+                          type="number"
+                          {...registerDiscount("discount")}
+                          placeholder="Enter discount amount"
+                          className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                            errorsDiscount.discount ? "border-red-500" : "border-gray-300"
+                          } transition duration-200`}
+                        />
+                      </div>
+                      {errorsDiscount.discount && (
+                        <p className="text-red-500 text-xs mt-1">{errorsDiscount.discount.message}</p>
+                      )}
+                    </div>
+
+                    {/* Discount percentage display */}
+                    {currentDiscount > 0 && hospitalServiceTotal + consultantChargeTotal > 0 && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-emerald-50 p-3 rounded-lg border border-emerald-100"
+                      >
+                        <p className="text-sm text-emerald-700 flex items-center">
+                          <Tag className="h-4 w-4 mr-1" />
+                          This is equivalent to a <span className="font-bold mx-1">
+                            {((currentDiscount / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1)}%
+                          </span> discount
+                        </p>
+                      </motion.div>
+                    )}
+
+                    <div className="flex space-x-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsDiscountModalOpen(false)}
+                        className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className={`flex-1 py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center ${
+                          loading ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
+                      >
+                        {loading ? (
+                          <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        ) : discountUpdated ? (
+                          <CheckCircle className="h-5 w-5" />
+                        ) : (
+                          <Save className="h-5 w-5 mr-2" />
+                        )}
+                        {loading ? "Processing..." : discountUpdated ? "Saved!" : "Save Discount"}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </Dialog.Panel>
             </Transition.Child>
