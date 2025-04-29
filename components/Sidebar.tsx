@@ -106,9 +106,9 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
         { title: "OPD Admin", icon: <Stethoscope size={20} />, href: "/opdadmin" },
         { title: "IPD Admin", icon: <BedDouble size={20} />, href: "/ipdadmin" },
         { title: "Patient Admin", icon: <FileText size={20} />, href: "/patientadmin" },
-        { title: "Pathology Admin", icon: <Syringe size={20} />, href: "/bloodadmin" },
+        // { title: "Pathology Admin", icon: <Syringe size={20} />, href: "/bloodadmin" },
         { title: "Mortality Report", icon: <Activity size={20} />, href: "/mortalityadmin" },
-        { title: "Surgery Report", icon: <Scissors size={20} />, href: "/surgeryadmin" },
+        // { title: "Surgery Report", icon: <Scissors size={20} />, href: "/surgeryadmin" },
         { title: "DPR", icon: <ClipboardList size={20} />, href: "/dr" },
         { title: "Add Service", icon: <ClipboardList size={20} />, href: "/makeservice" },
       ],
@@ -126,25 +126,25 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
       icon: <BedDouble size={20} />,
       submenu: [
         { title: "IPD Appointment", icon: <ClipboardList size={20} />, href: "/ipd" },
-        { title: "IPD Billing", icon: <FileText size={20} />, href: "/billing" },
+        { title: "IPD Management", icon: <FileText size={20} />, href: "/billing" },
         { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
       ],
     },
-    {
-      title: "Pathology",
-      icon: <Syringe size={20} />,
-      href: "/bloodtest",
-    },
+    // {
+    //   title: "Pathology",
+    //   icon: <Syringe size={20} />,
+    //   href: "/bloodtest",
+    // },
     {
       title: "Mortality",
       icon: <Activity size={20} />,
       href: "/mortality",
     },
-    {
-      title: "Surgery",
-      icon: <Scissors size={20} />,
-      href: "/surgery",
-    },
+    // {
+    //   title: "Surgery",
+    //   icon: <Scissors size={20} />,
+    //   href: "/surgery",
+    // },
   ];
 
   // Hide "Dashboard" and "Manage Admin" if userType is "staff"

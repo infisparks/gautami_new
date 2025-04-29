@@ -20,6 +20,8 @@ import {
   ChevronRight,
   MapPin,
   Loader2,
+  Activity,
+  Clipboard,
 } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -50,6 +52,7 @@ interface IPatientRecord {
   ipd?: Record<string, any>
   pathology?: Record<string, any>
   surgery?: Record<string, any>
+  ot?: Record<string, any> | any
   mortality?: Record<string, any>
 }
 
@@ -93,8 +96,12 @@ export default function PatientDetailsPage() {
   }, [id])
 
   // Format date for display
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | number) => {
+    if (!dateString) return "N/A"
+
     const date = new Date(dateString)
+    if (isNaN(date.getTime())) return "Invalid Date"
+
     return date.toLocaleDateString("en-US", {
       year: "numeric",
       month: "short",
@@ -160,13 +167,34 @@ export default function PatientDetailsPage() {
       }))
     : []
 
-  // Process Surgery records
-  const surgeryRecords = patientData.surgery
-    ? Object.entries(patientData.surgery).map(([key, value]) => ({
+  // Process Surgery records - handle both object and collection
+  let surgeryRecords = []
+  if (patientData.surgery) {
+    if (patientData.surgery.surgeryTitle) {
+      // It's a single object
+      surgeryRecords = [{ id: "single", ...patientData.surgery }]
+    } else {
+      // It's a collection
+      surgeryRecords = Object.entries(patientData.surgery).map(([key, value]) => ({
         id: key,
         ...value,
       }))
-    : []
+    }
+  }
+  // Process OT records - handle both object and collection
+  let otRecords: { id: string; [key: string]: any }[] = []
+  if (patientData.ot) {
+    if (patientData.ot.date || patientData.ot.createdAt) {
+      // It's a single object
+      otRecords = [{ id: "single", ...patientData.ot }]
+    } else {
+      // It's a collection
+      otRecords = Object.entries(patientData.ot).map(([key, value]) => ({
+        id: key,
+        ...(value as { [key: string]: any }),
+      }))
+    }
+  }
 
   return (
     <main className="container mx-auto py-6 px-4 md:px-6">
@@ -211,7 +239,7 @@ export default function PatientDetailsPage() {
 
       {/* Tabs for different sections */}
       <Tabs defaultValue="ipd" className="mb-6" onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-4 mb-6">
+        <TabsList className="grid grid-cols-5 mb-6">
           <TabsTrigger value="ipd" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             <span className="hidden sm:inline">IPD Records</span>
@@ -231,6 +259,11 @@ export default function PatientDetailsPage() {
             <Scissors className="h-4 w-4" />
             <span className="hidden sm:inline">Surgery</span>
             <span className="sm:hidden">Surg</span>
+          </TabsTrigger>
+          <TabsTrigger value="ot" className="flex items-center gap-2">
+            <Activity className="h-4 w-4" />
+            <span className="hidden sm:inline">OT Records</span>
+            <span className="sm:hidden">OT</span>
           </TabsTrigger>
         </TabsList>
 
@@ -344,9 +377,9 @@ export default function PatientDetailsPage() {
                 <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
                   <CardHeader className="bg-blue-50 pb-3">
                     <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">{record.serviceName}</CardTitle>
+                      <CardTitle className="text-lg font-semibold">{record.serviceName || "OPD Visit"}</CardTitle>
                       <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                        ₹{record.amount}
+                        ₹{record.amount || 0}
                       </Badge>
                     </div>
                     <CardDescription className="flex items-center gap-2 mt-1">
@@ -372,9 +405,27 @@ export default function PatientDetailsPage() {
                       <div className="flex items-center gap-2">
                         <CreditCard className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm">
-                          Payment: <span className="font-medium capitalize">{record.paymentMethod}</span>
+                          Payment: <span className="font-medium capitalize">{record.paymentMethod || "Cash"}</span>
                         </span>
                       </div>
+
+                      {record.appointmentType && (
+                        <div className="flex items-center gap-2">
+                          <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            Type: <span className="font-medium capitalize">{record.appointmentType}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {record.referredBy && (
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            Referred by: <span className="font-medium">{record.referredBy}</span>
+                          </span>
+                        </div>
+                      )}
 
                       {record.message && (
                         <div className="flex items-center gap-2">
@@ -406,21 +457,65 @@ export default function PatientDetailsPage() {
                     <div className="flex justify-between items-start">
                       <CardTitle className="text-lg font-semibold">{record.bloodTestName}</CardTitle>
                       <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                        ₹{record.amount}
+                        ₹{record.amount || 0}
                       </Badge>
                     </div>
                     <CardDescription className="flex items-center gap-2 mt-1">
                       <Calendar className="h-3.5 w-3.5" />
-                      <span>{new Date(record.timestamp).toLocaleDateString()}</span>
+                      <span>
+                        {record.timestamp
+                          ? formatDate(record.timestamp)
+                          : record.createdAt
+                            ? formatDate(record.createdAt)
+                            : "N/A"}
+                      </span>
                     </CardDescription>
                   </CardHeader>
 
                   <CardContent className="pt-4">
-                    <div className="flex justify-end">
-                      <Button variant="outline" size="sm" className="text-xs">
-                        View Report
-                        <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                      </Button>
+                    <div className="space-y-3">
+                      {record.referBy && (
+                        <div className="flex items-center gap-2">
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            Referred by: <span className="font-medium">{record.referBy}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {record.paymentMethod && (
+                        <div className="flex items-center gap-2">
+                          <CreditCard className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            Payment: <span className="font-medium capitalize">{record.paymentMethod}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {record.paymentId && (
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            Payment ID: <span className="font-medium">{record.paymentId}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {record.ipdId && (
+                        <div className="flex items-center gap-2">
+                          <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            IPD ID: <span className="font-medium">{record.ipdId}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end">
+                        <Button variant="outline" size="sm" className="text-xs">
+                          View Report
+                          <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -441,14 +536,20 @@ export default function PatientDetailsPage() {
                 <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
                   <CardHeader className="bg-amber-50 pb-3">
                     <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">{record.surgeryTitle}</CardTitle>
+                      <CardTitle className="text-lg font-semibold">{record.surgeryTitle || "Surgery"}</CardTitle>
                       <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
                         Surgery
                       </Badge>
                     </div>
                     <CardDescription className="flex items-center gap-2 mt-1">
                       <Calendar className="h-3.5 w-3.5" />
-                      <span>{record.surgeryDate}</span>
+                      <span>
+                        {record.surgeryDate
+                          ? record.surgeryDate
+                          : record.updatedAt
+                            ? formatDate(record.updatedAt)
+                            : "N/A"}
+                      </span>
                     </CardDescription>
                   </CardHeader>
 
@@ -457,15 +558,89 @@ export default function PatientDetailsPage() {
                       <div className="flex items-start gap-2">
                         <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
                         <span className="text-sm">
-                          Diagnosis: <span className="font-medium">{record.finalDiagnosis}</span>
+                          Diagnosis: <span className="font-medium">{record.finalDiagnosis || "Not specified"}</span>
                         </span>
                       </div>
+
+                      {record.ipdId && (
+                        <div className="flex items-center gap-2">
+                          <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            IPD ID: <span className="font-medium">{record.ipdId}</span>
+                          </span>
+                        </div>
+                      )}
 
                       <div className="flex justify-end">
                         <Button variant="outline" size="sm" className="text-xs">
                           View Details
                           <ChevronRight className="h-3.5 w-3.5 ml-1" />
                         </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* OT Tab */}
+        <TabsContent value="ot" className="space-y-6">
+          {otRecords.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No OT records found for this patient.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {otRecords.map((record) => (
+                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
+                  <CardHeader className="bg-pink-50 pb-3">
+                    <div className="flex justify-between items-start">
+                      <CardTitle className="text-lg font-semibold">OT Procedure</CardTitle>
+                      <Badge variant="outline" className="bg-pink-50 text-pink-700 border-pink-200">
+                        OT
+                      </Badge>
+                    </div>
+                    <CardDescription className="flex items-center gap-2 mt-1">
+                      <Calendar className="h-3.5 w-3.5" />
+                      <span>{record.date ? record.date : record.createdAt ? formatDate(record.createdAt) : "N/A"}</span>
+                      {record.time && (
+                        <>
+                          <Clock className="h-3.5 w-3.5 ml-2" />
+                          <span>{record.time}</span>
+                        </>
+                      )}
+                    </CardDescription>
+                  </CardHeader>
+
+                  <CardContent className="pt-4">
+                    <div className="space-y-3">
+                      {record.message && (
+                        <div className="flex items-start gap-2">
+                          <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                          <span className="text-sm">
+                            Notes: <span className="font-medium">{record.message}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {record.ipdId && (
+                        <div className="flex items-center gap-2">
+                          <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">
+                            IPD ID: <span className="font-medium">{record.ipdId}</span>
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end">
+                        <Link href={`/ot/${patientData.uhid}/${record.ipdId || record.id}`} passHref>
+                          <Button variant="outline" size="sm" className="text-xs">
+                            View Details
+                            <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                          </Button>
+                        </Link>
                       </div>
                     </div>
                   </CardContent>

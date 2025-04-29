@@ -139,9 +139,9 @@
        const instructions = [
          "Please have an attendant to accompany you till discharge.",
          "Billing Cycle will be of 24 hours from the date and time of admission.",
+        //  "Any investigations like Sonography, Blood/Urine Test, X‑Ray, 2D‑Echo, etc. will be charged extra.",
+        //  "In package, oral medicines and non‑medical items are payable by the patient.",
          "Consultant Visit charges will be charged as per their visits.",
-         "Any investigations like Sonography, Blood/Urine Test, X‑Ray, 2D‑Echo, etc. will be charged extra.",
-         "In package, oral medicines and non‑medical items are payable by the patient.",
          "All other services like Oxygen, Nebulizer, Monitor, Syringe pump, Ventilator, BiPAP, etc., are chargeable.",
          "Any other visiting consultants other than the treating doctor will be charged extra.",
          "Normal delivery basic package consists of 1 induction; if more than that, it will be charged.",

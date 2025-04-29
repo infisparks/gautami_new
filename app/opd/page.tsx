@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useForm, Controller } from "react-hook-form"
 import { db } from "../../lib/firebase" // Gautami DB
 import { db as dbMedford } from "../../lib/firebaseMedford" // Medford Family DB
-import { ref, push, update, get, onValue, set } from "firebase/database"
+import { ref, push, update, get, onValue, set, remove } from "firebase/database"
 import Head from "next/head"
 import {
   User,
@@ -17,36 +17,23 @@ import {
   MessageSquare,
   DollarSign,
   Info,
-  Mic,
-  MicOff,
   CheckCircle,
   HelpCircle,
+  Search,
+  Trash2,
+  X,
 } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
-import SpeechRecognition, { useSpeechRecognition } from "react-speech-recognition"
 import Joyride, { type CallBackProps, STATUS } from "react-joyride"
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardFooter,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -59,6 +46,16 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 /** ---------------------------
  *   TYPE & CONSTANT DEFINITIONS
@@ -77,6 +74,8 @@ interface IFormInput {
   amount: number
   serviceName: string
   doctor: string
+  referredBy?: string
+  appointmentType: "oncall" | "visithospital"
 }
 
 interface PatientRecord {
@@ -114,6 +113,20 @@ interface Doctor {
   name: string
   opdCharge: number
   specialty?: string
+}
+
+interface OnCallAppointment {
+  id: string
+  name: string
+  phone: string
+  age: number
+  gender: string
+  date: string
+  time: string
+  doctor?: string
+  serviceName?: string
+  appointmentType: "oncall"
+  createdAt: string
 }
 
 const PaymentOptions = [
@@ -162,10 +175,11 @@ const OPDBookingPage: React.FC = () => {
     register,
     handleSubmit,
     control,
-    formState: { errors, isValid },
+    formState: { errors },
     reset,
     watch,
     setValue,
+    trigger,
   } = useForm<IFormInput>({
     defaultValues: {
       name: "",
@@ -180,6 +194,8 @@ const OPDBookingPage: React.FC = () => {
       amount: 0,
       serviceName: "",
       doctor: "",
+      referredBy: "",
+      appointmentType: "visithospital",
     },
     mode: "onChange",
   })
@@ -189,6 +205,8 @@ const OPDBookingPage: React.FC = () => {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("form")
   const [doctors, setDoctors] = useState<Doctor[]>([])
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null)
 
   // States for patient management
   const [patientNameInput, setPatientNameInput] = useState("")
@@ -199,11 +217,16 @@ const OPDBookingPage: React.FC = () => {
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([])
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([])
 
-  // Voice recognition state
-  const [isListening, setIsListening] = useState(false)
+  // State for oncall appointments
+  const [oncallAppointments, setOncallAppointments] = useState<OnCallAppointment[]>([])
+  const [filteredOncallAppointments, setFilteredOncallAppointments] = useState<OnCallAppointment[]>([])
+  const [searchQuery, setSearchQuery] = useState("")
 
   // Refs
   const phoneSuggestionBoxRef = useRef<HTMLDivElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const phoneInputRef = useRef<HTMLInputElement>(null)
+  const ageInputRef = useRef<HTMLInputElement>(null)
 
   // States for Joyride (guided tour)
   const [runTour, setRunTour] = useState(false)
@@ -257,10 +280,6 @@ const OPDBookingPage: React.FC = () => {
       target: '[data-tour="amount"]',
       content: "The amount will be auto‑filled based on the doctor charge. Adjust if needed.",
     },
-    {
-      target: '[data-tour="voice-control"]',
-      content: "Use voice commands to fill the form hands‑free.",
-    },
   ]
 
   const handleJoyrideCallback = (data: CallBackProps) => {
@@ -274,239 +293,11 @@ const OPDBookingPage: React.FC = () => {
    *  SPEECH RECOGNITION COMMANDS
    *  ---------------------------
    */
-  const commands = [
-    // Name Commands
-    {
-      command: "name *",
-      callback: (name: string) => {
-        setPatientNameInput(name.trim())
-        setValue("name", name.trim(), { shouldValidate: true })
-        toast.info(`Name set to: ${name.trim()}`)
-      },
-    },
-    {
-      command: "mera naam *",
-      callback: (name: string) => {
-        setPatientNameInput(name.trim())
-        setValue("name", name.trim(), { shouldValidate: true })
-        toast.info(`Name set to: ${name.trim()}`)
-      },
-    },
-    {
-      command: "my name *",
-      callback: (name: string) => {
-        setPatientNameInput(name.trim())
-        setValue("name", name.trim(), { shouldValidate: true })
-        toast.info(`Name set to: ${name.trim()}`)
-      },
-    },
-    // Phone Commands
-    {
-      command: "number *",
-      callback: (phone: string) => {
-        const sanitizedPhone = phone.replace(/\D/g, "").trim()
-        setPatientPhoneInput(sanitizedPhone)
-        setValue("phone", sanitizedPhone, { shouldValidate: true })
-        toast.info(`Phone number set to: ${sanitizedPhone}`)
-      },
-    },
-    {
-      command: "mera number *",
-      callback: (phone: string) => {
-        const sanitizedPhone = phone.replace(/\D/g, "").trim()
-        setPatientPhoneInput(sanitizedPhone)
-        setValue("phone", sanitizedPhone, { shouldValidate: true })
-        toast.info(`Phone number set to: ${sanitizedPhone}`)
-      },
-    },
-    {
-      command: "my number *",
-      callback: (phone: string) => {
-        const sanitizedPhone = phone.replace(/\D/g, "").trim()
-        setPatientPhoneInput(sanitizedPhone)
-        setValue("phone", sanitizedPhone, { shouldValidate: true })
-        toast.info(`Phone number set to: ${sanitizedPhone}`)
-      },
-    },
-    // Age Command
-    {
-      command: "age *",
-      callback: (age: string) => {
-        const numericAge = Number.parseInt(age.replace(/\D/g, ""), 10)
-        if (!isNaN(numericAge) && numericAge > 0) {
-          setValue("age", numericAge, { shouldValidate: true })
-          toast.info(`Age set to: ${numericAge}`)
-        } else {
-          toast.error("Invalid age. Please try again.")
-        }
-      },
-    },
-    // Gender Command
-    {
-      command: "gender *",
-      callback: (gender: string) => {
-        const normalizedGender = gender.trim().toLowerCase()
-        const option = GenderOptions.find((opt) => opt.label.toLowerCase() === normalizedGender)
-        if (option) {
-          setValue("gender", option.value, { shouldValidate: true })
-          toast.info(`Gender set to: ${option.label}`)
-        } else {
-          toast.error(`Gender "${gender}" not recognized.`)
-        }
-      },
-    },
-    // Address Command
-    {
-      command: "address *",
-      callback: (address: string) => {
-        const trimmedAddress = address.trim()
-        setValue("address", trimmedAddress, { shouldValidate: false })
-        toast.info("Address set.")
-      },
-    },
-    // Date Commands
-    {
-      command: "set date to *",
-      callback: (date: string) => {
-        const parsedDate = new Date(Date.parse(date))
-        if (!isNaN(parsedDate.getTime())) {
-          setValue("date", parsedDate, { shouldValidate: true })
-          toast.info(`Date set to: ${parsedDate.toLocaleDateString()}`)
-        } else {
-          toast.error("Invalid date format. Please try again.")
-        }
-      },
-    },
-    // Time Commands
-    {
-      command: "set time to *",
-      callback: (time: string) => {
-        setValue("time", time.trim(), { shouldValidate: true })
-        toast.info(`Time set to: ${time.trim()}`)
-      },
-    },
-    // Message Commands
-    {
-      command: "message *",
-      callback: (message: string) => {
-        const trimmedMessage = message.trim()
-        setValue("message", trimmedMessage, { shouldValidate: false })
-        toast.info("Message set.")
-      },
-    },
-    // Payment Method Commands
-    {
-      command: "payment method *",
-      callback: (method: string) => {
-        const option = PaymentOptions.find(
-          (opt) => opt.label.toLowerCase() === method.toLowerCase(),
-        )
-        if (option) {
-          setValue("paymentMethod", option.value, { shouldValidate: true })
-          toast.info(`Payment method set to: ${option.label}`)
-        } else {
-          toast.error(`Payment method "${method}" not recognized.`)
-        }
-      },
-    },
-    // Amount Commands
-    {
-      command: "amount *",
-      callback: (amount: string) => {
-        const numericAmount = Number.parseFloat(amount.replace(/[^0-9.]/g, ""))
-        if (!isNaN(numericAmount)) {
-          setValue("amount", numericAmount, { shouldValidate: true })
-          toast.info(`Amount set to: Rs ${numericAmount}`)
-        } else {
-          toast.error("Invalid amount. Please try again.")
-        }
-      },
-    },
-    // Service Name Commands
-    {
-      command: "service *",
-      callback: (serviceName: string) => {
-        const trimmedServiceName = serviceName.trim().replace(/\s+/g, " ")
-        setValue("serviceName", trimmedServiceName, { shouldValidate: true })
-        toast.info(`Service name set to: ${trimmedServiceName}`)
-      },
-    },
-    {
-      command: "mera service *",
-      callback: (serviceName: string) => {
-        const trimmedServiceName = serviceName.trim().replace(/\s+/g, " ")
-        setValue("serviceName", trimmedServiceName, { shouldValidate: true })
-        toast.info(`Service name set to: ${trimmedServiceName}`)
-      },
-    },
-    {
-      command: "my service *",
-      callback: (serviceName: string) => {
-        const trimmedServiceName = serviceName.trim().replace(/\s+/g, " ")
-        setValue("serviceName", trimmedServiceName, { shouldValidate: true })
-        toast.info(`Service name set to: ${trimmedServiceName}`)
-      },
-    },
-    // Doctor Commands
-    {
-      command: "select doctor *",
-      callback: (doctorName: string) => {
-        const normalizedDoctorName = doctorName.trim().toLowerCase()
-        let selectedDoctor = doctors.find(
-          (doc) => doc.name.toLowerCase() === normalizedDoctorName,
-        )
-        if (!selectedDoctor) {
-          selectedDoctor = doctors.find((doc) =>
-            doc.name.toLowerCase().includes(normalizedDoctorName),
-          )
-        }
-        if (selectedDoctor) {
-          setValue("doctor", selectedDoctor.id, { shouldValidate: true })
-          toast.info(`Doctor set to: ${selectedDoctor.name}`)
-        } else {
-          toast.error(`Doctor "${doctorName}" not found.`)
-        }
-      },
-    },
-    // Preview & Submit Commands
-    {
-      command: "preview",
-      callback: () => {
-        setPreviewOpen(true)
-        toast.info("Form previewed.")
-      },
-    },
-    {
-      command: "cancel",
-      callback: () => {
-        setPreviewOpen(false)
-        toast.info("Preview canceled.")
-      },
-    },
-    {
-      command: "submit",
-      callback: () => {
-        handleSubmit(onSubmit)()
-      },
-    },
-  ]
 
   /** ------------------------------
    *  HOOKS: SPEECH RECOGNITION INIT
    *  ------------------------------
    */
-  const {
-    transcript,
-    resetTranscript,
-    browserSupportsSpeechRecognition,
-    listening: micListening,
-  } = useSpeechRecognition({ commands })
-
-  useEffect(() => {
-    if (!browserSupportsSpeechRecognition) {
-      toast.error("Browser does not support speech recognition.")
-    }
-  }, [browserSupportsSpeechRecognition])
 
   /** ----------------
    *   FETCH DOCTORS
@@ -581,6 +372,44 @@ const OPDBookingPage: React.FC = () => {
     })
     return () => unsubscribe()
   }, [])
+
+  // Fetch oncall appointments
+  useEffect(() => {
+    const oncallRef = ref(db, "oncall")
+    const unsubscribe = onValue(oncallRef, (snapshot) => {
+      const data = snapshot.val()
+      if (data) {
+        const appointments = Object.keys(data).map((key) => ({
+          id: key,
+          ...data[key],
+        }))
+        // Sort by createdAt in descending order (latest first)
+        appointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        setOncallAppointments(appointments)
+        setFilteredOncallAppointments(appointments)
+      } else {
+        setOncallAppointments([])
+        setFilteredOncallAppointments([])
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Filter oncall appointments when search query changes
+  useEffect(() => {
+    if (searchQuery.trim() === "") {
+      setFilteredOncallAppointments(oncallAppointments)
+    } else {
+      const query = searchQuery.toLowerCase()
+      const filtered = oncallAppointments.filter(
+        (appointment) =>
+          appointment.name.toLowerCase().includes(query) ||
+          appointment.phone.includes(query) ||
+          (appointment.serviceName && appointment.serviceName.toLowerCase().includes(query)),
+      )
+      setFilteredOncallAppointments(filtered)
+    }
+  }, [searchQuery, oncallAppointments])
 
   // Combined suggestions for the name field are updated when patientNameInput changes.
   useEffect(() => {
@@ -665,69 +494,181 @@ const OPDBookingPage: React.FC = () => {
    *   3. After DB writes, send a professional WhatsApp message to the patient.
    * ----------------------------------------------------------------------
    */
+  const validateAndSubmit = async (data: IFormInput) => {
+    // Check required fields manually
+    const requiredFields = ["name", "phone", "age", "gender", "date", "time"]
+
+    // Add conditional required fields based on appointment type
+    if (data.appointmentType === "visithospital") {
+      requiredFields.push("paymentMethod", "serviceName", "doctor")
+    } else {
+      // For oncall, we also need service and doctor
+      requiredFields.push("serviceName", "doctor")
+    }
+
+    // Validate all required fields
+    const isValid = await trigger(requiredFields as any)
+
+    if (!isValid) {
+      // Focus on the first field with an error
+      if (errors.name) {
+        nameInputRef.current?.focus()
+        toast.error("Please enter patient name")
+        return
+      }
+      if (errors.phone) {
+        phoneInputRef.current?.focus()
+        toast.error("Please enter a valid phone number")
+        return
+      }
+      if (errors.age) {
+        ageInputRef.current?.focus()
+        toast.error("Please enter patient age")
+        return
+      }
+      if (errors.gender) {
+        toast.error("Please select patient gender")
+        return
+      }
+      if (errors.serviceName) {
+        toast.error("Please enter service name")
+        return
+      }
+      if (errors.doctor) {
+        toast.error("Please select a doctor")
+        return
+      }
+
+      toast.error("Please fill all required fields")
+      return
+    }
+
+    // If all validations pass, proceed with submission
+    onSubmit(data)
+  }
+
   const onSubmit = async (data: IFormInput) => {
     setLoading(true)
     try {
       const appointmentData = {
         date: data.date.toISOString(),
         time: data.time,
-        paymentMethod: data.paymentMethod,
-        amount: data.amount,
+        paymentMethod: data.appointmentType === "visithospital" ? data.paymentMethod : "",
+        amount: data.appointmentType === "visithospital" ? data.amount : 0,
         serviceName: data.serviceName,
         doctor: data.doctor || "no_doctor",
         message: data.message || "",
+        referredBy: data.referredBy || "",
+        appointmentType: data.appointmentType,
         createdAt: new Date().toISOString(),
       }
 
-      let patientId = ""
-      if (selectedPatient) {
-        // Existing patient: update basic info
-        patientId = selectedPatient.id
-        const patientRef = ref(db, `patients/${patientId}`)
-        await update(patientRef, {
+      if (data.appointmentType === "oncall") {
+        // For oncall appointments, save to a separate node
+        const oncallRef = ref(db, "oncall")
+        const newOncallRef = push(oncallRef)
+        await set(newOncallRef, {
           name: data.name,
           phone: data.phone,
           age: data.age,
-          address: data.address,
           gender: data.gender,
+          date: data.date.toISOString(),
+          time: data.time,
+          doctor: data.doctor,
+          serviceName: data.serviceName,
+          appointmentType: "oncall",
+          createdAt: new Date().toISOString(),
+        })
+
+        // Send WhatsApp message for oncall appointment
+        try {
+          const selectedDocName = doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
+          const formattedDate = data.date.toLocaleDateString("en-IN") // e.g. DD/MM/YYYY
+          const professionalMessage = `Hello ${data.name}, 
+Your On-Call appointment at Gautami Hospital has been successfully booked.
+
+Appointment Details:
+• Patient Name: ${data.name}
+• Date: ${formattedDate}
+• Time: ${data.time}
+• Doctor: ${selectedDocName}
+• Service: ${data.serviceName}
+
+Our doctor will call you at the scheduled time. Please keep your phone available.
+
+Thank you,
+Gautami Hospital
+`
+
+          const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
+
+          await fetch("https://wa.medblisss.com/send-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token: "99583991572",
+              number: phoneWithCountryCode,
+              message: professionalMessage,
+            }),
+          })
+        } catch (whatsappError) {
+          console.error("Error sending WhatsApp message:", whatsappError)
+        }
+
+        toast.success("On-call appointment booked successfully!", {
+          position: "top-right",
+          autoClose: 5000,
         })
       } else {
-        // New patient: create fresh record in both DBs
-        const newPatientId = generatePatientId()
-        const newPatientData = {
-          name: data.name,
-          phone: data.phone,
-          age: data.age,
-          gender: data.gender,
-          address: data.address || "",
-          createdAt: new Date().toISOString(),
-          uhid: newPatientId,
+        // For hospital visit appointments, follow the existing flow
+        let patientId = ""
+        if (selectedPatient) {
+          // Existing patient: update basic info
+          patientId = selectedPatient.id
+          const patientRef = ref(db, `patients/${patientId}`)
+          await update(patientRef, {
+            name: data.name,
+            phone: data.phone,
+            age: data.age,
+            address: data.address,
+            gender: data.gender,
+            referredBy: data.referredBy || "",
+          })
+        } else {
+          // New patient: create fresh record in both DBs
+          const newPatientId = generatePatientId()
+          const newPatientData = {
+            name: data.name,
+            phone: data.phone,
+            age: data.age,
+            gender: data.gender,
+            address: data.address || "",
+            referredBy: data.referredBy || "",
+            createdAt: new Date().toISOString(),
+            uhid: newPatientId,
+          }
+          await set(ref(db, `patients/${newPatientId}`), newPatientData)
+          await set(ref(dbMedford, `patients/${newPatientId}`), {
+            name: data.name,
+            contact: data.phone,
+            gender: data.gender,
+            dob: "",
+            patientId: newPatientId,
+            hospitalName: "MEDFORD",
+          })
+          patientId = newPatientId
         }
-        await set(ref(db, `patients/${newPatientId}`), newPatientData)
-        await set(ref(dbMedford, `patients/${newPatientId}`), {
-          name: data.name,
-          contact: data.phone,
-          gender: data.gender,
-          dob: "",
-          patientId: newPatientId,
-          hospitalName: "MEDFORD",
-        })
-        patientId = newPatientId
-      }
 
-      // Push OPD appointment under the patient node
-      const opdRef = ref(db, `patients/${patientId}/opd`)
-      const newOpdRef = push(opdRef)
-      await update(newOpdRef, appointmentData)
+        // Push OPD appointment under the patient node
+        const opdRef = ref(db, `patients/${patientId}/opd`)
+        const newOpdRef = push(opdRef)
+        await update(newOpdRef, appointmentData)
 
-      // ----------------------
-      // Send WhatsApp message
-      // ----------------------
-      try {
-        const selectedDocName =
-          doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
-        const formattedDate = data.date.toLocaleDateString("en-IN") // e.g. DD/MM/YYYY
-        const professionalMessage = `Hello ${data.name}, 
+        // Send WhatsApp message
+        try {
+          const selectedDocName = doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
+          const formattedDate = data.date.toLocaleDateString("en-IN") // e.g. DD/MM/YYYY
+          const professionalMessage = `Hello ${data.name}, 
 Your OPD appointment at Gautami Hospital has been successfully booked.
 
 Appointment Details:
@@ -743,28 +684,26 @@ Thank you,
 Gautami Hospital
 `
 
-        // IMPORTANT: If your phone numbers do not already have country codes,
-        // you may need to prepend "91" or the correct country code here.
-        const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
+          const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
 
-        await fetch("https://wa.medblisss.com/send-text", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token: "99583991572",
-            number: phoneWithCountryCode,
-            message: professionalMessage,
-          }),
+          await fetch("https://wa.medblisss.com/send-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token: "99583991572",
+              number: phoneWithCountryCode,
+              message: professionalMessage,
+            }),
+          })
+        } catch (whatsappError) {
+          console.error("Error sending WhatsApp message:", whatsappError)
+        }
+
+        toast.success("Appointment booked successfully!", {
+          position: "top-right",
+          autoClose: 5000,
         })
-      } catch (whatsappError) {
-        console.error("Error sending WhatsApp message:", whatsappError)
-        // We won't fail the entire booking for a WhatsApp error; just log it.
       }
-
-      toast.success("Appointment booked successfully!", {
-        position: "top-right",
-        autoClose: 5000,
-      })
 
       // Reset the form and state
       reset({
@@ -780,9 +719,10 @@ Gautami Hospital
         amount: 0,
         serviceName: "",
         doctor: "",
+        referredBy: "",
+        appointmentType: "visithospital",
       })
       setPreviewOpen(false)
-      resetTranscript()
       setSelectedPatient(null)
       setPatientNameInput("")
       setPatientPhoneInput("")
@@ -797,25 +737,28 @@ Gautami Hospital
     }
   }
 
+  /**
+   * Delete an oncall appointment
+   */
+  const handleDeleteAppointment = async () => {
+    if (!appointmentToDelete) return
+
+    try {
+      const appointmentRef = ref(db, `oncall/${appointmentToDelete}`)
+      await remove(appointmentRef)
+      toast.success("Appointment deleted successfully")
+      setAppointmentToDelete(null)
+      setDeleteDialogOpen(false)
+    } catch (error) {
+      console.error("Error deleting appointment:", error)
+      toast.error("Failed to delete appointment")
+    }
+  }
+
   /** -------------------------------
    *  TOGGLE START/STOP VOICE CONTROL
    *  -------------------------------
    */
-  const toggleListening = () => {
-    if (micListening) {
-      SpeechRecognition.stopListening()
-      setIsListening(false)
-      toast.info("Voice recognition stopped.")
-    } else {
-      if (browserSupportsSpeechRecognition) {
-        SpeechRecognition.startListening({ continuous: true })
-        setIsListening(true)
-        toast.info("Voice recognition started.")
-      } else {
-        toast.error("Browser does not support speech recognition.")
-      }
-    }
-  }
 
   /** -------------
    *   START TOUR
@@ -858,9 +801,7 @@ Gautami Hospital
             <CardHeader className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="text-2xl md:text-3xl font-bold">
-                    OPD Booking System
-                  </CardTitle>
+                  <CardTitle className="text-2xl md:text-3xl font-bold">OPD Booking System</CardTitle>
                   <CardDescription className="text-emerald-100">
                     Book appointments quickly and efficiently
                   </CardDescription>
@@ -878,23 +819,27 @@ Gautami Hospital
             </CardHeader>
 
             <CardContent className="p-0">
-              <Tabs
-                defaultValue="form"
-                value={activeTab}
-                onValueChange={setActiveTab}
-                className="w-full"
-              >
-                <TabsList className="w-full grid grid-cols-2 rounded-none">
+              <Tabs defaultValue="form" value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="w-full grid grid-cols-3 rounded-none">
                   <TabsTrigger value="form" className="text-sm md:text-base">
                     Appointment Form
                   </TabsTrigger>
-                  <TabsTrigger value="voice" className="text-sm md:text-base">
-                    Voice Control
+                  <TabsTrigger value="oncall" className="text-sm md:text-base">
+                    On-Call List
+                  </TabsTrigger>
+                  <TabsTrigger value="help" className="text-sm md:text-base">
+                    Help
                   </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="form" className="p-6">
-                  <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault()
+                      validateAndSubmit(watch())
+                    }}
+                    className="space-y-6"
+                  >
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* Patient Name Field with Auto-Suggest */}
                       <div className="space-y-2" data-tour="patient-name">
@@ -906,6 +851,7 @@ Gautami Hospital
                           <Input
                             id="name"
                             type="text"
+                            ref={nameInputRef}
                             value={patientNameInput}
                             onChange={(e) => {
                               setPatientNameInput(e.target.value)
@@ -915,7 +861,7 @@ Gautami Hospital
                               setSelectedPatient(null)
                             }}
                             placeholder="Enter patient name"
-                            className="pl-10"
+                            className={`pl-10 ${errors.name ? "border-red-500" : ""}`}
                           />
                           {patientSuggestions.length > 0 && !selectedPatient && (
                             <ScrollArea className="absolute z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md w-full mt-1 max-h-48 shadow-lg">
@@ -924,32 +870,20 @@ Gautami Hospital
                                   <div
                                     key={suggestion.id}
                                     className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-md cursor-pointer"
-                                    onClick={() =>
-                                      handlePatientSuggestionClick(suggestion)
-                                    }
+                                    onClick={() => handlePatientSuggestionClick(suggestion)}
                                   >
                                     <div className="flex items-center gap-2">
                                       <Avatar className="h-6 w-6">
                                         <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                          {suggestion.name
-                                            .substring(0, 2)
-                                            .toUpperCase()}
+                                          {suggestion.name.substring(0, 2).toUpperCase()}
                                         </AvatarFallback>
                                       </Avatar>
-                                      <span className="font-medium">
-                                        {suggestion.name}
-                                      </span>
+                                      <span className="font-medium">{suggestion.name}</span>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-sm text-gray-500">
-                                        {suggestion.phone || "No phone"}
-                                      </span>
+                                      <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
                                       <Badge
-                                        variant={
-                                          suggestion.source === "gautami"
-                                            ? "default"
-                                            : "secondary"
-                                        }
+                                        variant={suggestion.source === "gautami" ? "default" : "secondary"}
                                         className="text-xs"
                                       >
                                         {suggestion.source}
@@ -962,9 +896,7 @@ Gautami Hospital
                           )}
                         </div>
                         {errors.name && (
-                          <p className="text-sm text-red-500">
-                            {errors.name.message || "Name is required"}
-                          </p>
+                          <p className="text-sm text-red-500">{errors.name.message || "Name is required"}</p>
                         )}
                       </div>
 
@@ -978,18 +910,15 @@ Gautami Hospital
                           <Input
                             id="phone"
                             type="tel"
+                            ref={phoneInputRef}
                             value={patientPhoneInput}
                             onChange={(e) => {
                               const val = e.target.value
                               setPatientPhoneInput(val)
                               setValue("phone", val, { shouldValidate: true })
                               if (val.trim().length >= 2) {
-                                const suggestions = [
-                                  ...gautamiPatients,
-                                  ...medfordPatients,
-                                ].filter(
-                                  (p) =>
-                                    p.phone && p.phone.includes(val.trim()),
+                                const suggestions = [...gautamiPatients, ...medfordPatients].filter(
+                                  (p) => p.phone && p.phone.includes(val.trim()),
                                 )
                                 setPhoneSuggestions(suggestions)
                               } else {
@@ -997,7 +926,7 @@ Gautami Hospital
                               }
                             }}
                             placeholder="Enter 10-digit number"
-                            className="pl-10"
+                            className={`pl-10 ${errors.phone ? "border-red-500" : ""}`}
                           />
                           {phoneSuggestions.length > 0 && (
                             <div
@@ -1007,33 +936,21 @@ Gautami Hospital
                               {phoneSuggestions.map((suggestion) => (
                                 <div
                                   key={suggestion.id}
-                                  onClick={() =>
-                                    handlePatientSuggestionClick(suggestion)
-                                  }
+                                  onClick={() => handlePatientSuggestionClick(suggestion)}
                                   className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 cursor-pointer"
                                 >
                                   <div className="flex items-center gap-2">
                                     <Avatar className="h-6 w-6">
                                       <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                        {suggestion.name
-                                          .substring(0, 2)
-                                          .toUpperCase()}
+                                        {suggestion.name.substring(0, 2).toUpperCase()}
                                       </AvatarFallback>
                                     </Avatar>
-                                    <span className="font-medium">
-                                      {suggestion.name}
-                                    </span>
+                                    <span className="font-medium">{suggestion.name}</span>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="text-sm text-gray-500">
-                                      {suggestion.phone || "No phone"}
-                                    </span>
+                                    <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
                                     <Badge
-                                      variant={
-                                        suggestion.source === "gautami"
-                                          ? "default"
-                                          : "secondary"
-                                      }
+                                      variant={suggestion.source === "gautami" ? "default" : "secondary"}
                                       className="text-xs"
                                     >
                                       {suggestion.source}
@@ -1045,9 +962,7 @@ Gautami Hospital
                           )}
                         </div>
                         {errors.phone && (
-                          <p className="text-sm text-red-500">
-                            {errors.phone.message || "Phone number is required"}
-                          </p>
+                          <p className="text-sm text-red-500">{errors.phone.message || "Phone number is required"}</p>
                         )}
                       </div>
 
@@ -1066,14 +981,10 @@ Gautami Hospital
                               min: { value: 1, message: "Age must be positive" },
                             })}
                             placeholder="Enter age"
-                            className="pl-10"
+                            className={`pl-10 ${errors.age ? "border-red-500" : ""}`}
                           />
                         </div>
-                        {errors.age && (
-                          <p className="text-sm text-red-500">
-                            {errors.age.message}
-                          </p>
-                        )}
+                        {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
                       </div>
 
                       {/* Gender Field */}
@@ -1086,11 +997,8 @@ Gautami Hospital
                           name="gender"
                           rules={{ required: "Gender is required" }}
                           render={({ field }) => (
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                            >
-                              <SelectTrigger>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <SelectTrigger className={errors.gender ? "border-red-500" : ""}>
                                 <SelectValue placeholder="Select gender" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1103,27 +1011,69 @@ Gautami Hospital
                             </Select>
                           )}
                         />
-                        {errors.gender && (
-                          <p className="text-sm text-red-500">
-                            {errors.gender.message}
-                          </p>
-                        )}
+                        {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
                       </div>
 
-                      {/* Address Field */}
-                      <div className="space-y-2" data-tour="address">
-                        <Label htmlFor="address" className="text-sm font-medium">
-                          Address
+                      {/* Appointment Type Selection */}
+                      <div className="space-y-2 col-span-2">
+                        <Label htmlFor="appointmentType" className="text-sm font-medium">
+                          Appointment Type <span className="text-red-500">*</span>
                         </Label>
-                        <div className="relative">
-                          <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                          <Textarea
-                            id="address"
-                            {...register("address")}
-                            placeholder="Enter address (optional)"
-                            className="pl-10 min-h-[80px]"
-                          />
+                        <div className="grid grid-cols-2 gap-4">
+                          <div
+                            className={`border rounded-md p-3 cursor-pointer transition-colors ${
+                              watch("appointmentType") === "visithospital"
+                                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
+                                : "border-gray-200 dark:border-gray-700"
+                            }`}
+                            onClick={() => setValue("appointmentType", "visithospital")}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                className={`h-4 w-4 rounded-full border ${
+                                  watch("appointmentType") === "visithospital"
+                                    ? "border-emerald-500 bg-emerald-500"
+                                    : "border-gray-300"
+                                }`}
+                              ></div>
+                              <span className="font-medium">Visit Hospital</span>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1 ml-6">Patient will visit the hospital in person</p>
+                          </div>
+                          <div
+                            className={`border rounded-md p-3 cursor-pointer transition-colors ${
+                              watch("appointmentType") === "oncall"
+                                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
+                                : "border-gray-200 dark:border-gray-700"
+                            }`}
+                            onClick={() => setValue("appointmentType", "oncall")}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div
+                                className={`h-4 w-4 rounded-full border ${
+                                  watch("appointmentType") === "oncall"
+                                    ? "border-emerald-500 bg-emerald-500"
+                                    : "border-gray-300"
+                                }`}
+                              ></div>
+                              <span className="font-medium">On-Call</span>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1 ml-6">Remote consultation via phone</p>
+                          </div>
                         </div>
+                      </div>
+
+                      {/* Referred By Field */}
+                      <div className="space-y-2">
+                        <Label htmlFor="referredBy" className="text-sm font-medium">
+                          Referred By
+                        </Label>
+                        <Input
+                          id="referredBy"
+                          type="text"
+                          {...register("referredBy")}
+                          placeholder="Enter referrer name (optional)"
+                        />
                       </div>
 
                       {/* Date Field */}
@@ -1140,21 +1090,17 @@ Gautami Hospital
                             render={({ field }) => (
                               <DatePicker
                                 selected={field.value}
-                                onChange={(date: Date | null) =>
-                                  date && field.onChange(date)
-                                }
+                                onChange={(date: Date | null) => date && field.onChange(date)}
                                 dateFormat="dd/MM/yyyy"
                                 placeholderText="Select Date"
-                                className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 border-gray-300 dark:border-gray-600 dark:bg-gray-800"
+                                className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 border-gray-300 dark:border-gray-600 dark:bg-gray-800 ${
+                                  errors.date ? "border-red-500" : ""
+                                }`}
                               />
                             )}
                           />
                         </div>
-                        {errors.date && (
-                          <p className="text-sm text-red-500">
-                            {errors.date.message}
-                          </p>
-                        )}
+                        {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
                       </div>
 
                       {/* Time Field */}
@@ -1171,55 +1117,14 @@ Gautami Hospital
                               required: "Time is required",
                             })}
                             placeholder="e.g. 10:30 AM"
-                            className="pl-10"
+                            className={`pl-10 ${errors.time ? "border-red-500" : ""}`}
                             defaultValue={formatAMPM(new Date())}
                           />
                         </div>
-                        {errors.time && (
-                          <p className="text-sm text-red-500">
-                            {errors.time.message}
-                          </p>
-                        )}
+                        {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
                       </div>
 
-                      {/* Payment Method Field */}
-                      <div className="space-y-2" data-tour="paymentMethod">
-                        <Label
-                          htmlFor="paymentMethod"
-                          className="text-sm font-medium"
-                        >
-                          Payment Method <span className="text-red-500">*</span>
-                        </Label>
-                        <Controller
-                          control={control}
-                          name="paymentMethod"
-                          rules={{ required: "Payment method is required" }}
-                          render={({ field }) => (
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select payment method" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PaymentOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        {errors.paymentMethod && (
-                          <p className="text-sm text-red-500">
-                            {errors.paymentMethod.message}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Service Name Field */}
+                      {/* Service Name Field - Now for both appointment types */}
                       <div className="space-y-2" data-tour="serviceName">
                         <Label htmlFor="serviceName" className="text-sm font-medium">
                           Service Name <span className="text-red-500">*</span>
@@ -1233,17 +1138,13 @@ Gautami Hospital
                               required: "Service name is required",
                             })}
                             placeholder="Enter service name"
-                            className="pl-10"
+                            className={`pl-10 ${errors.serviceName ? "border-red-500" : ""}`}
                           />
                         </div>
-                        {errors.serviceName && (
-                          <p className="text-sm text-red-500">
-                            {errors.serviceName.message}
-                          </p>
-                        )}
+                        {errors.serviceName && <p className="text-sm text-red-500">{errors.serviceName.message}</p>}
                       </div>
 
-                      {/* Doctor Selection Field */}
+                      {/* Doctor Selection Field - Now for both appointment types */}
                       <div className="space-y-2" data-tour="doctor">
                         <Label htmlFor="doctor" className="text-sm font-medium">
                           Doctor <span className="text-red-500">*</span>
@@ -1251,90 +1152,125 @@ Gautami Hospital
                         <Controller
                           control={control}
                           name="doctor"
-                          rules={{ required: "Doctor selection is required" }}
+                          rules={{
+                            required: "Doctor selection is required",
+                          }}
                           render={({ field }) => (
-                            <Select
-                              onValueChange={field.onChange}
-                              defaultValue={field.value}
-                            >
-                              <SelectTrigger>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <SelectTrigger className={errors.doctor ? "border-red-500" : ""}>
                                 <SelectValue placeholder="Select doctor" />
                               </SelectTrigger>
                               <SelectContent>
                                 {doctors.map((doctor) => (
                                   <SelectItem key={doctor.id} value={doctor.id}>
-                                    {doctor.name}{" "}
-                                    {doctor.specialty
-                                      ? `(${doctor.specialty})`
-                                      : ""}
+                                    {doctor.name} {doctor.specialty ? `(${doctor.specialty})` : ""}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           )}
                         />
-                        {errors.doctor && (
-                          <p className="text-sm text-red-500">
-                            {errors.doctor.message}
-                          </p>
-                        )}
+                        {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
                       </div>
 
-                      {/* Amount Field */}
-                      <div className="space-y-2" data-tour="amount">
-                        <Label htmlFor="amount" className="text-sm font-medium">
-                          Amount (Rs) <span className="text-red-500">*</span>
+                      {/* Conditional fields for hospital visit only */}
+                      {watch("appointmentType") === "visithospital" && (
+                        <>
+                          {/* Address Field */}
+                          <div className="space-y-2" data-tour="address">
+                            <Label htmlFor="address" className="text-sm font-medium">
+                              Address
+                            </Label>
+                            <div className="relative">
+                              <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
+                              <Textarea
+                                id="address"
+                                {...register("address")}
+                                placeholder="Enter address (optional)"
+                                className="pl-10 min-h-[80px]"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Payment Method Field */}
+                          <div className="space-y-2" data-tour="paymentMethod">
+                            <Label htmlFor="paymentMethod" className="text-sm font-medium">
+                              Payment Method <span className="text-red-500">*</span>
+                            </Label>
+                            <Controller
+                              control={control}
+                              name="paymentMethod"
+                              rules={{
+                                required:
+                                  watch("appointmentType") === "visithospital" ? "Payment method is required" : false,
+                              }}
+                              render={({ field }) => (
+                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                  <SelectTrigger className={errors.paymentMethod ? "border-red-500" : ""}>
+                                    <SelectValue placeholder="Select payment method" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PaymentOptions.map((option) => (
+                                      <SelectItem key={option.value} value={option.value}>
+                                        {option.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                            {errors.paymentMethod && (
+                              <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>
+                            )}
+                          </div>
+
+                          {/* Amount Field */}
+                          <div className="space-y-2" data-tour="amount">
+                            <Label htmlFor="amount" className="text-sm font-medium">
+                              Amount (Rs) <span className="text-red-500">*</span>
+                            </Label>
+                            <div className="relative">
+                              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                              <Input
+                                id="amount"
+                                type="number"
+                                {...register("amount", {
+                                  required: watch("appointmentType") === "visithospital" ? "Amount is required" : false,
+                                  min: { value: 0, message: "Amount must be positive" },
+                                })}
+                                placeholder="Enter amount"
+                                className={`pl-10 ${errors.amount ? "border-red-500" : ""}`}
+                              />
+                            </div>
+                            {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
+                          </div>
+                        </>
+                      )}
+
+                      {/* Message Field - For both types */}
+                      <div className="space-y-2 col-span-2" data-tour="message">
+                        <Label htmlFor="message" className="text-sm font-medium">
+                          Additional Notes
                         </Label>
                         <div className="relative">
-                          <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="amount"
-                            type="number"
-                            {...register("amount", {
-                              required: "Amount is required",
-                              min: { value: 0, message: "Amount must be positive" },
-                            })}
-                            placeholder="Enter amount"
-                            className="pl-10"
+                          <MessageSquare className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
+                          <Textarea
+                            id="message"
+                            {...register("message")}
+                            placeholder="Enter any additional notes (optional)"
+                            className="pl-10 min-h-[100px]"
                           />
                         </div>
-                        {errors.amount && (
-                          <p className="text-sm text-red-500">
-                            {errors.amount.message}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Message Field */}
-                    <div className="space-y-2" data-tour="message">
-                      <Label htmlFor="message" className="text-sm font-medium">
-                        Additional Notes
-                      </Label>
-                      <div className="relative">
-                        <MessageSquare className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                        <Textarea
-                          id="message"
-                          {...register("message")}
-                          placeholder="Enter any additional notes (optional)"
-                          className="pl-10 min-h-[100px]"
-                        />
                       </div>
                     </div>
 
                     <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => setPreviewOpen(true)}
-                      >
+                      <Button type="button" variant="outline" className="flex-1" onClick={() => setPreviewOpen(true)}>
                         Preview
                       </Button>
                       <Button
                         type="submit"
                         className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700"
-                        disabled={loading || !isValid}
                       >
                         {loading ? "Submitting..." : "Book Appointment"}
                       </Button>
@@ -1342,111 +1278,165 @@ Gautami Hospital
                   </form>
                 </TabsContent>
 
-                <TabsContent value="voice" className="p-6">
+                <TabsContent value="oncall" className="p-6">
+                  <div className="space-y-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+                      <h3 className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">
+                        On-Call Appointments
+                      </h3>
+                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+                        <div className="relative flex-1 sm:w-64">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                          <Input
+                            placeholder="Search appointments..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="pl-10"
+                          />
+                          {searchQuery && (
+                            <button
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                              onClick={() => setSearchQuery("")}
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                        <Button
+                          onClick={() => {
+                            setActiveTab("form")
+                            setValue("appointmentType", "oncall")
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-700"
+                        >
+                          Book On-Call
+                        </Button>
+                      </div>
+                    </div>
+
+                    {filteredOncallAppointments.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        {searchQuery ? "No matching appointments found" : "No on-call appointments found"}
+                      </div>
+                    ) : (
+                      <ScrollArea className="h-[500px]">
+                        <div className="space-y-4">
+                          {filteredOncallAppointments.map((appointment) => (
+                            <Card key={appointment.id} className="overflow-hidden">
+                              <CardHeader className="bg-emerald-50 dark:bg-gray-800 p-4">
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <CardTitle className="text-lg">{appointment.name}</CardTitle>
+                                    <CardDescription>
+                                      {new Date(appointment.date).toLocaleDateString()} at {appointment.time}
+                                    </CardDescription>
+                                  </div>
+                                  <Badge>On-Call</Badge>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="p-4">
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div className="font-medium">Phone:</div>
+                                  <div>{appointment.phone}</div>
+
+                                  <div className="font-medium">Age:</div>
+                                  <div>{appointment.age}</div>
+
+                                  <div className="font-medium">Gender:</div>
+                                  <div>{appointment.gender}</div>
+
+                                  {appointment.serviceName && (
+                                    <>
+                                      <div className="font-medium">Service:</div>
+                                      <div>{appointment.serviceName}</div>
+                                    </>
+                                  )}
+
+                                  {appointment.doctor && (
+                                    <>
+                                      <div className="font-medium">Doctor:</div>
+                                      <div>
+                                        {doctors.find((d) => d.id === appointment.doctor)?.name || appointment.doctor}
+                                      </div>
+                                    </>
+                                  )}
+
+                                  <div className="font-medium">Created:</div>
+                                  <div>{new Date(appointment.createdAt).toLocaleString()}</div>
+                                </div>
+                              </CardContent>
+                              <CardFooter className="bg-gray-50 dark:bg-gray-900 p-3 flex justify-between">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => {
+                                    setAppointmentToDelete(appointment.id)
+                                    setDeleteDialogOpen(true)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 mr-1" />
+                                  Delete
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setActiveTab("form")
+                                    setValue("name", appointment.name)
+                                    setValue("phone", appointment.phone)
+                                    setValue("age", appointment.age)
+                                    setValue("gender", appointment.gender)
+                                    setValue("appointmentType", "visithospital")
+                                    setPatientNameInput(appointment.name)
+                                    setPatientPhoneInput(appointment.phone)
+                                    toast.info("On-call patient details loaded to form")
+                                  }}
+                                >
+                                  Book OPD Visit
+                                </Button>
+                              </CardFooter>
+                            </Card>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="help" className="p-6">
                   <div className="space-y-6">
                     <div className="bg-emerald-50 dark:bg-gray-800 rounded-lg p-4 border border-emerald-100 dark:border-gray-700">
                       <h3 className="text-lg font-semibold mb-2 text-emerald-700 dark:text-emerald-400">
-                        Voice Control
+                        Help & Instructions
                       </h3>
                       <p className="text-gray-600 dark:text-gray-300 mb-4">
-                        Use voice commands to fill the form hands‑free. Click
-                        the button below to start or stop voice recognition.
+                        Learn how to use the OPD Booking System efficiently.
                       </p>
 
-                      <div
-                        className="flex flex-wrap gap-4 mb-6"
-                        data-tour="voice-control"
-                      >
-                        <Button
-                          type="button"
-                          onClick={toggleListening}
-                          variant={isListening ? "destructive" : "default"}
-                          className={
-                            isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"
-                          }
-                        >
-                          {isListening ? (
-                            <MicOff className="mr-2 h-4 w-4" />
-                          ) : (
-                            <Mic className="mr-2 h-4 w-4" />
-                          )}
-                          {isListening ? "Stop Listening" : "Start Voice Control"}
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            resetTranscript()
-                            toast.info("Transcript cleared.")
-                          }}
-                          variant="outline"
-                        >
-                          Clear Transcript
-                        </Button>
-                      </div>
-
-                      {isListening && (
-                        <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700 mb-6">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="relative">
-                              <div className="absolute -inset-1 rounded-full bg-red-500 animate-ping opacity-75"></div>
-                              <div className="relative rounded-full h-3 w-3 bg-red-600"></div>
-                            </div>
-                            <h4 className="font-medium">Listening...</h4>
-                          </div>
-                          <ScrollArea className="h-40 w-full rounded-md border p-2">
-                            <p className="text-gray-700 dark:text-gray-300">
-                              {transcript}
-                            </p>
-                          </ScrollArea>
-                        </div>
-                      )}
-
                       <div className="space-y-4">
-                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">
-                          Available Voice Commands
-                        </h4>
+                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">Appointment Types</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">
-                              Patient Information
+                            <p className="font-medium mb-1">Visit Hospital</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              For patients who will physically visit the hospital. Complete all details including doctor
+                              selection.
                             </p>
-                            <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>name [patient name]</li>
-                              <li>number [phone number]</li>
-                              <li>age [number]</li>
-                              <li>gender [male/female/other]</li>
-                              <li>address [address details]</li>
-                            </ul>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">
-                              Appointment Details
+                            <p className="font-medium mb-1">On-Call</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              For remote consultations. Basic patient details, service name, and doctor selection are
+                              required.
                             </p>
-                            <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>set date to [date]</li>
-                              <li>set time to [time]</li>
-                              <li>message [your message]</li>
-                              <li>service [service name]</li>
-                              <li>select doctor [doctor name]</li>
-                            </ul>
                           </div>
-                          <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">Payment</p>
-                            <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>
-                                payment method [cash/online/card/upi]
-                              </li>
-                              <li>amount [number]</li>
-                            </ul>
-                          </div>
-                          <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">Form Actions</p>
-                            <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                              <li>preview - Preview the form</li>
-                              <li>cancel - Cancel preview</li>
-                              <li>submit - Submit the form</li>
-                            </ul>
-                          </div>
+                        </div>
+
+                        <div className="mt-4">
+                          <Button variant="outline" size="sm" onClick={startTour}>
+                            <HelpCircle className="mr-2 h-4 w-4" />
+                            Start Guided Tour
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -1462,16 +1452,10 @@ Gautami Hospital
                     <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     <span className="text-sm font-medium">
                       Patient selected:{" "}
-                      <span className="text-emerald-600 dark:text-emerald-400">
-                        {selectedPatient.name}
-                      </span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{selectedPatient.name}</span>
                     </span>
                   </div>
-                  <Badge
-                    variant={
-                      selectedPatient.source === "gautami" ? "default" : "secondary"
-                    }
-                  >
+                  <Badge variant={selectedPatient.source === "gautami" ? "default" : "secondary"}>
                     {selectedPatient.source.toUpperCase()}
                   </Badge>
                 </div>
@@ -1487,21 +1471,6 @@ Gautami Hospital
                   <HelpCircle className="mr-2 h-4 w-4" />
                   Tour
                 </Button>
-                <Button
-                  variant={isListening ? "destructive" : "default"}
-                  size="sm"
-                  onClick={toggleListening}
-                  className={
-                    isListening ? "" : "bg-emerald-600 hover:bg-emerald-700"
-                  }
-                >
-                  {isListening ? (
-                    <MicOff className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Mic className="mr-2 h-4 w-4" />
-                  )}
-                  {isListening ? "Stop" : "Voice"}
-                </Button>
               </div>
             </CardFooter>
           </Card>
@@ -1513,13 +1482,14 @@ Gautami Hospital
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Appointment Preview</DialogTitle>
-            <DialogDescription>
-              Review your appointment details before submitting
-            </DialogDescription>
+            <DialogDescription>Review your appointment details before submitting</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div className="font-medium">Appointment Type:</div>
+              <div>{watch("appointmentType") === "visithospital" ? "Visit Hospital" : "On-Call"}</div>
+
               <div className="font-medium">Patient Name:</div>
               <div>{watch("name")}</div>
 
@@ -1530,14 +1500,16 @@ Gautami Hospital
               <div>{watch("age")}</div>
 
               <div className="font-medium">Gender:</div>
-              <div>
-                {
-                  GenderOptions.find((g) => g.value === watch("gender"))
-                    ?.label || watch("gender")
-                }
-              </div>
+              <div>{GenderOptions.find((g) => g.value === watch("gender"))?.label || watch("gender")}</div>
 
-              {watch("address") && (
+              {watch("referredBy") && (
+                <>
+                  <div className="font-medium">Referred By:</div>
+                  <div>{watch("referredBy")}</div>
+                </>
+              )}
+
+              {watch("address") && watch("appointmentType") === "visithospital" && (
                 <>
                   <div className="font-medium">Address:</div>
                   <div>{watch("address")}</div>
@@ -1554,43 +1526,36 @@ Gautami Hospital
               <div>{watch("serviceName")}</div>
 
               <div className="font-medium">Doctor:</div>
-              <div>
-                {doctors.find((d) => d.id === watch("doctor"))?.name ||
-                  "No Doctor"}
-              </div>
+              <div>{doctors.find((d) => d.id === watch("doctor"))?.name || "No Doctor"}</div>
 
-              <div className="font-medium">Payment Method:</div>
-              <div>
-                {
-                  PaymentOptions.find(
-                    (p) => p.value === watch("paymentMethod"),
-                  )?.label || watch("paymentMethod")
-                }
-              </div>
-
-              <div className="font-medium">Amount:</div>
-              <div>₹ {watch("amount")}</div>
-
-              {watch("message") && (
+              {watch("appointmentType") === "visithospital" && (
                 <>
-                  <div className="font-medium">Notes:</div>
-                  <div>{watch("message")}</div>
+                  <div className="font-medium">Payment Method:</div>
+                  <div>
+                    {PaymentOptions.find((p) => p.value === watch("paymentMethod"))?.label || watch("paymentMethod")}
+                  </div>
+
+                  <div className="font-medium">Amount:</div>
+                  <div>₹ {watch("amount")}</div>
+
+                  {watch("message") && (
+                    <>
+                      <div className="font-medium">Notes:</div>
+                      <div>{watch("message")}</div>
+                    </>
+                  )}
                 </>
               )}
             </div>
           </div>
 
           <DialogFooter className="sm:justify-between">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setPreviewOpen(false)}
-            >
+            <Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>
               Cancel
             </Button>
             <Button
               type="button"
-              onClick={handleSubmit(onSubmit)}
+              onClick={() => validateAndSubmit(watch())}
               disabled={loading}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
@@ -1599,6 +1564,24 @@ Gautami Hospital
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Appointment</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this on-call appointment? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setAppointmentToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteAppointment} className="bg-red-500 hover:bg-red-600">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }

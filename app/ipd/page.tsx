@@ -1,13 +1,13 @@
 "use client";
 import React, { useState, useEffect, useMemo } from "react";
 import { useForm, SubmitHandler, Controller } from "react-hook-form";
-import { db } from "../../lib/firebase"; // Gautami DB
-import { db as dbMedford } from "../../lib/firebaseMedford"; // Medford DB
+import { db } from "@/lib/firebase"; // Gautami DB
+import { db as dbMedford } from "@/lib/firebaseMedford"; // Medford DB
 import { ref, push, update, onValue, set } from "firebase/database";
 import Head from "next/head";
 
 // UPDATED IMPORTS:
-import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, ChevronRight, AlertCircle, Send, FileText, ArrowLeft } from 'lucide-react';
+import { User, Phone, UserRound, Calendar, Clock, Home, Users, Stethoscope, CheckCircle, XCircle, Eye, Bed, ChevronRight, AlertCircle, Send, FileText, ArrowLeft, UserPlus, Clipboard, Building, UserCheck } from 'lucide-react';
 
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -40,6 +40,9 @@ export interface IPDFormInput {
   doctor: { label: string; value: string } | null;
   referDoctor?: string;
   admissionType: { label: string; value: string } | null;
+  
+  // New fields
+  admissionSource: { label: string; value: string } | null;
 }
 
 interface PatientRecord {
@@ -83,12 +86,20 @@ const GenderOptions = [
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
 ];
+
 const AdmissionTypeOptions = [
   { value: "general", label: "General" },
   { value: "surgery", label: "Surgery" },
   { value: "accident_emergency", label: "Accident/Emergency" },
   { value: "day_observation", label: "Day Observation" },
 ];
+
+const AdmissionSourceOptions = [
+  { value: "opd", label: "OPD" },
+  { value: "casualty", label: "Casualty" },
+  { value: "referral", label: "Referral" },
+];
+
 const RoomTypeOptions = [
   { value: "female_ward", label: "Female Ward" },
   { value: "icu", label: "ICU" },
@@ -146,6 +157,7 @@ const IPDBookingPage: React.FC = () => {
       doctor: null,
       referDoctor: "",
       admissionType: AdmissionTypeOptions.find(opt => opt.value === "general") || null,
+      admissionSource: AdmissionSourceOptions.find(opt => opt.value === "opd") || null,
     },
   });
 
@@ -169,15 +181,13 @@ const IPDBookingPage: React.FC = () => {
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
   const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
 
-  // Watch the currently selected room type (used below)
+  // Watch the currently selected room type and admission source (used below)
   const selectedRoomType = watch("roomType");
+  const selectedAdmissionSource = watch("admissionSource");
 
   // NEW: All bed data for the "View Bed Availability" popup
   const [allBedData, setAllBedData] = useState<any>({});
   const [showBedPopup, setShowBedPopup] = useState(false);
-  
-  // Form step state for multi-step form
-  const [formStep, setFormStep] = useState(0);
 
   /* -----------------------------------------------------------------
      3A) Fetching data: Doctors, Patients, All Beds
@@ -470,6 +480,7 @@ const IPDBookingPage: React.FC = () => {
         doctor: data.doctor?.value || "",
         referDoctor: data.referDoctor || "",
         admissionType: data.admissionType?.value || "",
+        admissionSource: data.admissionSource?.value || "",
         createdAt: new Date().toISOString(),
       };
 
@@ -542,12 +553,12 @@ const IPDBookingPage: React.FC = () => {
         doctor: null,
         referDoctor: "",
         admissionType: null,
+        admissionSource: AdmissionSourceOptions.find(opt => opt.value === "opd") || null,
       });
       setPatientNameInput("");
       setPatientPhoneInput("");
       setSelectedPatient(null);
       setPreviewData(null);
-      setFormStep(0);
     } catch (err) {
       console.error("Error in IPD booking:", err);
       toast.error("Error: Failed to book IPD admission.", {
@@ -609,35 +620,33 @@ const IPDBookingPage: React.FC = () => {
 
       <ToastContainer />
 
-      <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4 md:p-6">
-        <div className="w-full max-w-4xl bg-white rounded-2xl shadow-xl overflow-hidden">
+      <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
+        <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl md:text-3xl font-bold">IPD Admission</h2>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs md:text-sm bg-white/20 py-1 px-3 rounded-full">
-                  {formStep === 0 ? "Patient Details" : formStep === 1 ? "Relative Details" : "Admission Details"}
-                </span>
+              <div className="flex items-center space-x-3">
+                <UserPlus className="h-8 w-8" />
+                <h2 className="text-2xl md:text-3xl font-bold">IPD Admission</h2>
               </div>
-            </div>
-            <div className="mt-4 flex justify-between">
-              <div className="flex space-x-1">
-                <div className={`h-1 w-10 rounded-full ${formStep >= 0 ? "bg-white" : "bg-white/30"}`}></div>
-                <div className={`h-1 w-10 rounded-full ${formStep >= 1 ? "bg-white" : "bg-white/30"}`}></div>
-                <div className={`h-1 w-10 rounded-full ${formStep >= 2 ? "bg-white" : "bg-white/30"}`}></div>
+              <div className="bg-white/20 py-1 px-3 rounded-full text-sm">
+                Complete all fields in one form
               </div>
-              <div className="text-sm text-white/80">Step {formStep + 1} of 3</div>
             </div>
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="p-6">
-            {/* Step 1: Patient Details */}
-            {formStep === 0 && (
-              <div className="space-y-6 animate-fadeIn">
+            <div className="space-y-8">
+              {/* Section: Patient Information */}
+              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
+                  <User className="mr-2 h-5 w-5" />
+                  Patient Information
+                </h3>
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Patient Name + Suggestions */}
-                  <div className="relative col-span-full">
+                  <div className="relative md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
                     <div className="relative">
                       <User className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -695,7 +704,7 @@ const IPDBookingPage: React.FC = () => {
                   </div>
 
                   {/* Phone with Auto-Complete */}
-                  <div className="relative col-span-full">
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
                     <div className="relative">
                       <Phone className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -802,7 +811,7 @@ const IPDBookingPage: React.FC = () => {
                   </div>
 
                   {/* Address */}
-                  <div className="relative col-span-full">
+                  <div className="relative md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Address (Optional)</label>
                     <div className="relative">
                       <Home className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -815,26 +824,18 @@ const IPDBookingPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-
-                <div className="pt-4 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setFormStep(1)}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
-                  >
-                    Next: Relative Details
-                    <ChevronRight className="ml-2 h-5 w-5" />
-                  </button>
-                </div>
               </div>
-            )}
 
-            {/* Step 2: Relative Details */}
-            {formStep === 1 && (
-              <div className="space-y-6 animate-fadeIn">
+              {/* Section: Relative Information */}
+              <div className="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                <h3 className="text-lg font-semibold text-indigo-800 mb-4 flex items-center">
+                  <Users className="mr-2 h-5 w-5" />
+                  Relative Information
+                </h3>
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Relative Name */}
-                  <div className="relative col-span-full">
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Relative Name</label>
                     <div className="relative">
                       <Users className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -858,7 +859,7 @@ const IPDBookingPage: React.FC = () => {
                   </div>
 
                   {/* Relative Phone */}
-                  <div className="relative col-span-full">
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Relative Phone Number</label>
                     <div className="relative">
                       <Phone className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -886,7 +887,7 @@ const IPDBookingPage: React.FC = () => {
                   </div>
 
                   {/* Relative Address */}
-                  <div className="relative col-span-full">
+                  <div className="relative md:col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Relative Address (Optional)</label>
                     <div className="relative">
                       <Home className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -899,33 +900,93 @@ const IPDBookingPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
-
-                <div className="pt-4 flex justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setFormStep(0)}
-                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 flex items-center"
-                  >
-                    <ArrowLeft className="mr-2 h-5 w-5" />
-                    Back
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormStep(2)}
-                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center"
-                  >
-                    Next: Admission Details
-                    <ChevronRight className="ml-2 h-5 w-5" />
-                  </button>
-                </div>
               </div>
-            )}
 
-            {/* Step 3: Admission Details */}
-            {formStep === 2 && (
-              <div className="space-y-6 animate-fadeIn">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Date & Time */}
+              {/* Section: Admission Details */}
+              <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+                <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center">
+                  <Clipboard className="mr-2 h-5 w-5" />
+                  Admission Details
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Admission Source - NEW FIELD */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Source</label>
+                    <Controller
+                      control={control}
+                      name="admissionSource"
+                      rules={{ required: "Admission source is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={AdmissionSourceOptions}
+                          placeholder="Select Source"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.admissionSource && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.admissionSource.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Referral Doctor - Conditional Field */}
+                  {selectedAdmissionSource?.value === "referral" && (
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor</label>
+                      <div className="relative">
+                        <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                        <input
+                          type="text"
+                          {...register("referDoctor", {
+                            required: selectedAdmissionSource?.value === "referral" ? "Referral doctor name is required" : false,
+                          })}
+                          placeholder="Name of referring doctor"
+                          className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                            errors.referDoctor ? "border-red-500" : "border-gray-300"
+                          } transition duration-200`}
+                        />
+                      </div>
+                      {errors.referDoctor && (
+                        <p className="text-red-500 text-sm mt-1 flex items-center">
+                          <AlertCircle className="h-4 w-4 mr-1" />
+                          {errors.referDoctor.message}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Admission Type */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Type</label>
+                    <Controller
+                      control={control}
+                      name="admissionType"
+                      rules={{ required: "Admission Type is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={AdmissionTypeOptions}
+                          placeholder="Select Admission Type"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.admissionType && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.admissionType.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Date */}
                   <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Admission Date</label>
                     <div className="relative">
@@ -953,6 +1014,7 @@ const IPDBookingPage: React.FC = () => {
                     )}
                   </div>
                   
+                  {/* Time */}
                   <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Admission Time</label>
                     <div className="relative">
@@ -975,7 +1037,44 @@ const IPDBookingPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Room Type & Bed */}
+                  {/* Doctor */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Under Care of Doctor
+                    </label>
+                    <Controller
+                      control={control}
+                      name="doctor"
+                      rules={{ required: "Doctor selection is required" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={doctors}
+                          placeholder="Select Doctor"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.doctor && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.doctor.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Section: Room & Bed */}
+              <div className="bg-amber-50 p-4 rounded-lg border border-amber-100">
+                <h3 className="text-lg font-semibold text-amber-800 mb-4 flex items-center">
+                  <Building className="mr-2 h-5 w-5" />
+                  Room & Bed Assignment
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Room Type */}
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-sm font-medium text-gray-700">Room Type</label>
@@ -1010,6 +1109,7 @@ const IPDBookingPage: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Bed */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Bed</label>
                     <Controller
@@ -1036,107 +1136,41 @@ const IPDBookingPage: React.FC = () => {
                       </p>
                     )}
                   </div>
-
-                  {/* Doctor & Referral Doctor */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Under Care of Doctor
-                    </label>
-                    <Controller
-                      control={control}
-                      name="doctor"
-                      rules={{ required: "Doctor selection is required" }}
-                      render={({ field }) => (
-                        <Select
-                          {...field}
-                          options={doctors}
-                          placeholder="Select Doctor"
-                          styles={customSelectStyles}
-                          onChange={(val) => field.onChange(val)}
-                        />
-                      )}
-                    />
-                    {errors.doctor && (
-                      <p className="text-red-500 text-sm mt-1 flex items-center">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {errors.doctor.message}
-                      </p>
-                    )}
-                  </div>
-                  
-                  <div className="relative">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Referral Doctor (Optional)</label>
-                    <div className="relative">
-                      <Stethoscope className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
-                      <input
-                        type="text"
-                        {...register("referDoctor")}
-                        placeholder="Name of referring doctor"
-                        className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Admission Type */}
-                  <div className="col-span-full">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Admission Type</label>
-                    <Controller
-                      control={control}
-                      name="admissionType"
-                      rules={{ required: "Admission Type is required" }}
-                      render={({ field }) => (
-                        <Select
-                          {...field}
-                          options={AdmissionTypeOptions}
-                          placeholder="Select Admission Type"
-                          styles={customSelectStyles}
-                          onChange={(val) => field.onChange(val)}
-                        />
-                      )}
-                    />
-                    {errors.admissionType && (
-                      <p className="text-red-500 text-sm mt-1 flex items-center">
-                        <AlertCircle className="h-4 w-4 mr-1" />
-                        {errors.admissionType.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-4 flex justify-between">
-                  <button
-                    type="button"
-                    onClick={() => setFormStep(1)}
-                    className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 flex items-center"
-                  >
-                    <ArrowLeft className="mr-2 h-5 w-5" />
-                    Back
-                  </button>
-                  
-                  <div className="flex space-x-3">
-                    <button
-                      type="button"
-                      onClick={handlePreview}
-                      className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center"
-                    >
-                      <FileText className="mr-2 h-5 w-5" />
-                      Preview
-                    </button>
-                    
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className={`px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center ${
-                        loading ? "opacity-50 cursor-not-allowed" : ""
-                      }`}
-                    >
-                      <Send className="mr-2 h-5 w-5" />
-                      {loading ? "Submitting..." : "Submit Admission"}
-                    </button>
-                  </div>
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* Form Actions */}
+            <div className="mt-8 flex justify-end space-x-4">
+              <button
+                type="button"
+                onClick={handlePreview}
+                className="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center"
+              >
+                <FileText className="mr-2 h-5 w-5" />
+                Preview
+              </button>
+              
+              <button
+                type="submit"
+                disabled={loading}
+                className={`px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center ${
+                  loading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+              >
+                {loading ? (
+                  <>
+                    <div className="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="mr-2 h-5 w-5" />
+                    Submit Admission
+                  </>
+                )}
+              </button>
+            </div>
           </form>
         </div>
       </main>
@@ -1213,6 +1247,18 @@ const IPDBookingPage: React.FC = () => {
                     <span className="text-gray-600">Time:</span>
                     <span className="font-medium">{previewData.time}</span>
                   </p>
+                  {previewData.admissionSource && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Admission Source:</span>
+                      <span className="font-medium">{previewData.admissionSource.label}</span>
+                    </p>
+                  )}
+                  {previewData.admissionType && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Admission Type:</span>
+                      <span className="font-medium">{previewData.admissionType.label}</span>
+                    </p>
+                  )}
                   {previewData.roomType && (
                     <p className="flex justify-between">
                       <span className="text-gray-600">Room Type:</span>
@@ -1235,12 +1281,6 @@ const IPDBookingPage: React.FC = () => {
                     <p className="flex justify-between">
                       <span className="text-gray-600">Referral Doctor:</span>
                       <span className="font-medium">{previewData.referDoctor}</span>
-                    </p>
-                  )}
-                  {previewData.admissionType && (
-                    <p className="flex justify-between">
-                      <span className="text-gray-600">Admission Type:</span>
-                      <span className="font-medium">{previewData.admissionType.label}</span>
                     </p>
                   )}
                 </div>
