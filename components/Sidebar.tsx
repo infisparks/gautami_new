@@ -339,7 +339,7 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
               "text-xl font-bold text-white ml-2 transition-opacity duration-200",
               isCollapsed && "opacity-0 w-0 overflow-hidden"
             )}>
-              Gautami Medford
+              G Medford NX
             </span>
           </div>
           
