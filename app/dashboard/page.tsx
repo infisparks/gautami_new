@@ -986,7 +986,7 @@ const DashboardPage: React.FC = () => {
           {/* Header */}
           <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
             <div className="px-6 py-4 flex flex-col md:flex-row justify-between items-center">
-              <h1 className="text-2xl font-bold text-sky-600 mb-4 md:mb-0">Gautami Medford NX</h1>
+              <h1 className="text-2xl font-bold text-sky-600 mb-4 md:mb-0">G Medford NX</h1>
 
               {/* Search Bar */}
               <div className="relative w-full md:w-1/3">

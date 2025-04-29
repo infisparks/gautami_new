@@ -128,7 +128,7 @@ Test Details:
 ${referBy ? `• Referred By: ${referBy}` : ""}
 
 Thank you for choosing our services.
-Gautami Hospital
+Medford Hospital
 `
 
           const phoneWithCountryCode = `91${patientInfo.phone.replace(/\D/g, "")}`

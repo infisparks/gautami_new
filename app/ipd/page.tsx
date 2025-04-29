@@ -634,8 +634,7 @@ const IPDBookingPage: React.FC = () => {
       <ToastContainer />
 
       <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
-        <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
-          {/* Header */}
+      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-visible">          {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -646,7 +645,7 @@ const IPDBookingPage: React.FC = () => {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="p-6">
+          <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">
             <div className="space-y-8">
               {/* Section: Patient Information */}
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">

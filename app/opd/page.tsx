@@ -16,6 +16,7 @@ import {
   Clock,
   MessageSquare,
   DollarSign,
+  IndianRupeeIcon,
   Info,
   CheckCircle,
   HelpCircle,
@@ -597,7 +598,7 @@ Appointment Details:
 Our doctor will call you at the scheduled time. Please keep your phone available.
 
 Thank you,
-Gautami Hospital
+Medford Hospital
 `
 
           const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
@@ -681,7 +682,7 @@ Appointment Details:
 
 We look forward to serving you!
 Thank you,
-Gautami Hospital
+Medford Hospital
 `
 
           const phoneWithCountryCode = `91${data.phone.replace(/\D/g, "")}`
@@ -1230,17 +1231,26 @@ Gautami Hospital
                               Amount (Rs) <span className="text-red-500">*</span>
                             </Label>
                             <div className="relative">
-                              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                              <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                               <Input
-                                id="amount"
-                                type="number"
-                                {...register("amount", {
-                                  required: watch("appointmentType") === "visithospital" ? "Amount is required" : false,
-                                  min: { value: 0, message: "Amount must be positive" },
-                                })}
-                                placeholder="Enter amount"
-                                className={`pl-10 ${errors.amount ? "border-red-500" : ""}`}
-                              />
+  id="amount"
+  type="number"
+  placeholder="Enter amount"
+  className={`pl-10 ${errors.amount ? "border-red-500" : ""}`}
+  {...register("amount", {
+    required:
+      watch("appointmentType") === "visithospital"
+        ? "Amount is required"
+        : false,
+    min: { value: 0, message: "Amount must be positive" },
+  })}
+  /* 🛑 stop mouse-wheel from changing the value */
+  onWheel={e => {
+    e.preventDefault();   // cancel the scroll event
+    (e.currentTarget as HTMLElement).blur(); // optional: drop focus
+  }}
+/>
+
                             </div>
                             {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
                           </div>
