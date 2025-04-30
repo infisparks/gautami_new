@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Calendar } from "lucide-react";
-import { format } from "date-fns/format";
+import format from "date-fns/format";
 
 interface ChargeSheet {
   id?: string;

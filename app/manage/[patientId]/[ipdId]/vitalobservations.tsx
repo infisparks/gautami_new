@@ -8,7 +8,7 @@ import { db, auth } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { format } from "date-fns/format";
+import format from "date-fns/format";
 
 interface VitalObservation {
   id?: string;

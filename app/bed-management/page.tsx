@@ -68,13 +68,15 @@ const bedSchema: ObjectSchema<BedFormInput> = yup
   })
   .required()
 
-const RoomTypeOptions = [
-  { value: "female_ward", label: "Female Ward" },
-  { value: "icu", label: "ICU" },
-  { value: "male_ward", label: "Male Ward" },
-  { value: "deluxe", label: "Deluxe" },
-  { value: "nicu", label: "NICU" },
-]
+  const RoomTypeOptions = [
+    { value: "casualty", label: "Casualty" },
+    { value: "icu", label: "ICU" },
+    { value: "suit", label: "Suite" },        // corrected from "suit" to "suite"
+    { value: "female", label: "Female" },
+    { value: "male", label: "Male" },
+    { value: "nicu", label: "NICU" },
+  ];
+  
 
 const StatusOptions = [
   { value: "Available", label: "Available" },

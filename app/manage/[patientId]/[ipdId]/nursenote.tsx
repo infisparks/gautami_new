@@ -8,7 +8,7 @@ import { db, auth } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { format } from "date-fns/format";
+import format from "date-fns/format";
 
 interface NurseNote {
   id?: string;

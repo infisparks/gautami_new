@@ -37,7 +37,7 @@ import {
   Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
 } from "@/components/ui/carousel"
 
-import { format } from "date-fns/format"
+import  format  from "date-fns/format"
 import { jsPDF } from "jspdf"
 import { Eye, Download, X, FileImage, Loader2 } from "lucide-react"
 

@@ -5,18 +5,7 @@ import { useEffect, useState } from "react"
 import { ref, onValue } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { useRouter } from "next/navigation"
-import {
-  Search,
-  Edit,
-  Users,
-  CreditCard,
-  Home,
-  XCircle,
-  CheckCircle,
-  Stethoscope,
-  Scissors,
-  FlaskRoundIcon as Flask,
-} from "lucide-react"
+import { Search, Edit, Users, CreditCard, Home, XCircle, CheckCircle, Stethoscope, BabyIcon } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -207,16 +196,10 @@ export default function PatientsPage() {
     router.push(`/ot/${record.patientId}/${record.ipdId}`)
   }
 
-  // Surgery handler
-  const handleSurgery = (e: React.MouseEvent, record: BillingRecord) => {
+  // Labour Room handler
+  const handleLabourRoom = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
-    router.push(`/surgery/${record.patientId}/${record.ipdId}`)
-  }
-
-  // Pathology handler
-  const handlePathology = (e: React.MouseEvent, record: BillingRecord) => {
-    e.stopPropagation()
-    router.push(`/pathology/${record.patientId}/${record.ipdId}`)
+    router.push(`/labour-room/${record.patientId}/${record.ipdId}`)
   }
 
   // Get unique ward names from allRecords
@@ -334,8 +317,7 @@ export default function PatientsPage() {
                   handleRowClick,
                   handleEditRecord,
                   handleOT,
-                  handleSurgery,
-                  handlePathology,
+                  handleLabourRoom,
                   isLoading,
                 )}
               </TabsContent>
@@ -346,8 +328,7 @@ export default function PatientsPage() {
                   handleRowClick,
                   handleEditRecord,
                   handleOT,
-                  handleSurgery,
-                  handlePathology,
+                  handleLabourRoom,
                   isLoading,
                 )}
               </TabsContent>
@@ -364,8 +345,7 @@ function renderPatientsTable(
   handleRowClick: (record: BillingRecord) => void,
   handleEditRecord: (e: React.MouseEvent, record: BillingRecord) => void,
   handleOT: (e: React.MouseEvent, record: BillingRecord) => void,
-  handleSurgery: (e: React.MouseEvent, record: BillingRecord) => void,
-  handlePathology: (e: React.MouseEvent, record: BillingRecord) => void,
+  handleLabourRoom: (e: React.MouseEvent, record: BillingRecord) => void,
   isLoading: boolean,
 ) {
   if (isLoading) {
@@ -464,20 +444,11 @@ function renderPatientsTable(
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={(e) => handleSurgery(e, record)}
-                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-200"
+                  onClick={(e) => handleLabourRoom(e, record)}
+                  className="text-pink-600 hover:text-pink-700 hover:bg-pink-50 border-pink-200"
                 >
-                  <Scissors className="h-4 w-4 mr-1" />
-                  Surgery
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => handlePathology(e, record)}
-                  className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 border-purple-200"
-                >
-                  <Flask className="h-4 w-4 mr-1" />
-                  Pathology
+                  <BabyIcon className="h-4 w-4 mr-1" />
+                  Labour Room
                 </Button>
               </td>
             </tr>
