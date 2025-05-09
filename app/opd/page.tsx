@@ -18,9 +18,6 @@ import {
   CheckCircle,
   HelpCircle,
   Trash2,
-  UserCheck,
-  Building,
-  FileText,
 } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -55,9 +52,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Checkbox } from "@/components/ui/checkbox"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import CasualtyPatientsList from "./casualty-patients-list"
 import { useRouter } from "next/navigation"
 import React from "react"
 import { PersonIcon, CalendarIcon, MagnifyingGlassIcon, Cross2Icon } from "@radix-ui/react-icons"
@@ -82,18 +76,7 @@ interface IFormInput {
   doctor: string
   referredBy?: string
   appointmentType: "oncall" | "visithospital"
-  opdType: "opd" | "casualty"
-  // Casualty specific fields
-  modeOfArrival?: "ambulance" | "walkin" | "referred"
-  broughtBy?: string
-  referralHospital?: string
-  broughtDead?: boolean
-  caseType?: "rta" | "physicalAssault" | "burn" | "poisoning" | "snakeBite" | "cardiac" | "fall" | "other"
-  otherCaseType?: string
-  incidentDescription?: string
-  isMLC?: boolean
-  mlcNumber?: string
-  policeInformed?: boolean
+  opdType: "opd"
 }
 
 interface PatientRecord {
@@ -145,7 +128,7 @@ interface OnCallAppointment {
   serviceName?: string
   appointmentType: "oncall"
   createdAt: string
-  opdType: "opd" | "casualty"
+  opdType: "opd"
 }
 
 interface Service {
@@ -163,23 +146,6 @@ const PaymentOptions = [
 const GenderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
-  { value: "other", label: "Other" },
-]
-
-const ModeOfArrivalOptions = [
-  { value: "ambulance", label: "Ambulance" },
-  { value: "walkin", label: "Walk-in" },
-  { value: "referred", label: "Referred" },
-]
-
-const CaseTypeOptions = [
-  { value: "rta", label: "Road Traffic Accident (RTA)" },
-  { value: "physicalAssault", label: "Physical Assault" },
-  { value: "burn", label: "Burn" },
-  { value: "poisoning", label: "Poisoning" },
-  { value: "snakeBite", label: "Snake/Insect Bite" },
-  { value: "cardiac", label: "Cardiac Emergency" },
-  { value: "fall", label: "Fall" },
   { value: "other", label: "Other" },
 ]
 
@@ -241,16 +207,6 @@ const OPDBookingPage: React.FC = () => {
       referredBy: "",
       appointmentType: "visithospital",
       opdType: "opd",
-      modeOfArrival: undefined,
-      broughtBy: "",
-      referralHospital: "",
-      broughtDead: false,
-      caseType: undefined,
-      otherCaseType: "",
-      incidentDescription: "",
-      isMLC: false,
-      mlcNumber: "",
-      policeInformed: false,
     },
     mode: "onChange",
   })
@@ -590,22 +546,6 @@ const OPDBookingPage: React.FC = () => {
       // For oncall, we also need service and doctor
       requiredFields.push("serviceName", "doctor")
     }
-
-    // Add conditional required fields for casualty
-    if (data.opdType === "casualty") {
-      requiredFields.push("modeOfArrival", "caseType")
-
-      // If case type is "other", require otherCaseType
-      if (data.caseType === "other") {
-        requiredFields.push("otherCaseType")
-      }
-
-      // If MLC is true, require mlcNumber
-      if (data.isMLC) {
-        requiredFields.push("mlcNumber")
-      }
-    }
-
     // Validate all required fields
     const isValid = await trigger(requiredFields as any)
 
@@ -642,24 +582,6 @@ const OPDBookingPage: React.FC = () => {
         toast.error("Please select OPD type")
         return
       }
-      if (data.opdType === "casualty") {
-        if (errors.modeOfArrival) {
-          toast.error("Please select mode of arrival")
-          return
-        }
-        if (errors.caseType) {
-          toast.error("Please select case type")
-          return
-        }
-        if (data.caseType === "other" && errors.otherCaseType) {
-          toast.error("Please specify the other case type")
-          return
-        }
-        if (data.isMLC && errors.mlcNumber) {
-          toast.error("Please enter MLC number")
-          return
-        }
-      }
 
       toast.error("Please fill all required fields")
       return
@@ -685,19 +607,6 @@ const OPDBookingPage: React.FC = () => {
         appointmentType: data.appointmentType,
         opdType: data.opdType,
         createdAt: new Date().toISOString(),
-        // Add casualty specific fields if opdType is casualty
-        ...(data.opdType === "casualty" && {
-          modeOfArrival: data.modeOfArrival,
-          broughtBy: data.broughtBy || "",
-          referralHospital: data.referralHospital || "",
-          broughtDead: data.broughtDead || false,
-          caseType: data.caseType,
-          otherCaseType: data.caseType === "other" ? data.otherCaseType : "",
-          incidentDescription: data.incidentDescription || "",
-          isMLC: data.isMLC || false,
-          mlcNumber: data.isMLC ? data.mlcNumber : "",
-          policeInformed: data.policeInformed || false,
-        }),
         // Add services if any
         services: services.length > 0 ? services : [],
       }
@@ -718,19 +627,6 @@ const OPDBookingPage: React.FC = () => {
           appointmentType: "oncall",
           opdType: data.opdType,
           createdAt: new Date().toISOString(),
-          // Add casualty specific fields if opdType is casualty
-          ...(data.opdType === "casualty" && {
-            modeOfArrival: data.modeOfArrival,
-            broughtBy: data.broughtBy || "",
-            referralHospital: data.referralHospital || "",
-            broughtDead: data.broughtDead || false,
-            caseType: data.caseType,
-            otherCaseType: data.caseType === "other" ? data.otherCaseType : "",
-            incidentDescription: data.incidentDescription || "",
-            isMLC: data.isMLC || false,
-            mlcNumber: data.isMLC ? data.mlcNumber : "",
-            policeInformed: data.policeInformed || false,
-          }),
           // Add services if any
           services: services.length > 0 ? services : [],
         })
@@ -878,16 +774,6 @@ Medford Hospital
         referredBy: "",
         appointmentType: "visithospital",
         opdType: "opd",
-        modeOfArrival: undefined,
-        broughtBy: "",
-        referralHospital: "",
-        broughtDead: false,
-        caseType: undefined,
-        otherCaseType: "",
-        incidentDescription: "",
-        isMLC: false,
-        mlcNumber: "",
-        policeInformed: false,
       })
       setPreviewOpen(false)
       setSelectedPatient(null)
@@ -935,6 +821,42 @@ Medford Hospital
    *   RENDER UI
    *  -----------
    */
+  // Handle clicks outside the patient name suggestions dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        patientSuggestions.length > 0 &&
+        nameInputRef.current &&
+        !nameInputRef.current.contains(event.target as Node)
+      ) {
+        setPatientSuggestions([])
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [patientSuggestions])
+
+  // Handle clicks outside the phone suggestions dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        phoneSuggestions.length > 0 &&
+        phoneInputRef.current &&
+        !phoneInputRef.current.contains(event.target as Node)
+      ) {
+        setPhoneSuggestions([])
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [phoneSuggestions])
+
   return (
     <>
       <Head>
@@ -983,15 +905,12 @@ Medford Hospital
 
             <CardContent className="p-0">
               <Tabs defaultValue="form" value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="w-full grid grid-cols-4 rounded-none">
+                <TabsList className="w-full grid grid-cols-3 rounded-none">
                   <TabsTrigger value="form" className="text-sm md:text-base">
                     Appointment Form
                   </TabsTrigger>
                   <TabsTrigger value="oncall" className="text-sm md:text-base">
                     On-Call List
-                  </TabsTrigger>
-                  <TabsTrigger value="casualty" className="text-sm md:text-base">
-                    Casualty List
                   </TabsTrigger>
                   <TabsTrigger value="help" className="text-sm md:text-base">
                     Help
@@ -1246,216 +1165,12 @@ Medford Hospital
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="opd">OPD</SelectItem>
-                                <SelectItem value="casualty">Casualty</SelectItem>
                               </SelectContent>
                             </Select>
                           )}
                         />
                         {errors.opdType && <p className="text-sm text-red-500">{errors.opdType.message}</p>}
                       </div>
-
-                      {/* Casualty specific fields */}
-                      {opdType === "casualty" && (
-                        <div className="col-span-2 space-y-6 border border-red-200 rounded-md p-4 bg-red-50 dark:bg-red-900/10 dark:border-red-900/30">
-                          <h3 className="text-lg font-semibold text-red-700 dark:text-red-400 mb-4">
-                            Casualty Details
-                          </h3>
-
-                          {/* Mode of Arrival */}
-                          <div className="space-y-2">
-                            <Label htmlFor="modeOfArrival" className="text-sm font-medium">
-                              Mode of Arrival <span className="text-red-500">*</span>
-                            </Label>
-                            <Controller
-                              control={control}
-                              name="modeOfArrival"
-                              rules={{ required: opdType === "casualty" ? "Mode of arrival is required" : false }}
-                              render={({ field }) => (
-                                <RadioGroup
-                                  onValueChange={field.onChange}
-                                  defaultValue={field.value}
-                                  className="flex flex-wrap gap-4"
-                                >
-                                  {ModeOfArrivalOptions.map((option) => (
-                                    <div key={option.value} className="flex items-center space-x-2">
-                                      <RadioGroupItem value={option.value} id={`mode-${option.value}`} />
-                                      <Label htmlFor={`mode-${option.value}`}>{option.label}</Label>
-                                    </div>
-                                  ))}
-                                </RadioGroup>
-                              )}
-                            />
-                            {errors.modeOfArrival && (
-                              <p className="text-sm text-red-500">{errors.modeOfArrival.message}</p>
-                            )}
-                          </div>
-
-                          {/* Brought By */}
-                          <div className="space-y-2">
-                            <Label htmlFor="broughtBy" className="text-sm font-medium">
-                              Brought By (Name & Relation)
-                            </Label>
-                            <div className="relative">
-                              <UserCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="broughtBy"
-                                type="text"
-                                {...register("broughtBy")}
-                                placeholder="Enter name and relation"
-                                className="pl-10"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Referral Hospital/Doctor */}
-                          <div className="space-y-2">
-                            <Label htmlFor="referralHospital" className="text-sm font-medium">
-                              Referral Hospital/Doctor (if any)
-                            </Label>
-                            <div className="relative">
-                              <Building className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="referralHospital"
-                                type="text"
-                                {...register("referralHospital")}
-                                placeholder="Enter referral details"
-                                className="pl-10"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Brought Dead */}
-                          <div className="space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                id="broughtDead"
-                                checked={watch("broughtDead")}
-                                onCheckedChange={(checked) => {
-                                  setValue("broughtDead", checked === true)
-                                }}
-                              />
-                              <Label htmlFor="broughtDead" className="text-sm font-medium">
-                                Brought Dead
-                              </Label>
-                            </div>
-                          </div>
-
-                          {/* Type of Case */}
-                          <div className="space-y-2">
-                            <Label htmlFor="caseType" className="text-sm font-medium">
-                              Type of Case <span className="text-red-500">*</span>
-                            </Label>
-                            <Controller
-                              control={control}
-                              name="caseType"
-                              rules={{ required: opdType === "casualty" ? "Case type is required" : false }}
-                              render={({ field }) => (
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                  <SelectTrigger className={errors.caseType ? "border-red-500" : ""}>
-                                    <SelectValue placeholder="Select case type" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {CaseTypeOptions.map((option) => (
-                                      <SelectItem key={option.value} value={option.value}>
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                            {errors.caseType && <p className="text-sm text-red-500">{errors.caseType.message}</p>}
-                          </div>
-
-                          {/* Other Case Type (if "other" is selected) */}
-                          {caseType === "other" && (
-                            <div className="space-y-2">
-                              <Label htmlFor="otherCaseType" className="text-sm font-medium">
-                                Specify Other Case Type <span className="text-red-500">*</span>
-                              </Label>
-                              <Input
-                                id="otherCaseType"
-                                type="text"
-                                {...register("otherCaseType", {
-                                  required: caseType === "other" ? "Please specify the case type" : false,
-                                })}
-                                placeholder="Enter case type"
-                                className={errors.otherCaseType ? "border-red-500" : ""}
-                              />
-                              {errors.otherCaseType && (
-                                <p className="text-sm text-red-500">{errors.otherCaseType.message}</p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Description of Incident */}
-                          <div className="space-y-2">
-                            <Label htmlFor="incidentDescription" className="text-sm font-medium">
-                              Description of Incident
-                            </Label>
-                            <Textarea
-                              id="incidentDescription"
-                              {...register("incidentDescription")}
-                              placeholder="Enter incident details"
-                              className="min-h-[80px]"
-                            />
-                          </div>
-
-                          {/* Medico-Legal Case (MLC) */}
-                          <div className="space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                id="isMLC"
-                                checked={watch("isMLC")}
-                                onCheckedChange={(checked) => {
-                                  setValue("isMLC", checked === true)
-                                }}
-                              />
-                              <Label htmlFor="isMLC" className="text-sm font-medium">
-                                Medico-Legal Case (MLC)
-                              </Label>
-                            </div>
-                          </div>
-
-                          {/* MLC Number (if MLC is checked) */}
-                          {isMLC && (
-                            <div className="space-y-2">
-                              <Label htmlFor="mlcNumber" className="text-sm font-medium">
-                                MLC Number <span className="text-red-500">*</span>
-                              </Label>
-                              <div className="relative">
-                                <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                                <Input
-                                  id="mlcNumber"
-                                  type="text"
-                                  {...register("mlcNumber", {
-                                    required: isMLC ? "MLC number is required" : false,
-                                  })}
-                                  placeholder="Enter MLC number"
-                                  className={`pl-10 ${errors.mlcNumber ? "border-red-500" : ""}`}
-                                />
-                              </div>
-                              {errors.mlcNumber && <p className="text-sm text-red-500">{errors.mlcNumber.message}</p>}
-                            </div>
-                          )}
-
-                          {/* Police Informed */}
-                          <div className="space-y-2">
-                            <div className="flex items-center space-x-2">
-                              <Checkbox
-                                id="policeInformed"
-                                checked={watch("policeInformed")}
-                                onCheckedChange={(checked) => {
-                                  setValue("policeInformed", checked === true)
-                                }}
-                              />
-                              <Label htmlFor="policeInformed" className="text-sm font-medium">
-                                Police Informed
-                              </Label>
-                            </div>
-                          </div>
-                        </div>
-                      )}
 
                       {/* Referred By Field */}
                       <div className="space-y-2">
@@ -1889,10 +1604,6 @@ Medford Hospital
                   </div>
                 </TabsContent>
 
-                <TabsContent value="casualty" className="p-6">
-                  <CasualtyPatientsList />
-                </TabsContent>
-
                 <TabsContent value="help" className="p-6">
                   <div className="space-y-6">
                     <div className="bg-emerald-50 dark:bg-gray-800 rounded-lg p-4 border border-emerald-100 dark:border-gray-700">
@@ -1922,19 +1633,12 @@ Medford Hospital
                           </div>
                         </div>
 
-                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">OPD Types</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">OPD Type</h4>
+                        <div className="grid grid-cols-1 gap-4">
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">OPD</p>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
                               Regular outpatient department appointments for non-emergency consultations.
-                            </p>
-                          </div>
-                          <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-red-200 dark:border-red-900/30">
-                            <p className="font-medium mb-1 text-red-700 dark:text-red-400">Casualty</p>
-                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                              For emergency cases. Additional information like mode of arrival, case type, and MLC
-                              details are required.
                             </p>
                           </div>
                         </div>
@@ -2077,64 +1781,6 @@ Medford Hospital
                       <div>{watch("message")}</div>
                     </>
                   )}
-                </>
-              )}
-
-              {/* Casualty specific fields in preview */}
-              {watch("opdType") === "casualty" && (
-                <>
-                  <div className="col-span-2 pt-2 border-t font-medium text-red-700 dark:text-red-400">
-                    Casualty Details:
-                  </div>
-
-                  <div className="font-medium">Mode of Arrival:</div>
-                  <div>
-                    {ModeOfArrivalOptions.find((m) => m.value === watch("modeOfArrival"))?.label || "Not specified"}
-                  </div>
-
-                  {watch("broughtBy") && (
-                    <>
-                      <div className="font-medium">Brought By:</div>
-                      <div>{watch("broughtBy")}</div>
-                    </>
-                  )}
-
-                  {watch("referralHospital") && (
-                    <>
-                      <div className="font-medium">Referral Hospital/Doctor:</div>
-                      <div>{watch("referralHospital")}</div>
-                    </>
-                  )}
-
-                  <div className="font-medium">Brought Dead:</div>
-                  <div>{watch("broughtDead") ? "Yes" : "No"}</div>
-
-                  <div className="font-medium">Case Type:</div>
-                  <div>
-                    {watch("caseType") === "other"
-                      ? `Other: ${watch("otherCaseType")}`
-                      : CaseTypeOptions.find((c) => c.value === watch("caseType"))?.label || "Not specified"}
-                  </div>
-
-                  {watch("incidentDescription") && (
-                    <>
-                      <div className="font-medium">Incident Description:</div>
-                      <div>{watch("incidentDescription")}</div>
-                    </>
-                  )}
-
-                  <div className="font-medium">Medico-Legal Case:</div>
-                  <div>{watch("isMLC") ? "Yes" : "No"}</div>
-
-                  {watch("isMLC") && (
-                    <>
-                      <div className="font-medium">MLC Number:</div>
-                      <div>{watch("mlcNumber")}</div>
-                    </>
-                  )}
-
-                  <div className="font-medium">Police Informed:</div>
-                  <div>{watch("policeInformed") ? "Yes" : "No"}</div>
                 </>
               )}
             </div>

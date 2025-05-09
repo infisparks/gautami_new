@@ -121,6 +121,16 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
         { title: "Add Doctor", icon: <UserPlus size={20} />, href: "/addDoctor" },
       ],
     },
+
+    {
+      title: "Casualty",
+      icon: <Stethoscope size={20} />,
+      submenu: [
+        { title: "Casualty", icon: <ClipboardList size={20} />, href: "/casulity" },
+        { title: "Casualty List", icon: <UserPlus size={20} />, href: "/casulity/list" },
+      ],
+    },
+
     {
       title: "IPD",
       icon: <BedDouble size={20} />,

@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react"
 import { db } from "../../lib/firebase" // Gautami DB
 import { ref, onValue } from "firebase/database"
-import { Search, X, Calendar, Clock, User, Phone, Cake } from "lucide-react"
+import { Search, X, User, Phone, Cake, FileText, AlertTriangle, Building, Ambulance } from "lucide-react"
 import { format } from "date-fns"
+import { useRouter } from "next/navigation"
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -28,9 +29,22 @@ interface CasualtyPatient {
   appointmentType: "oncall" | "visithospital"
   opdType: "casualty"
   createdAt: string
+  // Casualty specific fields
+  modeOfArrival?: "ambulance" | "walkin" | "referred"
+  broughtBy?: string
+  referralHospital?: string
+  broughtDead?: boolean
+  caseType?: string
+  otherCaseType?: string
+  incidentDescription?: string
+  isMLC?: boolean
+  mlcNumber?: string
+  policeInformed?: boolean
+  services?: Array<{ name: string; amount: number }>
 }
 
 const CasualtyPatientsList = () => {
+  const router = useRouter()
   const [casualtyPatients, setCasualtyPatients] = useState<CasualtyPatient[]>([])
   const [filteredPatients, setFilteredPatients] = useState<CasualtyPatient[]>([])
   const [searchQuery, setSearchQuery] = useState("")
@@ -75,6 +89,18 @@ const CasualtyPatientsList = () => {
                       appointmentType: opdRecord.appointmentType,
                       opdType: opdRecord.opdType,
                       createdAt: opdRecord.createdAt,
+                      // Casualty specific fields
+                      modeOfArrival: opdRecord.modeOfArrival,
+                      broughtBy: opdRecord.broughtBy,
+                      referralHospital: opdRecord.referralHospital,
+                      broughtDead: opdRecord.broughtDead,
+                      caseType: opdRecord.caseType,
+                      otherCaseType: opdRecord.otherCaseType,
+                      incidentDescription: opdRecord.incidentDescription,
+                      isMLC: opdRecord.isMLC,
+                      mlcNumber: opdRecord.mlcNumber,
+                      policeInformed: opdRecord.policeInformed,
+                      services: opdRecord.services || [],
                     })
                   }
                 })
@@ -115,6 +141,18 @@ const CasualtyPatientsList = () => {
                   appointmentType: record.appointmentType,
                   opdType: record.opdType,
                   createdAt: record.createdAt,
+                  // Casualty specific fields
+                  modeOfArrival: record.modeOfArrival,
+                  broughtBy: record.broughtBy,
+                  referralHospital: record.referralHospital,
+                  broughtDead: record.broughtDead,
+                  caseType: record.caseType,
+                  otherCaseType: record.otherCaseType,
+                  incidentDescription: record.incidentDescription,
+                  isMLC: record.isMLC,
+                  mlcNumber: record.mlcNumber,
+                  policeInformed: record.policeInformed,
+                  services: record.services || [],
                 })
               }
             })
@@ -151,7 +189,8 @@ const CasualtyPatientsList = () => {
         (patient) =>
           patient.name.toLowerCase().includes(query) ||
           patient.phone.includes(query) ||
-          (patient.serviceName && patient.serviceName.toLowerCase().includes(query)),
+          (patient.serviceName && patient.serviceName.toLowerCase().includes(query)) ||
+          (patient.mlcNumber && patient.mlcNumber.toLowerCase().includes(query)),
       )
     }
 
@@ -195,6 +234,42 @@ const CasualtyPatientsList = () => {
     } catch (error) {
       return dateString
     }
+  }
+
+  // Navigate to patient details page
+  const handleViewDetails = (patient: CasualtyPatient) => {
+    router.push(`/casualitymanage/${patient.patientId}/${patient.id}`)
+  }
+
+  // Get case type label
+  const getCaseTypeLabel = (caseType?: string, otherCaseType?: string) => {
+    if (!caseType) return "Not specified"
+
+    const caseTypeMap: Record<string, string> = {
+      rta: "Road Traffic Accident (RTA)",
+      physicalAssault: "Physical Assault",
+      burn: "Burn",
+      poisoning: "Poisoning",
+      snakeBite: "Snake/Insect Bite",
+      cardiac: "Cardiac Emergency",
+      fall: "Fall",
+      other: otherCaseType || "Other",
+    }
+
+    return caseTypeMap[caseType] || caseType
+  }
+
+  // Get mode of arrival label
+  const getModeOfArrivalLabel = (mode?: string) => {
+    if (!mode) return "Not specified"
+
+    const modeMap: Record<string, string> = {
+      ambulance: "Ambulance",
+      walkin: "Walk-in",
+      referred: "Referred",
+    }
+
+    return modeMap[mode] || mode
   }
 
   return (
@@ -254,7 +329,20 @@ const CasualtyPatientsList = () => {
                         {formatDate(patient.date)} at {patient.time}
                       </CardDescription>
                     </div>
-                    <Badge variant="destructive">Casualty</Badge>
+                    <div className="flex items-center gap-2">
+                      {patient.broughtDead && (
+                        <Badge variant="destructive" className="mr-2">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Brought Dead
+                        </Badge>
+                      )}
+                      {patient.isMLC && (
+                        <Badge variant="outline" className="border-red-500 text-red-500">
+                          MLC
+                        </Badge>
+                      )}
+                      <Badge variant="destructive">Casualty</Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-4">
@@ -277,6 +365,38 @@ const CasualtyPatientsList = () => {
                     </div>
                     <div>{patient.gender}</div>
 
+                    <div className="flex items-center gap-2">
+                      <Ambulance className="h-4 w-4 text-gray-500" />
+                      <div className="font-medium">Arrival:</div>
+                    </div>
+                    <div>{getModeOfArrivalLabel(patient.modeOfArrival)}</div>
+
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-gray-500" />
+                      <div className="font-medium">Case Type:</div>
+                    </div>
+                    <div>{getCaseTypeLabel(patient.caseType, patient.otherCaseType)}</div>
+
+                    {patient.isMLC && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-gray-500" />
+                          <div className="font-medium">MLC Number:</div>
+                        </div>
+                        <div>{patient.mlcNumber || "Not provided"}</div>
+                      </>
+                    )}
+
+                    {patient.referralHospital && (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <Building className="h-4 w-4 text-gray-500" />
+                          <div className="font-medium">Referral:</div>
+                        </div>
+                        <div>{patient.referralHospital}</div>
+                      </>
+                    )}
+
                     {patient.serviceName && (
                       <>
                         <div className="font-medium">Service:</div>
@@ -290,21 +410,6 @@ const CasualtyPatientsList = () => {
                         <div>{patient.doctor}</div>
                       </>
                     )}
-
-                    <div className="flex items-center gap-2">
-                      <Calendar className="h-4 w-4 text-gray-500" />
-                      <div className="font-medium">Date:</div>
-                    </div>
-                    <div>{formatDate(patient.date)}</div>
-
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-gray-500" />
-                      <div className="font-medium">Time:</div>
-                    </div>
-                    <div>{patient.time}</div>
-
-                    <div className="font-medium">Type:</div>
-                    <div>{patient.appointmentType === "visithospital" ? "Visit Hospital" : "On-Call"}</div>
                   </div>
                 </CardContent>
                 <CardFooter className="bg-gray-50 dark:bg-gray-900 p-3 flex justify-between">
@@ -318,7 +423,7 @@ const CasualtyPatientsList = () => {
                       Created: {format(new Date(patient.createdAt), "dd MMM yyyy, HH:mm")}
                     </span>
                   </div>
-                  <Button size="sm" variant="outline">
+                  <Button size="sm" onClick={() => handleViewDetails(patient)}>
                     View Details
                   </Button>
                 </CardFooter>
