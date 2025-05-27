@@ -1044,46 +1044,192 @@ export default function CasualtyListPage() {
 
                   <TabsContent value="services" className="space-y-6">
                     <Card>
-                      <CardHeader>
-                        <CardTitle>Add Service</CardTitle>
+                      <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900 dark:to-indigo-900">
+                        <CardTitle className="flex items-center gap-2">
+                          <Plus className="h-5 w-5 text-blue-600" />
+                          Add New Service
+                        </CardTitle>
                         <CardDescription>Record a new service provided to this patient</CardDescription>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="pt-6">
                         <div className="grid gap-4">
                           <div className="grid gap-2">
-                            <Label htmlFor="serviceName">Service Name</Label>
+                            <Label htmlFor="serviceName" className="text-base font-medium">
+                              Service Name
+                            </Label>
                             <Input
                               id="serviceName"
-                              placeholder="Enter service name"
+                              placeholder="Enter service name (e.g., X-Ray, Blood Test, Consultation)"
                               value={serviceName}
                               onChange={(e) => setServiceName(e.target.value)}
+                              className="text-lg"
                             />
                           </div>
                           <div className="grid gap-2">
-                            <Label htmlFor="serviceAmount">Amount</Label>
-                            <Input
-                              id="serviceAmount"
-                              type="number"
-                              placeholder="Enter amount"
-                              value={serviceAmount}
-                              onChange={(e) => setServiceAmount(e.target.value)}
-                            />
+                            <Label htmlFor="serviceAmount" className="text-base font-medium">
+                              Amount (₹)
+                            </Label>
+                            <div className="relative">
+                              <Input
+                                id="serviceAmount"
+                                type="number"
+                                placeholder="Enter amount"
+                                value={serviceAmount}
+                                onChange={(e) => setServiceAmount(e.target.value)}
+                                className="pl-8 text-lg"
+                              />
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
+                            </div>
                           </div>
                         </div>
                       </CardContent>
-                      <CardFooter>
-                        <Button onClick={handleAddService} className="ml-auto">
+                      <CardFooter className="border-t pt-4">
+                        <Button onClick={handleAddService} className="ml-auto bg-blue-600 hover:bg-blue-700 text-white">
                           <Plus className="h-4 w-4 mr-2" /> Add Service
                         </Button>
                       </CardFooter>
                     </Card>
 
+                    {/* Services List */}
                     <Card>
-                      <CardHeader className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800">
-                        <CardTitle className="flex items-center gap-2">
-                          <span className="text-blue-600 dark:text-blue-300">Discount</span>
+                      <CardHeader className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900 dark:to-emerald-900">
+                        <CardTitle className="flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <span className="text-green-600 dark:text-green-300">Services Provided</span>
+                            {selectedCasualty.services && Object.keys(selectedCasualty.services).length > 0 && (
+                              <Badge
+                                variant="secondary"
+                                className="bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100"
+                              >
+                                {Object.keys(selectedCasualty.services).length} service
+                                {Object.keys(selectedCasualty.services).length !== 1 ? "s" : ""}
+                              </Badge>
+                            )}
+                          </span>
+                          {selectedCasualty.services && Object.keys(selectedCasualty.services).length > 0 && (
+                            <div className="text-right">
+                              <p className="text-sm text-gray-600 dark:text-gray-300">Total Amount</p>
+                              <p className="text-xl font-bold text-green-600 dark:text-green-400">
+                                ₹
+                                {Object.values(selectedCasualty.services)
+                                  .reduce((sum, service) => sum + service.amount, 0)
+                                  .toLocaleString()}
+                              </p>
+                            </div>
+                          )}
                         </CardTitle>
-                        <CardDescription>Apply a discount to this patient bill</CardDescription>
+                        <CardDescription>All services and procedures provided to the patient</CardDescription>
+                      </CardHeader>
+                      <CardContent className="pt-6">
+                        {selectedCasualty.services && Object.keys(selectedCasualty.services).length > 0 ? (
+                          <div className="space-y-4">
+                            {/* Modern Service Cards */}
+                            <div className="grid gap-4">
+                              {Object.values(selectedCasualty.services).map((service, index) => (
+                                <div key={service.id} className="group relative">
+                                  <Card className="transition-all duration-200 hover:shadow-md border-l-4 border-l-blue-500 bg-gradient-to-r from-white to-blue-50/30 dark:from-gray-800 dark:to-blue-900/20">
+                                    <CardContent className="p-4">
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-4">
+                                          <div className="flex-shrink-0">
+                                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                                              <span className="text-blue-600 dark:text-blue-300 font-semibold text-sm">
+                                                {index + 1}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <div>
+                                            <h4 className="font-semibold text-gray-900 dark:text-gray-100 text-lg">
+                                              {service.name}
+                                            </h4>
+                                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                              Service #{service.id.slice(-6)}
+                                            </p>
+                                          </div>
+                                        </div>
+                                        <div className="text-right">
+                                          <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                            ₹{service.amount.toLocaleString()}
+                                          </p>
+                                          <p className="text-xs text-gray-500 dark:text-gray-400">Amount</p>
+                                        </div>
+                                      </div>
+                                    </CardContent>
+                                  </Card>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Summary Card */}
+                            <Card className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/50 dark:to-emerald-900/50 border-green-200 dark:border-green-700">
+                              <CardContent className="p-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                      Total Services
+                                    </p>
+                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                      {Object.keys(selectedCasualty.services).length}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-600 dark:text-gray-300">Subtotal</p>
+                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                      ₹
+                                      {Object.values(selectedCasualty.services)
+                                        .reduce((sum, service) => sum + service.amount, 0)
+                                        .toLocaleString()}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                      Average per Service
+                                    </p>
+                                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                                      ₹
+                                      {Math.round(
+                                        Object.values(selectedCasualty.services).reduce(
+                                          (sum, service) => sum + service.amount,
+                                          0,
+                                        ) / Object.keys(selectedCasualty.services).length,
+                                      ).toLocaleString()}
+                                    </p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        ) : (
+                          <div className="text-center py-12">
+                            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <Plus className="h-8 w-8 text-gray-400" />
+                            </div>
+                            <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">
+                              No services added yet
+                            </h3>
+                            <p className="text-gray-500 dark:text-gray-400 mb-4">
+                              Start by adding the first service provided to this patient
+                            </p>
+                            <Button
+                              variant="outline"
+                              onClick={() => document.getElementById("serviceName")?.focus()}
+                              className="border-dashed border-2 hover:border-solid"
+                            >
+                              <Plus className="h-4 w-4 mr-2" />
+                              Add First Service
+                            </Button>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    {/* Discount Section - Enhanced */}
+                    <Card>
+                      <CardHeader className="bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900 dark:to-pink-900">
+                        <CardTitle className="flex items-center gap-2">
+                          <span className="text-purple-600 dark:text-purple-300">💰 Discount Management</span>
+                        </CardTitle>
+                        <CardDescription>Apply or update discount for this patient's bill</CardDescription>
                       </CardHeader>
                       <CardContent className="pt-6">
                         <div className="grid gap-4">
@@ -1102,18 +1248,28 @@ export default function CasualtyListPage() {
                               />
                               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₹</span>
                             </div>
-                            {selectedCasualty.discount && (
-                              <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-900 rounded-md">
-                                <p className="text-sm text-blue-700 dark:text-blue-300 font-medium">
-                                  Current discount: ₹{selectedCasualty.discount.toFixed(2)}
-                                </p>
+                            {selectedCasualty.discount && selectedCasualty.discount > 0 && (
+                              <div className="mt-2 p-4 bg-purple-50 dark:bg-purple-900/50 rounded-lg border border-purple-200 dark:border-purple-700">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium text-purple-700 dark:text-purple-300">
+                                      Current Discount Applied
+                                    </p>
+                                    <p className="text-xs text-purple-600 dark:text-purple-400">
+                                      This discount will be applied to the final bill
+                                    </p>
+                                  </div>
+                                  <p className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                                    ₹{selectedCasualty.discount.toFixed(2)}
+                                  </p>
+                                </div>
                               </div>
                             )}
                           </div>
                         </div>
                       </CardContent>
                       <CardFooter className="border-t pt-4">
-                        <Button onClick={handleAddDiscount} className="ml-auto bg-blue-600 hover:bg-blue-700">
+                        <Button onClick={handleAddDiscount} className="ml-auto bg-purple-600 hover:bg-purple-700">
                           <Plus className="h-4 w-4 mr-2" /> Update Discount
                         </Button>
                       </CardFooter>

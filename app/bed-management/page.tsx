@@ -309,28 +309,35 @@ const BedManagementPage: React.FC = () => {
     setIsFormOpen(true)
   }
 
+  const lowerSearch = searchTerm.toLowerCase();
+
   const filteredRoomTypes = roomTypes
     .map((room) => ({
       ...room,
       beds: room.beds.filter((bed) => {
-        // Filter by search term
+        // safe lowercase values
+        const bedNumber = bed.bedNumber?.toLowerCase() || "";
+        const bedType   = bed.type?.toLowerCase()       || "";
+        const roomName  = room.roomName.toLowerCase();
+  
+        // search match
         const matchesSearch =
-          bed.bedNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          bed.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          room.roomName.toLowerCase().includes(searchTerm.toLowerCase())
-
-        // Filter by tab
+          bedNumber.includes(lowerSearch) ||
+          bedType.includes(lowerSearch)   ||
+          roomName.includes(lowerSearch);
+  
+        // tab filter
         const matchesTab =
           activeTab === "all" ||
-          (activeTab === "available" && bed.status === "Available") ||
-          (activeTab === "occupied" && bed.status === "Occupied") ||
+          (activeTab === "available"   && bed.status === "Available")   ||
+          (activeTab === "occupied"    && bed.status === "Occupied")    ||
           (activeTab === "maintenance" && bed.status === "Maintenance") ||
-          (activeTab === "reserved" && bed.status === "Reserved")
-
-        return matchesSearch && matchesTab
+          (activeTab === "reserved"    && bed.status === "Reserved");
+  
+        return matchesSearch && matchesTab;
       }),
     }))
-    .filter((room) => room.beds.length > 0)
+    .filter((room) => room.beds.length > 0);
 
   const getStatusColor = (status: string) => {
     switch (status) {
