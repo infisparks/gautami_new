@@ -1229,7 +1229,7 @@ export default function CasualtyListPage() {
                         <CardTitle className="flex items-center gap-2">
                           <span className="text-purple-600 dark:text-purple-300">💰 Discount Management</span>
                         </CardTitle>
-                        <CardDescription>Apply or update discount for this patient's bill</CardDescription>
+                        <CardDescription>Apply or update discount for this patients bill</CardDescription>
                       </CardHeader>
                       <CardContent className="pt-6">
                         <div className="grid gap-4">
