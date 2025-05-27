@@ -308,9 +308,9 @@ const OPDBookingPage: React.FC = () => {
   }
 
   // Watch for OPD type changes to show/hide casualty fields
-  const opdType = watch("opdType")
-  const caseType = watch("caseType")
-  const isMLC = watch("isMLC")
+  // const opdType = watch("opdType")
+  // const caseType = watch("caseType")
+  // const isMLC = watch("isMLC")
 
   /** ----------------
    *   FETCH DOCTORS
