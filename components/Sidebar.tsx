@@ -113,24 +113,36 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
         { title: "Add Service", icon: <ClipboardList size={20} />, href: "/makeservice" },
       ],
     },
+
+    {
+      title: "changes",
+      icon: <BedDouble size={20} />,
+      submenu: [
+        { title: "OPD Changes", icon: <ClipboardList size={20} />, href: "/opdchanges" },
+        { title: "IPD Changes", icon: <FileText size={20} />, href: "/ipdchanges" },
+    
+      ],
+    },
     {
       title: "OPD",
       icon: <Stethoscope size={20} />,
       submenu: [
         { title: "Appointment", icon: <ClipboardList size={20} />, href: "/opd" },
+        { title: "OPD LIST", icon: <UserPlus size={20} />, href: "/opdlist" },
         { title: "Add Doctor", icon: <UserPlus size={20} />, href: "/addDoctor" },
       ],
     },
 
-    {
-      title: "Casualty",
-      icon: <Stethoscope size={20} />,
-      submenu: [
-        { title: "Casualty", icon: <ClipboardList size={20} />, href: "/casulity" },
-        { title: "Casualty List", icon: <UserPlus size={20} />, href: "/casulity/list" },
-      ],
-    },
-
+    // {
+    //   title: "Casualty",
+    //   icon: <Stethoscope size={20} />,
+    //   submenu: [
+    //     { title: "Casualty", icon: <ClipboardList size={20} />, href: "/casulity" },
+    //     { title: "Casualty List", icon: <UserPlus size={20} />, href: "/casulity/list" },
+    //   ],
+    // },
+   
+    
     {
       title: "IPD",
       icon: <BedDouble size={20} />,

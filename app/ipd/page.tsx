@@ -3,7 +3,6 @@ import type React from "react"
 import { useState, useEffect, useMemo } from "react"
 import { useForm, type SubmitHandler, Controller } from "react-hook-form"
 import { db } from "@/lib/firebase" // Gautami DB
-import { db as dbMedford } from "@/lib/firebaseMedford" // Medford DB
 import { ref, push, update, onValue, set } from "firebase/database"
 import Head from "next/head"
 
@@ -64,6 +63,9 @@ export interface IPDFormInput {
 
   // New fields
   admissionSource: { label: string; value: string } | null
+  // New field
+  deposit?: number
+  paymentMode: { label: string; value: string } | null
 }
 
 interface PatientRecord {
@@ -74,29 +76,22 @@ interface PatientRecord {
   age?: number
   address?: string
   createdAt?: string
-}
-
-interface MedfordPatient {
-  patientId: string
-  name: string
-  contact: string
-  dob: string
-  gender: string
-  hospitalName: string
+  uhid?: string
+  updatedAt?: string
 }
 
 interface CombinedPatient {
   id: string
   name: string
   phone?: string
-  source: "gautami" | "other"
-  data: PatientRecord | MedfordPatient
+  source: "gautami"
+  data: PatientRecord
 }
 
 interface PatientSuggestion {
   label: string
   value: string
-  source: "gautami" | "other"
+  source: "gautami"
 }
 
 /* ---------------------------------------------------------------------
@@ -122,11 +117,13 @@ const AdmissionSourceOptions = [
 ]
 
 const RoomTypeOptions = [
-  { value: "female_ward", label: "Female Ward" },
-  { value: "icu", label: "ICU" },
-  { value: "male_ward", label: "Male Ward" },
+  { value: "casualty", label: "Casualty" },
   { value: "deluxe", label: "Deluxe" },
+  { value: "female", label: "Female Ward" },
+  { value: "icu", label: "ICU" },
+  { value: "male", label: "Male Ward" },
   { value: "nicu", label: "NICU" },
+  { value: "suit", label: "Suit" },
 ]
 
 function formatAMPM(date: Date): string {
@@ -148,6 +145,11 @@ function generatePatientId(): string {
   }
   return result
 }
+
+const PaymentModeOptions = [
+  { value: "cash", label: "Cash" },
+  { value: "online", label: "Online" },
+]
 
 /* ---------------------------------------------------------------------
   3) Main IPD Component
@@ -179,6 +181,8 @@ const IPDBookingPage: React.FC = () => {
       referDoctor: "",
       admissionType: AdmissionTypeOptions.find((opt) => opt.value === "general") || null,
       admissionSource: AdmissionSourceOptions.find((opt) => opt.value === "opd") || null,
+      deposit: 0,
+      paymentMode: PaymentModeOptions[0],
     },
   })
 
@@ -200,13 +204,12 @@ const IPDBookingPage: React.FC = () => {
 
   // Patient lists from both DBs
   const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([])
-  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([])
 
-  // Watch the currently selected room type and admission source (used below)
+  // Watch the currently selected room type and admission source
   const selectedRoomType = watch("roomType")
   const selectedAdmissionSource = watch("admissionSource")
 
-  // NEW: All bed data for the "View Bed Availability" popup
+  // All bed data for the "View Bed Availability" popup
   const [allBedData, setAllBedData] = useState<any>({})
   const [showBedPopup, setShowBedPopup] = useState(false)
 
@@ -236,9 +239,9 @@ const IPDBookingPage: React.FC = () => {
     return () => unsubscribe()
   }, [])
 
-  // Gautami Patients
+  // Gautami Patients - Updated to use new structure
   useEffect(() => {
-    const patientsRef = ref(db, "patients")
+    const patientsRef = ref(db, "patients/patientinfo")
     const unsubscribe = onValue(patientsRef, (snapshot) => {
       if (!snapshot.exists()) {
         setGautamiPatients([])
@@ -260,37 +263,12 @@ const IPDBookingPage: React.FC = () => {
     return () => unsubscribe()
   }, [])
 
-  // Medford Patients
-  useEffect(() => {
-    const medfordRef = ref(dbMedford, "patients")
-    const unsubscribe = onValue(medfordRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setMedfordPatients([])
-        return
-      }
-      const data = snapshot.val()
-      const loaded: CombinedPatient[] = []
-      for (const key in data) {
-        const rec: MedfordPatient = data[key]
-        loaded.push({
-          id: rec.patientId,
-          name: rec.name,
-          phone: rec.contact,
-          source: "other",
-          data: rec,
-        })
-      }
-      setMedfordPatients(loaded)
-    })
-    return () => unsubscribe()
-  }, [])
-
-  // Combine the two arrays (memoized to avoid unnecessary re-renders)
+  // Combine the two arrays
   const combinedPatients = useMemo(() => {
-    return [...gautamiPatients, ...medfordPatients]
-  }, [gautamiPatients, medfordPatients])
+    return [...gautamiPatients]
+  }, [gautamiPatients])
 
-  // NEW: Fetch all bed data once for the "View Bed Availability" popup
+  // Fetch all bed data for the "View Bed Availability" popup
   useEffect(() => {
     const allBedsRef = ref(db, "beds")
     const unsub = onValue(allBedsRef, (snapshot) => {
@@ -302,6 +280,24 @@ const IPDBookingPage: React.FC = () => {
     })
     return () => unsub()
   }, [])
+
+  // Handle clicks outside dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('[data-dropdown="patient-name"]') && patientSuggestions.length > 0) {
+        setPatientSuggestions([])
+      }
+      if (!target.closest('[data-dropdown="patient-phone"]') && phoneSuggestions.length > 0) {
+        setPhoneSuggestions([])
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [patientSuggestions.length, phoneSuggestions.length])
 
   /* -----------------------------------------------------------------
      3B) Patient auto-suggest logic for Name
@@ -398,12 +394,6 @@ const IPDBookingPage: React.FC = () => {
         const match = GenderOptions.find((g) => g.value.toLowerCase() === rec.gender?.toLowerCase())
         setValue("gender", match || null)
       }
-    } else {
-      const med = found.data as MedfordPatient
-      if (med.gender) {
-        const match = GenderOptions.find((g) => g.value.toLowerCase() === med.gender.toLowerCase())
-        setValue("gender", match || null)
-      }
     }
     setPatientSuggestions([])
     setPhoneSuggestions([])
@@ -411,7 +401,7 @@ const IPDBookingPage: React.FC = () => {
   }
 
   /* -----------------------------------------------------------------
-     3C) Beds fetching logic if user selects a Room Type normally
+     3C) Beds fetching logic
   ------------------------------------------------------------------ */
   useEffect(() => {
     if (!selectedRoomType?.value) {
@@ -442,11 +432,11 @@ const IPDBookingPage: React.FC = () => {
   }, [selectedRoomType, setValue])
 
   /* -----------------------------------------------------------------
-     3D) Helper: WhatsApp message sender function
+     3D) WhatsApp message sender function
   ------------------------------------------------------------------ */
   const sendWhatsAppMessage = async (number: string, message: string) => {
     const payload = {
-      token: "99583991572", // example token
+      token: "99583991572",
       number: `91${number}`,
       message,
     }
@@ -465,7 +455,7 @@ const IPDBookingPage: React.FC = () => {
   }
 
   /* -----------------------------------------------------------------
-     3E) Submission Logic
+     3E) Submission Logic - UPDATED STRUCTURE
   ------------------------------------------------------------------ */
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true)
@@ -476,68 +466,96 @@ const IPDBookingPage: React.FC = () => {
         await update(bedRef, { status: "Occupied" })
       }
 
-      // 2) Prepare IPD data
+      // 2) Generate or use existing patient ID
+      let patientId: string
+      const currentTime = new Date().toISOString()
+
+      if (selectedPatient) {
+        // If the user chose an existing patient
+        patientId = selectedPatient.id
+
+        // Update patient info in patients/patientinfo/
+        await update(ref(db, `patients/patientinfo/${patientId}`), {
+          name: data.name,
+          phone: data.phone,
+          gender: data.gender?.value || "",
+          age: data.age,
+          address: data.address || "",
+          updatedAt: currentTime,
+        })
+      } else {
+        // If the user is creating a brand-new patient
+        patientId = generatePatientId()
+
+        // Save patient basic info to patients/patientinfo/
+        await set(ref(db, `patients/patientinfo/${patientId}`), {
+          name: data.name,
+          phone: data.phone,
+          gender: data.gender?.value || "",
+          age: data.age,
+          address: data.address || "",
+          createdAt: currentTime,
+          updatedAt: currentTime,
+          uhid: patientId,
+        })
+      }
+
+      // 3) Prepare IPD data (NO patient details, NO billing info, NO labels)
       const ipdData = {
-        name: data.name,
-        phone: data.phone,
-        gender: data.gender?.value || "",
-        age: data.age,
-        address: data.address || "",
+        // Patient reference only
+        uhid: patientId,
+
+        // Relative information
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
         relativeAddress: data.relativeAddress || "",
-        date: data.date.toISOString(),
-        time: data.time,
+
+        // IPD specific details (values only, no labels)
+        admissionDate: data.date.toISOString(),
+        admissionTime: data.time,
         roomType: data.roomType?.value || "",
         bed: data.bed?.value || "",
         doctor: data.doctor?.value || "",
         referDoctor: data.referDoctor || "",
         admissionType: data.admissionType?.value || "",
         admissionSource: data.admissionSource?.value || "",
-        createdAt: new Date().toISOString(),
+
+        // Metadata
+        createdAt: currentTime,
+        status: "active",
       }
 
-      // 3) Create or update patient record
-      let patientId: string
-      if (selectedPatient) {
-        // If the user chose an existing patient
-        patientId = selectedPatient.id
-        await update(ref(db, `patients/${patientId}`), {
-          name: data.name,
-          phone: data.phone,
-          gender: data.gender?.value || "",
-          age: data.age,
-          address: data.address || "",
+      // 4) Save IPD data under patients/ipddetail/userinfoipd/[uhid]/[ipdId]/
+      const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${patientId}`))
+      const ipdId = ipdRef.key as string
+      await update(ipdRef, ipdData)
+
+      // 5) Save billing info under patients/ipddetail/userbillinginfoipd/[uhid]/[ipdId]/
+      if (data.deposit && data.deposit > 0) {
+        const billingData = {
+          patientId: patientId,
+          uhid: patientId,
+          ipdId: ipdId,
+          totalDeposit: data.deposit,
+          createdAt: currentTime,
+        }
+
+        // 5a) Update at path /userbillinginfoipd/[uhid]/[ipdId]
+        const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}`)
+        await update(billingRef, billingData)
+
+        // 5b) Add payment entry under that node
+        const paymentRef = push(ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}/payments`))
+        await update(paymentRef, {
+          amount: data.deposit,
+          date: currentTime,
+          paymentType: data.paymentMode?.value || "",
+          type: "deposit",
+          createdAt: currentTime,
         })
-      } else {
-        // If the user is creating a brand-new patient
-        const newId = generatePatientId()
-        await set(ref(db, `patients/${newId}`), {
-          name: data.name,
-          phone: data.phone,
-          gender: data.gender?.value || "",
-          age: data.age,
-          address: data.address || "",
-          createdAt: new Date().toISOString(),
-          uhid: newId,
-        })
-        // Also add to Medford DB
-        await set(ref(dbMedford, `patients/${newId}`), {
-          name: data.name,
-          contact: data.phone,
-          gender: data.gender?.value || "",
-          dob: "",
-          patientId: newId,
-          hospitalName: "other",
-        })
-        patientId = newId
       }
 
-      // 4) Push IPD data under that patient in Gautami
-      const newIpdRef = push(ref(db, `patients/${patientId}/ipd`))
-      await update(newIpdRef, ipdData)
-
-      // 5) Construct and send WhatsApp messages
+      // 6) Send WhatsApp messages
       const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`
       const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
 
@@ -549,7 +567,7 @@ const IPDBookingPage: React.FC = () => {
         autoClose: 5000,
       })
 
-      // 6) Reset the form
+      // 7) Reset the form
       reset({
         name: "",
         phone: "",
@@ -567,6 +585,8 @@ const IPDBookingPage: React.FC = () => {
         referDoctor: "",
         admissionType: null,
         admissionSource: AdmissionSourceOptions.find((opt) => opt.value === "opd") || null,
+        deposit: 0,
+        paymentMode: PaymentModeOptions[0],
       })
       setPatientNameInput("")
       setPatientPhoneInput("")
@@ -634,7 +654,8 @@ const IPDBookingPage: React.FC = () => {
       <ToastContainer />
 
       <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-8 px-4">
-      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-visible">          {/* Header */}
+        <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-visible">
+          {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
@@ -645,7 +666,8 @@ const IPDBookingPage: React.FC = () => {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">            <div className="space-y-8">
+          <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">
+            <div className="space-y-8">
               {/* Section: Patient Information */}
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                 <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
@@ -655,7 +677,7 @@ const IPDBookingPage: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Patient Name + Suggestions */}
-                  <div className="relative md:col-span-2">
+                  <div className="relative" data-dropdown="patient-name">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
                     <div className="relative">
                       <User className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -715,7 +737,7 @@ const IPDBookingPage: React.FC = () => {
                   </div>
 
                   {/* Phone with Auto-Complete */}
-                  <div className="relative">
+                  <div className="relative" data-dropdown="patient-phone">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
                     <div className="relative">
                       <Phone className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
@@ -923,7 +945,7 @@ const IPDBookingPage: React.FC = () => {
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {/* Admission Source - NEW FIELD */}
+                  {/* Admission Source */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Admission Source</label>
                     <Controller
@@ -1074,6 +1096,55 @@ const IPDBookingPage: React.FC = () => {
                       <p className="text-red-500 text-sm mt-1 flex items-center">
                         <AlertCircle className="h-4 w-4 mr-1" />
                         {errors.doctor.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Deposit */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Deposit Amount (Optional)</label>
+                    <div className="relative">
+                      <span className="absolute top-3 left-3 text-gray-400">₹</span>
+                      <input
+                        type="number"
+                        {...register("deposit", {
+                          min: { value: 0, message: "Deposit must be positive" },
+                        })}
+                        placeholder="Enter deposit amount"
+                        className={`w-full pl-8 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errors.deposit ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                    </div>
+                    {errors.deposit && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.deposit.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Payment Mode */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
+                    <Controller
+                      name="paymentMode"
+                      control={control}
+                      rules={{ required: "Please select payment mode" }}
+                      render={({ field }) => (
+                        <Select
+                          {...field}
+                          options={PaymentModeOptions}
+                          placeholder="Select Mode"
+                          styles={customSelectStyles}
+                          onChange={(val) => field.onChange(val)}
+                        />
+                      )}
+                    />
+                    {errors.paymentMode && (
+                      <p className="text-red-500 text-sm mt-1 flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1" />
+                        {errors.paymentMode.message}
                       </p>
                     )}
                   </div>
@@ -1290,6 +1361,12 @@ const IPDBookingPage: React.FC = () => {
                       <span className="font-medium">{previewData.referDoctor}</span>
                     </p>
                   )}
+                  {previewData.deposit && previewData.deposit > 0 && (
+                    <p className="flex justify-between">
+                      <span className="text-gray-600">Deposit:</span>
+                      <span className="font-medium">₹{previewData.deposit}</span>
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1380,20 +1457,31 @@ const IPDBookingPage: React.FC = () => {
                               }`}
                               onClick={() => {
                                 if (!isAvailable) return
-                                // Auto-fill form with this bed & room
+
+                                // 1) First set the room type
                                 const rtOption = RoomTypeOptions.find((opt) => opt.value === roomKey)
-                                setValue("roomType", rtOption || null)
-                                // Overwrite the bed dropdown
-                                setBeds([
-                                  {
-                                    label: `Bed ${bedInfo.bedNumber}`,
-                                    value: bedId,
-                                  },
-                                ])
-                                setValue("bed", {
-                                  label: `Bed ${bedInfo.bedNumber}`,
-                                  value: bedId,
-                                })
+                                if (rtOption) {
+                                  setValue("roomType", rtOption)
+
+                                  // Wait for the room type to be set before setting the bed
+                                  setTimeout(() => {
+                                    // 2) Build the full option object for this bed
+                                    const bedOption = {
+                                      label: `Bed ${bedInfo.bedNumber}`,
+                                      value: bedId,
+                                    }
+
+                                    // 3) Merge it into your current `beds` state
+                                    setBeds((prev) =>
+                                      prev.some((b) => b.value === bedOption.value) ? prev : [bedOption, ...prev],
+                                    )
+
+                                    // 4) Actually select it
+                                    setValue("bed", bedOption)
+                                  }, 100)
+                                }
+
+                                // 5) Close the popup
                                 setShowBedPopup(false)
                               }}
                             >

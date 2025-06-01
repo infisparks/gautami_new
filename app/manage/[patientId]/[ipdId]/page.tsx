@@ -98,16 +98,28 @@ export default function ManagePatientPageTabs() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
       <div className="container mx-auto px-4 py-4 md:py-6">
-        {/* Back button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleGoBack}
-          className="mb-4 text-slate-600 hover:text-slate-900 -ml-2"
-        >
-          <ChevronLeft className="h-4 w-4 mr-1" />
-          Back
-        </Button>
+        {/* Back and Add Discharge Summary buttons */}
+        <div className="flex items-center justify-between mb-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleGoBack}
+            className="text-slate-600 hover:text-slate-900 -ml-2"
+          >
+            <ChevronLeft className="h-4 w-4 mr-1" />
+            Back
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              router.push(`/discharge-summary/${patientId}/${ipdId}`)
+            }}
+          >
+            Add Discharge Summary
+          </Button>
+        </div>
 
         {/* Patient header */}
         {isLoading ? (
@@ -200,7 +212,7 @@ export default function ManagePatientPageTabs() {
               <TabsContent value="nurse" className="mt-0">
                 <NurseNoteComponent />
               </TabsContent>
-             
+
               <TabsContent value="doctor" className="mt-0">
                 <DoctorVisits />
               </TabsContent>

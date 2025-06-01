@@ -31,9 +31,12 @@ export default function NurseNoteComponent() {
   const [notes, setNotes] = useState<NurseNote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Firebase path base for nurse notes under the new structure
+  const dbPath = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/nursenote`;
+
   // Fetch existing nurse notes for this patient from Firebase.
   useEffect(() => {
-    const nurseNotesRef = ref(db, `patients/${patientId}/ipd/${ipdId}/nurseNotes`);
+    const nurseNotesRef = ref(db, dbPath);
     const unsubscribe = onValue(nurseNotesRef, (snapshot) => {
       setIsLoading(false);
       if (snapshot.exists()) {
@@ -64,7 +67,7 @@ export default function NurseNoteComponent() {
         enteredBy,
         timestamp: new Date().toISOString(),
       };
-      const nurseNotesRef = ref(db, `patients/${patientId}/ipd/${ipdId}/nurseNotes`);
+      const nurseNotesRef = ref(db, dbPath);
       await push(nurseNotesRef, newNote);
       reset({ observation: "" });
     } catch (error) {

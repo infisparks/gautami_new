@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { ref, onValue, update, push, remove } from "firebase/database"
+import { ref, onValue, update, push, remove, get } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -10,11 +10,34 @@ import { useForm, Controller, type SubmitHandler } from "react-hook-form"
 import { yupResolver } from "@hookform/resolvers/yup"
 import * as yup from "yup"
 import { motion, AnimatePresence } from "framer-motion"
-import  { CheckCircle } from "lucide-react";
+import { CheckCircle } from "lucide-react"
 // ***** IMPORTANT: Use CreatableSelect from react-select/creatable
 import CreatableSelect from "react-select/creatable"
 
-import { Plus, ArrowLeft, AlertTriangle, History, Trash, Calendar, User, Phone, MapPin, CreditCard, Bed, Users, FileText, Download, ChevronRight, Percent, UserPlus, X, DollarSign, Tag, Save, RefreshCw } from 'lucide-react'
+import {
+  Plus,
+  ArrowLeft,
+  AlertTriangle,
+  History,
+  Trash,
+  Calendar,
+  User,
+  Phone,
+  MapPin,
+  CreditCard,
+  Bed,
+  Users,
+  FileText,
+  Download,
+  ChevronRight,
+  Percent,
+  UserPlus,
+  X,
+  DollarSign,
+  Tag,
+  Save,
+  RefreshCw,
+} from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
 import InvoiceDownload from "./../../InvoiceDownload"
@@ -32,6 +55,7 @@ interface Payment {
   id?: string
   amount: number
   paymentType: string
+  type?: string
   date: string
 }
 
@@ -67,8 +91,8 @@ export interface BillingRecord {
   relativePhone?: string
   relativeAddress?: string
   dischargeDate?: string
-  amount: number
-  paymentType: string
+  amount: number            // deposit total
+  paymentType: string       // not used heavily here, but kept
   roomType?: string
   bed?: string
   services: ServiceItem[]
@@ -203,66 +227,93 @@ export default function BillingPage() {
   }, [])
 
   // ===== Load Selected Patient Record =====
+  // We need both patient demographics (from "patients/patientinfo/[patientId]")
+  // and IPD‐details (from "patients/ipddetail/userinfoipd/[patientId]/[ipdId]")
   useEffect(() => {
     if (!patientId || !ipdId) return
-    const patientRef = ref(db, `patients/${patientId}`)
-    const unsubscribe = onValue(patientRef, (snapshot) => {
-      if (!snapshot.exists()) return
-      const patientData = snapshot.val()
-      if (!patientData.ipd || !patientData.ipd[ipdId]) return
-      const ipd = patientData.ipd[ipdId]
 
-      const servicesArray: ServiceItem[] = ipd.services
-        ? ipd.services.map((svc: any) => ({
-            serviceName: svc.serviceName || "",
-            doctorName: svc.doctorName || "",
-            type: svc.type || "service",
-            amount: Number(svc.amount) || 0,
-            createdAt: svc.createdAt || "",
+    // 1) Fetch patient demographic data
+    const patientInfoRef = ref(db, `patients/patientinfo/${patientId}`)
+    onValue(patientInfoRef, (snapInfo) => {
+      if (!snapInfo.exists()) return
+      const patientData = snapInfo.val()
+
+      // 2) Fetch IPD detail under new structure:
+      const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`)
+      onValue(ipdRef, async (snapIPD) => {
+        if (!snapIPD.exists()) {
+          return
+        }
+        const ipd = snapIPD.val()
+
+        // Build services[]
+        const servicesArray: ServiceItem[] = ipd.services
+          ? ipd.services.map((svc: any) => ({
+              serviceName: svc.serviceName || "",
+              doctorName: svc.doctorName || "",
+              type: svc.type || "service",
+              amount: Number(svc.amount) || 0,
+              createdAt: svc.createdAt || "",
+            }))
+          : []
+
+        // Build payments[] by fetching from billing node:
+        let paymentsArray: Payment[] = []
+        const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}/payments`)
+        const billingSnap = await get(billingRef)
+        if (billingSnap.exists()) {
+          const paymentsData: Record<string, any> = billingSnap.val()
+          paymentsArray = Object.keys(paymentsData).map((k) => ({
+            id: k,
+            amount: Number(paymentsData[k].amount) || 0,
+            paymentType: paymentsData[k].paymentType || "cash",
+            type: paymentsData[k].type || "advance",
+            date: paymentsData[k].date || new Date().toISOString(),
           }))
-        : []
+        }
 
-      let paymentsArray: Payment[] = []
-      if (ipd.payments) {
-        paymentsArray = Object.keys(ipd.payments).map((k) => ({
-          id: k,
-          amount: Number(ipd.payments[k].amount) || 0,
-          paymentType: ipd.payments[k].paymentType || "cash",
-          date: ipd.payments[k].date || new Date().toISOString(),
-        }))
-      }
+        // Fetch deposit total from billing node:
+        let depositTotal = 0
+        const billingRootRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}`)
+        const billingRootSnap = await get(billingRootRef)
+        if (billingRootSnap.exists()) {
+          const billingRootData = billingRootSnap.val()
+          depositTotal = Number(billingRootData.totalDeposit) || 0
+        }
 
-      const record: BillingRecord = {
-        patientId,
-        uhid: patientData.uhid ?? patientId,
-        ipdId,
-        name: patientData.name || "Unknown",
-        mobileNumber: patientData.phone || "",
-        address: patientData.address || "",
-        age: patientData.age || "",
-        gender: patientData.gender || "",
-        relativeName: ipd.relativeName || "",
-        relativePhone: ipd.relativePhone || "",
-        relativeAddress: ipd.relativeAddress || "",
-        amount: Number(ipd.amount || 0),
-        paymentType: ipd.paymentType || "deposit",
-        roomType: ipd.roomType || "",
-        bed: ipd.bed || "",
-        services: servicesArray,
-        payments: paymentsArray,
-        dischargeDate: ipd.dischargeDate,
-        discount: ipd.discount ? Number(ipd.discount) : 0,
-        admitDate: ipd.date ? ipd.date : ipd.createdAt ? ipd.createdAt : undefined,
-      }
+        const record: BillingRecord = {
+          patientId,
+          uhid: patientData.uhid ?? patientId,
+          ipdId,
+          name: patientData.name || "Unknown",
+          mobileNumber: patientData.phone || "",
+          address: patientData.address || "",
+          age: patientData.age || "",
+          gender: patientData.gender || "",
+          relativeName: ipd.relativeName || "",
+          relativePhone: ipd.relativePhone || "",
+          relativeAddress: ipd.relativeAddress || "",
+          dischargeDate: ipd.dischargeDate || "",
+          amount: depositTotal,
+          paymentType: ipd.paymentType || "advance",
+          roomType: ipd.roomType || "",
+          bed: ipd.bed || "",
+          services: servicesArray,
+          payments: paymentsArray,
+          discount: ipd.discount ? Number(ipd.discount) : 0,
+          admitDate: ipd.date ? ipd.date : ipd.createdAt ? ipd.createdAt : undefined,
+          createdAt: ipd.createdAt || "",
+        }
 
-      setSelectedRecord(record)
-      
-      // Initialize discount form with existing discount value
-      if (record.discount) {
-        resetDiscount({ discount: record.discount })
-      }
+        setSelectedRecord(record)
+
+        // Initialize discount form if there’s an existing discount
+        if (record.discount) {
+          resetDiscount({ discount: record.discount })
+        }
+      })
     })
-    return () => unsubscribe()
+    // No need to explicitly unsubscribe here since onValue returns a function, but Next.js 13 / React might remount.
   }, [patientId, ipdId])
 
   // ===== React Hook Form setups =====
@@ -275,7 +326,6 @@ export default function BillingPage() {
     reset: resetService,
     setValue: setValueService,
     control: serviceControl,
-    // watch: watchService,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
     defaultValues: { serviceName: "", amount: 0 },
@@ -355,9 +405,10 @@ export default function BillingPage() {
   const dueAmount = selectedRecord ? Math.max(totalBill - selectedRecord.amount, 0) : 0
 
   // Calculate discount percentage for display
-  const discountPercentage = hospitalServiceTotal + consultantChargeTotal > 0 
-    ? ((discountVal / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1) 
-    : "0.0"
+  const discountPercentage =
+    hospitalServiceTotal + consultantChargeTotal > 0
+      ? ((discountVal / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1)
+      : "0.0"
 
   // ===== Group Consultant Charges by Doctor =====
   const aggregatedConsultantCharges = consultantChargeItems.reduce(
@@ -390,7 +441,7 @@ export default function BillingPage() {
         lastVisit: Date | null
         items: ServiceItem[]
       }
-    >,
+    >
   )
   const aggregatedConsultantChargesArray = Object.values(aggregatedConsultantCharges)
 
@@ -399,9 +450,8 @@ export default function BillingPage() {
     patientMobile: string,
     patientName: string,
     paymentAmount: number,
-    updatedDeposit: number,
+    updatedDeposit: number
   ) => {
-    // If you have a notification API, you can integrate it here.
     const apiUrl = "https://wa.medblisss.com/send-text"
     const payload = {
       token: "99583991572",
@@ -448,7 +498,10 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
       await update(recordRef, { services: sanitizedServices })
 
       toast.success("Additional service added successfully!")
@@ -468,30 +521,39 @@ export default function BillingPage() {
     if (!selectedRecord) return
     setLoading(true)
     try {
-      const newPaymentRef = push(ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}/payments`))
+      // Push new payment under billing node
+      const newPaymentRef = push(
+        ref(
+          db,
+          `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`
+        )
+      )
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
+        type: "advance",
         date: new Date().toISOString(),
       }
       await update(newPaymentRef, newPayment)
 
-      // Update deposit total
-      const updatedPayments = [newPayment, ...selectedRecord.payments]
+      // Update deposit total under billing node
       const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
+      const billingRootRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
+      await update(billingRootRef, { totalDeposit: updatedDeposit })
 
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
-      await update(recordRef, { amount: updatedDeposit })
-
-      // Optional: send a payment notification via your chosen method
+      // Optional: send payment notification
       await sendPaymentNotification(
         selectedRecord.mobileNumber,
         selectedRecord.name,
         Number(formData.paymentAmount),
-        updatedDeposit,
+        updatedDeposit
       )
 
       toast.success("Payment recorded successfully!")
+      const updatedPayments = [newPayment, ...selectedRecord.payments]
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
       setSelectedRecord(updatedRecord)
       resetPayment({ paymentAmount: 0, paymentType: "" })
@@ -504,31 +566,9 @@ export default function BillingPage() {
   }
 
   // 3. Discharge Patient
-  const handleDischarge = async () => {
+  const handleDischarge = () => {
     if (!selectedRecord) return
-    if (!selectedRecord.roomType || !selectedRecord.bed) {
-      toast.error("Bed or Room Type information missing. Cannot discharge.")
-      return
-    }
-    setLoading(true)
-    try {
-      const dischargeDate = new Date().toISOString()
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
-      await update(recordRef, { dischargeDate })
-
-      // Mark the bed as available
-      const bedRef = ref(db, `beds/${selectedRecord.roomType}/${selectedRecord.bed}`)
-      await update(bedRef, { status: "Available" })
-
-      toast.success("Patient discharged and bed made available!")
-      const updatedRecord = { ...selectedRecord, dischargeDate }
-      setSelectedRecord(updatedRecord)
-    } catch (error) {
-      console.error("Error discharging patient:", error)
-      toast.error("Failed to discharge patient. Please try again.")
-    } finally {
-      setLoading(false)
-    }
+    router.push(`/discharge-summary/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
   }
 
   // 4. Apply Discount
@@ -537,15 +577,17 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const discountVal = Number(formData.discount)
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
       await update(recordRef, { discount: discountVal })
 
       toast.success("Discount applied successfully!")
       const updatedRecord = { ...selectedRecord, discount: discountVal }
       setSelectedRecord(updatedRecord)
       setDiscountUpdated(true)
-      
-      // Close the modal after successful update
+
       setTimeout(() => {
         setIsDiscountModalOpen(false)
       }, 1000)
@@ -585,7 +627,10 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
       await update(recordRef, { services: sanitizedServices })
 
       toast.success("Consultant charge added successfully!")
@@ -608,7 +653,10 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const updatedServices = selectedRecord.services.filter((svc) => svc !== item)
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
       await update(recordRef, { services: updatedServices })
 
       toast.success("Service deleted successfully!")
@@ -629,14 +677,17 @@ export default function BillingPage() {
     try {
       const paymentRef = ref(
         db,
-        `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}/payments/${paymentId}`,
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`
       )
       await remove(paymentRef)
 
       // Adjust deposit after deleting payment
       const updatedDeposit = selectedRecord.amount - paymentAmount
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
-      await update(recordRef, { amount: updatedDeposit })
+      const billingRootRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
+      await update(billingRootRef, { totalDeposit: updatedDeposit })
 
       const updatedPayments = selectedRecord.payments.filter((p) => p.id !== paymentId)
       toast.success("Payment deleted successfully!")
@@ -656,9 +707,12 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const updatedServices = selectedRecord.services.filter(
-        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName,
+        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName
       )
-      const recordRef = ref(db, `patients/${selectedRecord.patientId}/ipd/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+      )
       await update(recordRef, { services: updatedServices })
 
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
@@ -672,7 +726,6 @@ export default function BillingPage() {
     }
   }
 
-  // ===== Separate Service Items =====
   const serviceItems = selectedRecord?.services.filter((s) => s.type === "service") || []
 
   return (
@@ -697,7 +750,7 @@ export default function BillingPage() {
                   disabled={loading}
                   className="flex items-center px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors shadow-sm"
                 >
-                  <AlertTriangle size={16} className="mr-2" /> Discharge Patient
+                  <FileText size={16} className="mr-2" /> Discharge Summary
                 </button>
               )}
 
@@ -802,14 +855,14 @@ export default function BillingPage() {
                           </div>
                         )}
                       </div>
-                      
+
                       {/* Discount Quick Action Button */}
                       {!selectedRecord.dischargeDate && (
                         <button
                           onClick={() => setIsDiscountModalOpen(true)}
                           className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-all shadow-sm transform hover:scale-[1.02]"
                         >
-                          <Percent size={16} className="mr-2" /> 
+                          <Percent size={16} className="mr-2" />
                           {discountVal > 0 ? "Update Discount" : "Add Discount"}
                         </button>
                       )}
@@ -1151,11 +1204,10 @@ export default function BillingPage() {
                                   control={serviceControl}
                                   name="serviceName"
                                   render={({ field }) => {
-                                    // If the typed-in service is not in the array, we create an object so CreatableSelect won't complain
+                                    // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
                                     const selectedOption =
                                       serviceOptions.find(
-                                        (option) =>
-                                          option.label.toLowerCase() === field.value.toLowerCase(),
+                                        (option) => option.label.toLowerCase() === field.value.toLowerCase()
                                       ) || {
                                         label: field.value,
                                         value: field.value,
@@ -1172,9 +1224,7 @@ export default function BillingPage() {
                                             // If user chose an existing service, auto-fill the amount
                                             field.onChange(selected.label)
                                             // If that option has a known amount, set it
-                                            const foundOption = serviceOptions.find(
-                                              (opt) => opt.label === selected.label
-                                            )
+                                            const foundOption = serviceOptions.find((opt) => opt.label === selected.label)
                                             if (foundOption) {
                                               setValueService("amount", foundOption.amount)
                                             }
@@ -1216,7 +1266,9 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? "Processing..." : (
+                                {loading ? (
+                                  "Processing..."
+                                ) : (
                                   <>
                                     <Plus size={16} className="mr-2" /> Add Service
                                   </>
@@ -1230,21 +1282,23 @@ export default function BillingPage() {
                             <h3 className="text-lg font-semibold text-emerald-800 mb-4 flex items-center">
                               <Percent size={18} className="mr-2 text-emerald-600" /> Discount
                             </h3>
-                            
+
                             {discountVal > 0 ? (
                               <div className="space-y-4">
                                 <div className="bg-white rounded-lg p-4 shadow-sm border border-emerald-100">
                                   <div className="flex justify-between items-center">
                                     <div>
                                       <p className="text-sm text-gray-500">Current Discount</p>
-                                      <p className="text-2xl font-bold text-emerald-600">₹{discountVal.toLocaleString()}</p>
+                                      <p className="text-2xl font-bold text-emerald-600">
+                                        ₹{discountVal.toLocaleString()}
+                                      </p>
                                     </div>
                                     <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
                                       {discountPercentage}% off
                                     </div>
                                   </div>
                                 </div>
-                                
+
                                 <button
                                   onClick={() => setIsDiscountModalOpen(true)}
                                   className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
@@ -1258,7 +1312,7 @@ export default function BillingPage() {
                                   <p className="text-gray-500 mb-2">No discount applied yet</p>
                                   <DollarSign size={24} className="mx-auto text-emerald-300" />
                                 </div>
-                                
+
                                 <button
                                   onClick={() => setIsDiscountModalOpen(true)}
                                   className="w-full py-2 px-4 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center justify-center"
@@ -1297,11 +1351,7 @@ export default function BillingPage() {
                               <p className={`text-sm ${dueAmount > 0 ? "text-red-600" : "text-green-600"}`}>
                                 {dueAmount > 0 ? "Due Amount" : "Fully Paid"}
                               </p>
-                              <p
-                                className={`text-2xl font-bold ${
-                                  dueAmount > 0 ? "text-red-800" : "text-green-800"
-                                }`}
-                              >
+                              <p className={`text-2xl font-bold ${dueAmount > 0 ? "text-red-800" : "text-green-800"}`}>
                                 {dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : "✓"}
                               </p>
                             </div>
@@ -1328,6 +1378,10 @@ export default function BillingPage() {
                                     Payment Type
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Type
+                                  </th>{" "}
+                                  {/* New Column */}
+                                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
                                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1335,6 +1389,7 @@ export default function BillingPage() {
                                   </th>
                                 </tr>
                               </thead>
+
                               <tbody className="divide-y divide-gray-200">
                                 {selectedRecord.payments.map((payment, index) => (
                                   <tr key={index} className="hover:bg-gray-50">
@@ -1342,14 +1397,22 @@ export default function BillingPage() {
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
                                       {payment.amount.toLocaleString()}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                                      {payment.paymentType}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                                      {payment.type || "advance"}
+                                    </td>{" "}
+                                    {/* New cell */}
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
                                       {!selectedRecord.dischargeDate && (
                                         <button
-                                          onClick={() => payment.id && handleDeletePayment(payment.id, payment.amount)}
+                                          onClick={() =>
+                                            payment.id && handleDeletePayment(payment.id, payment.amount)
+                                          }
                                           className="text-red-500 hover:text-red-700 transition-colors"
                                           title="Delete payment"
                                         >
@@ -1413,7 +1476,9 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? "Processing..." : (
+                                {loading ? (
+                                  "Processing..."
+                                ) : (
                                   <>
                                     <Plus size={16} className="mr-2" /> Add Payment
                                   </>
@@ -1466,7 +1531,7 @@ export default function BillingPage() {
                                     <td className="px-4 py-3 text-sm text-gray-900">{agg.doctorName}</td>
                                     <td className="px-4 py-3 text-sm text-gray-900 text-center">{agg.visited}</td>
                                     <td className="px-4 py-3 text-sm text-gray-900 text-right">
-                                      {agg.totalCharge.toLocaleString()}
+                                      ₹{agg.totalCharge.toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {agg.lastVisit ? agg.lastVisit.toLocaleString() : "N/A"}
@@ -1548,7 +1613,9 @@ export default function BillingPage() {
                                   loading ? "opacity-50 cursor-not-allowed" : ""
                                 }`}
                               >
-                                {loading ? "Processing..." : (
+                                {loading ? (
+                                  "Processing..."
+                                ) : (
                                   <>
                                     <Plus size={16} className="mr-2" /> Add Consultant Charge
                                   </>
@@ -1721,7 +1788,9 @@ export default function BillingPage() {
                     <div className="flex justify-between items-center">
                       <div>
                         <p className="text-sm text-gray-600">Total Bill Amount</p>
-                        <p className="text-xl font-bold text-gray-800">₹{(hospitalServiceTotal + consultantChargeTotal).toLocaleString()}</p>
+                        <p className="text-xl font-bold text-gray-800">
+                          ₹{(hospitalServiceTotal + consultantChargeTotal).toLocaleString()}
+                        </p>
                       </div>
                       {discountVal > 0 && (
                         <div className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-sm font-medium">
@@ -1752,16 +1821,18 @@ export default function BillingPage() {
 
                     {/* Discount percentage display */}
                     {currentDiscount > 0 && hospitalServiceTotal + consultantChargeTotal > 0 && (
-                      <motion.div 
+                      <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         className="bg-emerald-50 p-3 rounded-lg border border-emerald-100"
                       >
                         <p className="text-sm text-emerald-700 flex items-center">
                           <Tag className="h-4 w-4 mr-1" />
-                          This is equivalent to a <span className="font-bold mx-1">
+                          This is equivalent to a{" "}
+                          <span className="font-bold mx-1">
                             {((currentDiscount / (hospitalServiceTotal + consultantChargeTotal)) * 100).toFixed(1)}%
-                          </span> discount
+                          </span>{" "}
+                          discount
                         </p>
                       </motion.div>
                     )}

@@ -1,18 +1,29 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState, useRef } from "react"
-import { useParams } from "next/navigation"
-import { ref, onValue, set } from "firebase/database"
-import { useForm, type SubmitHandler } from "react-hook-form"
-import { db, auth } from "@/lib/firebase"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Textarea } from "@/components/ui/textarea"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import type React from "react";
+import { useEffect, useState, useRef } from "react";
+import { useParams } from "next/navigation";
+import { ref, onValue, set } from "firebase/database";
+import { useForm, type SubmitHandler } from "react-hook-form";
+import { db, auth } from "@/lib/firebase";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Stethoscope,
   FileText,
@@ -28,8 +39,15 @@ import {
   Users,
   Activity,
   Clock,
-} from "lucide-react"
-import { PersonIcon, ExclamationTriangleIcon, PlusIcon } from "@radix-ui/react-icons"
+} from "lucide-react";
+import {
+  PersonIcon,
+  ExclamationTriangleIcon,
+  PlusIcon,
+} from "@radix-ui/react-icons";
+import { format, parseISO } from "date-fns";
+import "react-toastify/dist/ReactToastify.css";
+import { ToastContainer, toast } from "react-toastify";
 
 // --- Define Web Speech API interfaces if not globally available (common in TypeScript) ---
 declare global {
@@ -40,73 +58,84 @@ declare global {
 }
 
 interface SpeechRecognition extends EventTarget {
-    continuous: boolean;
-    interimResults: boolean;
-    lang: string;
-    onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null;
-    onend: ((this: SpeechRecognition, ev: Event) => any) | null;
-    onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any) | null;
-    start(): void;
-    stop(): void;
-    // Add other properties/methods as needed
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult:
+    | ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any)
+    | null;
+  onend: ((this: SpeechRecognition, ev: Event) => any) | null;
+  onerror:
+    | ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any)
+    | null;
+  start(): void;
+  stop(): void;
 }
 
 interface SpeechRecognitionEvent extends Event {
-    readonly resultIndex: number;
-    readonly results: SpeechRecognitionResultList;
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
 }
 
 interface SpeechRecognitionResultList {
-    readonly length: number;
-    item(index: number): SpeechRecognitionResult;
-    [index: number]: SpeechRecognitionResult;
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
 }
 
 interface SpeechRecognitionResult {
-    readonly isFinal: boolean;
-    readonly length: number;
-    item(index: number): SpeechRecognitionAlternative;
-    [index: number]: SpeechRecognitionAlternative;
+  readonly isFinal: boolean;
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
 }
 
 interface SpeechRecognitionAlternative {
-    readonly transcript: string;
-    readonly confidence: number;
+  readonly transcript: string;
+  readonly confidence: number;
 }
 
 interface SpeechRecognitionErrorEvent extends Event {
-    readonly error: string;
-    readonly message: string;
+  readonly error: string;
+  readonly message: string;
 }
 
 // --- End Web Speech API interfaces ---
 
-
 interface ClinicNote {
-  mainComplaintsAndDuration?: string
-  pastHistory?: string
-  familySocialHistory?: string
-  generalPhysicalExamination?: string
-  systemicCardiovascular?: string
-  systemicRespiratory?: string
-  systemicPerAbdomen?: string
-  systemicNeurology?: string
-  systemicSkeletal?: string
-  systemicOther?: string
-  summary?: string
-  provisionalDiagnosis?: string
-  additionalNotes?: string
-  enteredBy?: string
-  timestamp?: string
+  mainComplaintsAndDuration?: string;
+  pastHistory?: string;
+  familySocialHistory?: string;
+  generalPhysicalExamination?: string;
+  systemicCardiovascular?: string;
+  systemicRespiratory?: string;
+  systemicPerAbdomen?: string;
+  systemicNeurology?: string;
+  systemicSkeletal?: string;
+  systemicOther?: string;
+  summary?: string;
+  provisionalDiagnosis?: string;
+  additionalNotes?: string;
+  enteredBy?: string;
+  timestamp?: string;
 }
 
 // Exclude admin fields from form inputs.
-type ClinicNoteFormInputs = Omit<ClinicNote, "enteredBy" | "timestamp">
+type ClinicNoteFormInputs = Omit<ClinicNote, "enteredBy" | "timestamp">;
 
 export default function ClinicNotePage() {
-  const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string }
+  const { patientId, ipdId } = useParams() as {
+    patientId: string;
+    ipdId: string;
+  };
 
-  const { register, handleSubmit, reset, setValue, watch } = useForm<ClinicNoteFormInputs>({
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+  } = useForm<ClinicNoteFormInputs>({
     defaultValues: {
       mainComplaintsAndDuration: "",
       pastHistory: "",
@@ -122,161 +151,151 @@ export default function ClinicNotePage() {
       provisionalDiagnosis: "",
       additionalNotes: "",
     },
-  })
+  });
 
-  const [loading, setLoading] = useState(true)
-  const [activeField, setActiveField] = useState<keyof ClinicNoteFormInputs | null>(null)
-  const [isRecording, setIsRecording] = useState(false)
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState("complaints")
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const [loading, setLoading] = useState(true);
+  const [activeField, setActiveField] =
+    useState<keyof ClinicNoteFormInputs | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("complaints");
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
-  // Fetch existing clinic note (if any) from Firebase.
+  // Fetch existing clinic note (if any) from Firebase at the new path
   useEffect(() => {
-    const clinicNoteRef = ref(db, `patients/${patientId}/ipd/${ipdId}/clinicNote`)
+    const clinicNoteRef = ref(
+      db,
+      `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/clinicalnote`
+    );
     const unsubscribe = onValue(clinicNoteRef, (snapshot) => {
       if (snapshot.exists()) {
-        const data = snapshot.val() as ClinicNote
+        const data = snapshot.val() as ClinicNote;
         // Pre-populate the form with existing data.
-        reset(data)
+        reset(data);
         if (data.timestamp) {
-          setLastUpdated(new Date(data.timestamp).toLocaleString())
+          setLastUpdated(new Date(data.timestamp).toLocaleString());
         }
       }
-      setLoading(false)
-    })
-    return () => unsubscribe()
-  }, [patientId, ipdId, reset])
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [patientId, ipdId, reset]);
 
-  // Submit handler saves the whole clinic note.
+  // Submit handler saves the whole clinic note under the new path
   const onSubmit: SubmitHandler<ClinicNoteFormInputs> = async (data) => {
     try {
-      const loggedInEmail = auth.currentUser?.email || "unknown"
+      const loggedInEmail = auth.currentUser?.email || "unknown";
       // Build the record. Optionally, you can remove keys with empty strings.
       const clinicNoteData: ClinicNote = {
         ...data,
         enteredBy: loggedInEmail,
         timestamp: new Date().toISOString(),
-      }
-      const clinicNoteRef = ref(db, `patients/${patientId}/ipd/${ipdId}/clinicNote`)
-      await set(clinicNoteRef, clinicNoteData)
-      setLastUpdated(new Date().toLocaleString())
-      alert("Clinic note updated successfully!")
+      };
+      const clinicNoteRef = ref(
+        db,
+        `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/clinicalnote`
+      );
+      await set(clinicNoteRef, clinicNoteData);
+      setLastUpdated(new Date().toLocaleString());
+      toast.success("Clinic note updated successfully!");
     } catch (error) {
-      console.error("Error updating clinic note:", error)
-      alert("Error updating clinic note. Please try again.")
+      console.error("Error updating clinic note:", error);
+      toast.error("Error updating clinic note. Please try again.");
     }
-  }
+  };
 
   // Voice transcription functionality
   const startRecording = (field: keyof ClinicNoteFormInputs) => {
     // Ensure any previous recognition is stopped before starting a new one
     if (recognitionRef.current) {
-        recognitionRef.current.stop();
-        recognitionRef.current = null; // Clear the ref
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
 
-    setActiveField(field)
-    setIsRecording(true) // Set recording state immediately
+    setActiveField(field);
+    setIsRecording(true);
 
-    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
-
+    const SpeechRecognitionAPI =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognitionAPI) {
-      // 1️⃣  Locate this block
       const recognition = new SpeechRecognitionAPI() as SpeechRecognition;
       recognitionRef.current = recognition;
-        if (recognition) {
-            recognition.continuous = true; // Keep listening even after pauses
-            recognition.interimResults = true; // Get results as they come in 
-            recognition.lang = "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
+
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        let finalTranscript = "";
+        let interimTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
         }
 
-        // --- Event Handlers ---
-        recognition.onresult = (event: SpeechRecognitionEvent) => {
-            let finalTranscript = '';
-            let interimTranscript = '';
+        if (finalTranscript) {
+          const currentValue = watch(field) || "";
+          setValue(
+            field,
+            (currentValue ? currentValue + " " : "") + finalTranscript.trim(),
+            { shouldDirty: true }
+          );
+        }
 
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
-                }
-            }
+        // (Optional) use interimTranscript for a live preview somewhere
+      };
 
-            // Update the form field - append only the *final* transcript part from this event
-            // And display interim results (optional, but good feedback)
-            // A common pattern is to only append final results to avoid duplication from interim updates
-            if (finalTranscript) {
-                 const currentValue = watch(field) || ""
-                 // Append final results with a space
-                 setValue(field, (currentValue ? currentValue + " " : "") + finalTranscript.trim(), { shouldDirty: true });
-            }
+      recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        console.error("Speech recognition error:", event.error, event.message);
+        toast.error(`Speech recognition error: ${event.error}`);
+        setIsRecording(false);
+        setActiveField(null);
+        recognitionRef.current = null;
+      };
 
-            // Optional: You could display interimTranscript somewhere else for live feedback if needed
-            // console.log("Interim: ", interimTranscript);
-        };
-
-        recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-            console.error("Speech recognition error:", event.error, event.message);
-            // Optionally inform the user
-            // alert(`Speech recognition error: ${event.error}`);
-            // Clean up state if an error occurs
-            setIsRecording(false);
-            setActiveField(null);
-            recognitionRef.current = null;
-        };
-
-        recognition.onend = () => {
-            // IMPORTANT: Removed automatic restart.
-            // Stop is handled by the button click or errors.
-            // If recognition stops naturally (e.g., long silence with continuous=false),
-            // the user needs to click the mic again if they want to continue.
-            // With continuous=true, it should ideally keep running until stop() is called.
-            // We only update state here if it wasn't already stopped by the user/error.
-            if (isRecording && activeField === field) { // Check if still supposed to be recording this field
-                 setIsRecording(false);
-                 setActiveField(null);
-                 recognitionRef.current = null; // Clean up ref
-            }
-             console.log("Speech recognition ended.");
-        };
-
-        // --- Start Recognition ---
-        try {
-          recognition?.start();
-          console.log("Speech recognition started for field:", field);
-        } catch (e) {
-          console.error("Error starting speech recognition:", e);
-          alert("Could not start voice recording. Please check browser permissions.");
+      recognition.onend = () => {
+        if (isRecording && activeField === field) {
           setIsRecording(false);
           setActiveField(null);
           recognitionRef.current = null;
         }
+      };
 
+      try {
+        recognition.start();
+        console.log("Speech recognition started for field:", field);
+      } catch (e) {
+        console.error("Error starting speech recognition:", e);
+        toast.error("Could not start voice recording. Check permissions.");
+        setIsRecording(false);
+        setActiveField(null);
+        recognitionRef.current = null;
+      }
     } else {
-      alert("Speech recognition is not supported in your browser.");
-      setIsRecording(false); // Reset state if not supported
+      toast.error("Speech recognition is not supported in your browser.");
+      setIsRecording(false);
       setActiveField(null);
     }
-  }
+  };
 
   const stopRecording = () => {
     if (recognitionRef.current) {
       try {
-         recognitionRef.current.stop(); // Explicitly stop recognition
-         console.log("Speech recognition stopped by user.");
-      } catch(e) {
-         console.error("Error stopping speech recognition:", e);
+        recognitionRef.current.stop();
+        console.log("Speech recognition stopped by user.");
+      } catch (e) {
+        console.error("Error stopping speech recognition:", e);
       }
     }
-    // Always reset state when stop is clicked
-    setIsRecording(false)
-    setActiveField(null)
-    recognitionRef.current = null; // Clean up the ref
-  }
+    setIsRecording(false);
+    setActiveField(null);
+    recognitionRef.current = null;
+  };
 
-  // Cleanup effect to stop recording if component unmounts
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (recognitionRef.current) {
@@ -284,7 +303,7 @@ export default function ClinicNotePage() {
         console.log("Stopping recognition on component unmount.");
       }
     };
-  }, []); // Empty dependency array ensures this runs only on unmount
+  }, []);
 
   if (loading) {
     return (
@@ -294,11 +313,13 @@ export default function ClinicNotePage() {
           <p className="text-teal-700 font-medium">Loading clinic note...</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 to-cyan-50 p-4 md:p-6">
+      <ToastContainer position="top-right" autoClose={3000} />
+
       <Card className="max-w-5xl mx-auto shadow-lg border-teal-100">
         <CardHeader className="bg-gradient-to-r from-teal-500 to-cyan-500 text-white rounded-t-lg">
           <div className="flex justify-between items-center">
@@ -312,7 +333,10 @@ export default function ClinicNotePage() {
               </CardDescription>
             </div>
             {lastUpdated && (
-              <Badge variant="outline" className="bg-white/10 text-white border-none flex items-center gap-1">
+              <Badge
+                variant="outline"
+                className="bg-white/10 text-white border-none flex items-center gap-1"
+              >
                 <Clock className="h-3 w-3" />
                 Last updated: {lastUpdated}
               </Badge>
@@ -320,12 +344,16 @@ export default function ClinicNotePage() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <Tabs defaultValue="complaints" value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <Tabs
+            defaultValue="complaints"
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
             <div className="border-b">
               <ScrollArea className="w-full whitespace-nowrap">
                 <TabsList className="bg-transparent h-14 px-4">
-                   {/* Tab Triggers remain the same */}
-                   <TabsTrigger
+                  <TabsTrigger
                     value="complaints"
                     className="data-[state=active]:bg-teal-100 data-[state=active]:text-teal-800"
                   >
@@ -364,170 +392,191 @@ export default function ClinicNotePage() {
               </ScrollArea>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="p-6">
-              {/* Tab Content remains the same structure, using TextareaWithVoice */}
+            <form
+              onSubmit={handleSubmit(onSubmit)}
+              className="p-6 space-y-6"
+            >
               <TabsContent value="complaints" className="mt-0">
-                <div className="space-y-6">
-                  <TextareaWithVoice
-                    label="Main Complaints & Duration"
-                    icon={<ExclamationTriangleIcon className="h-5 w-5 text-teal-600" />}
-                    field="mainComplaintsAndDuration"
-                    register={register}
-                    // Pass the correct state for *this specific* field
-                    isRecording={isRecording && activeField === "mainComplaintsAndDuration"}
-                    startRecording={() => startRecording("mainComplaintsAndDuration")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter patient's main complaints and their duration..."
-                  />
-                </div>
+                <TextareaWithVoice
+                  label="Main Complaints & Duration"
+                  icon={
+                    <ExclamationTriangleIcon className="h-5 w-5 text-teal-600" />
+                  }
+                  field="mainComplaintsAndDuration"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "mainComplaintsAndDuration"
+                  }
+                  startRecording={() =>
+                    startRecording("mainComplaintsAndDuration")
+                  }
+                  stopRecording={stopRecording}
+                  placeholder="Enter patient's main complaints and their duration..."
+                />
               </TabsContent>
 
               <TabsContent value="history" className="mt-0">
-                <div className="space-y-6">
-                  <TextareaWithVoice
-                    label="Past History"
-                    icon={<Clock className="h-5 w-5 text-teal-600" />}
-                    field="pastHistory"
-                    register={register}
-                    isRecording={isRecording && activeField === "pastHistory"}
-                    startRecording={() => startRecording("pastHistory")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter patient's past medical history..."
-                  />
+                <TextareaWithVoice
+                  label="Past History"
+                  icon={<Clock className="h-5 w-5 text-teal-600" />}
+                  field="pastHistory"
+                  register={register}
+                  isRecording={isRecording && activeField === "pastHistory"}
+                  startRecording={() => startRecording("pastHistory")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter patient's past medical history..."
+                />
 
-                  <TextareaWithVoice
-                    label="Family & Social History"
-                    icon={<Users className="h-5 w-5 text-teal-600" />}
-                    field="familySocialHistory"
-                    register={register}
-                    isRecording={isRecording && activeField === "familySocialHistory"}
-                    startRecording={() => startRecording("familySocialHistory")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter patient's family and social history..."
-                  />
-                </div>
+                <TextareaWithVoice
+                  label="Family & Social History"
+                  icon={<Users className="h-5 w-5 text-teal-600" />}
+                  field="familySocialHistory"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "familySocialHistory"
+                  }
+                  startRecording={() => startRecording("familySocialHistory")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter patient's family and social history..."
+                />
               </TabsContent>
 
               <TabsContent value="examination" className="mt-0">
-                 <div className="space-y-6">
-                  <TextareaWithVoice
-                    label="General Physical Examination"
-                    icon={<Stethoscope className="h-5 w-5 text-teal-600" />}
-                    field="generalPhysicalExamination"
-                    register={register}
-                    isRecording={isRecording && activeField === "generalPhysicalExamination"}
-                    startRecording={() => startRecording("generalPhysicalExamination")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter general physical examination findings..."
-                  />
-                 </div>
+                <TextareaWithVoice
+                  label="General Physical Examination"
+                  icon={
+                    <Stethoscope className="h-5 w-5 text-teal-600" />
+                  }
+                  field="generalPhysicalExamination"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "generalPhysicalExamination"
+                  }
+                  startRecording={() =>
+                    startRecording("generalPhysicalExamination")
+                  }
+                  stopRecording={stopRecording}
+                  placeholder="Enter general physical examination findings..."
+                />
               </TabsContent>
 
               <TabsContent value="systemic" className="mt-0">
-                <div className="space-y-6">
-                  <TextareaWithVoice
-                    label="Cardiovascular System"
-                    icon={<Heart className="h-5 w-5 text-teal-600" />}
-                    field="systemicCardiovascular"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicCardiovascular"}
-                    startRecording={() => startRecording("systemicCardiovascular")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter cardiovascular examination findings..."
-                  />
+                <TextareaWithVoice
+                  label="Cardiovascular System"
+                  icon={<Heart className="h-5 w-5 text-teal-600" />}
+                  field="systemicCardiovascular"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "systemicCardiovascular"
+                  }
+                  startRecording={() =>
+                    startRecording("systemicCardiovascular")
+                  }
+                  stopRecording={stopRecording}
+                  placeholder="Enter cardiovascular examination findings..."
+                />
 
-                  <TextareaWithVoice
-                    label="Respiratory System"
-                    icon={<Lungs className="h-5 w-5 text-teal-600" />}
-                    field="systemicRespiratory"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicRespiratory"}
-                    startRecording={() => startRecording("systemicRespiratory")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter respiratory examination findings..."
-                  />
+                <TextareaWithVoice
+                  label="Respiratory System"
+                  icon={<Lungs className="h-5 w-5 text-teal-600" />}
+                  field="systemicRespiratory"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "systemicRespiratory"
+                  }
+                  startRecording={() => startRecording("systemicRespiratory")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter respiratory examination findings..."
+                />
 
-                   <TextareaWithVoice
-                    label="Per Abdomen"
-                    icon={<Pill className="h-5 w-5 text-teal-600" />} // Consider a more relevant icon if Pill is not suitable
-                    field="systemicPerAbdomen"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicPerAbdomen"}
-                    startRecording={() => startRecording("systemicPerAbdomen")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter per abdomen examination findings..."
-                  />
+                <TextareaWithVoice
+                  label="Per Abdomen"
+                  icon={<Pill className="h-5 w-5 text-teal-600" />}
+                  field="systemicPerAbdomen"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "systemicPerAbdomen"
+                  }
+                  startRecording={() => startRecording("systemicPerAbdomen")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter per abdomen examination findings..."
+                />
 
-                  <TextareaWithVoice
-                    label="Neurological System"
-                    icon={<Brain className="h-5 w-5 text-teal-600" />}
-                    field="systemicNeurology"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicNeurology"}
-                    startRecording={() => startRecording("systemicNeurology")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter neurological examination findings..."
-                  />
+                <TextareaWithVoice
+                  label="Neurological System"
+                  icon={<Brain className="h-5 w-5 text-teal-600" />}
+                  field="systemicNeurology"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "systemicNeurology"
+                  }
+                  startRecording={() => startRecording("systemicNeurology")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter neurological examination findings..."
+                />
 
-                   <TextareaWithVoice
-                    label="Skeletal System"
-                    icon={<Bone className="h-5 w-5 text-teal-600" />}
-                    field="systemicSkeletal"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicSkeletal"}
-                    startRecording={() => startRecording("systemicSkeletal")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter skeletal examination findings..."
-                  />
+                <TextareaWithVoice
+                  label="Skeletal System"
+                  icon={<Bone className="h-5 w-5 text-teal-600" />}
+                  field="systemicSkeletal"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "systemicSkeletal"
+                  }
+                  startRecording={() => startRecording("systemicSkeletal")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter skeletal examination findings..."
+                />
 
-                   <TextareaWithVoice
-                    label="Other Systems"
-                    icon={<PlusIcon className="h-5 w-5 text-teal-600" />}
-                    field="systemicOther"
-                    register={register}
-                    isRecording={isRecording && activeField === "systemicOther"}
-                    startRecording={() => startRecording("systemicOther")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter other systemic examination findings..."
-                  />
-                </div>
+                <TextareaWithVoice
+                  label="Other Systems"
+                  icon={<PlusIcon className="h-5 w-5 text-teal-600" />}
+                  field="systemicOther"
+                  register={register}
+                  isRecording={isRecording && activeField === "systemicOther"}
+                  startRecording={() => startRecording("systemicOther")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter other systemic examination findings..."
+                />
               </TabsContent>
 
               <TabsContent value="diagnosis" className="mt-0">
-                 <div className="space-y-6">
-                   <TextareaWithVoice
-                    label="Summary"
-                    icon={<ClipboardList className="h-5 w-5 text-teal-600" />}
-                    field="summary"
-                    register={register}
-                    isRecording={isRecording && activeField === "summary"}
-                    startRecording={() => startRecording("summary")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter summary of findings..."
-                  />
+                <TextareaWithVoice
+                  label="Summary"
+                  icon={<ClipboardList className="h-5 w-5 text-teal-600" />}
+                  field="summary"
+                  register={register}
+                  isRecording={isRecording && activeField === "summary"}
+                  startRecording={() => startRecording("summary")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter summary of findings..."
+                />
 
-                   <TextareaWithVoice
-                    label="Provisional Diagnosis"
-                    icon={<Stethoscope className="h-5 w-5 text-teal-600" />}
-                    field="provisionalDiagnosis"
-                    register={register}
-                    isRecording={isRecording && activeField === "provisionalDiagnosis"}
-                    startRecording={() => startRecording("provisionalDiagnosis")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter provisional diagnosis..."
-                  />
+                <TextareaWithVoice
+                  label="Provisional Diagnosis"
+                  icon={<Stethoscope className="h-5 w-5 text-teal-600" />}
+                  field="provisionalDiagnosis"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "provisionalDiagnosis"
+                  }
+                  startRecording={() => startRecording("provisionalDiagnosis")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter provisional diagnosis..."
+                />
 
-                  <TextareaWithVoice
-                    label="Additional Notes"
-                    icon={<FileText className="h-5 w-5 text-teal-600" />}
-                    field="additionalNotes"
-                    register={register}
-                    isRecording={isRecording && activeField === "additionalNotes"}
-                    startRecording={() => startRecording("additionalNotes")}
-                    stopRecording={stopRecording}
-                    placeholder="Enter any additional notes..."
-                  />
-                 </div>
+                <TextareaWithVoice
+                  label="Additional Notes"
+                  icon={<FileText className="h-5 w-5 text-teal-600" />}
+                  field="additionalNotes"
+                  register={register}
+                  isRecording={
+                    isRecording && activeField === "additionalNotes"
+                  }
+                  startRecording={() => startRecording("additionalNotes")}
+                  stopRecording={stopRecording}
+                  placeholder="Enter any additional notes..."
+                />
               </TabsContent>
 
               <div className="mt-8 flex justify-end">
@@ -544,28 +593,26 @@ export default function ClinicNotePage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
 
 interface TextareaWithVoiceProps {
-  label: string
-  icon: React.ReactNode
-  field: keyof ClinicNoteFormInputs // Use the specific type here
-  register: any // Or ideally UseFormRegister<ClinicNoteFormInputs>
-  isRecording: boolean
-  startRecording: () => void
-  stopRecording: () => void
-  placeholder: string
+  label: string;
+  icon: React.ReactNode;
+  field: keyof ClinicNoteFormInputs;
+  register: any;
+  isRecording: boolean;
+  startRecording: () => void;
+  stopRecording: () => void;
+  placeholder: string;
 }
 
-// No changes needed in TextareaWithVoice component itself,
-// but ensure props passed down are correct.
 function TextareaWithVoice({
   label,
   icon,
   field,
   register,
-  isRecording, // This prop now correctly reflects if *this specific* field is recording
+  isRecording,
   startRecording,
   stopRecording,
   placeholder,
@@ -584,12 +631,11 @@ function TextareaWithVoice({
                 type="button"
                 size="sm"
                 variant={isRecording ? "destructive" : "outline"}
-                className={`h-8 w-[140px] ${ // Fixed width for consistency
+                className={`h-8 w-[140px] ${
                   isRecording
                     ? "bg-red-500 hover:bg-red-600 text-white"
                     : "border-teal-200 text-teal-700 hover:bg-teal-100"
                 }`}
-                // Conditional logic based on isRecording state for this component
                 onClick={isRecording ? stopRecording : startRecording}
               >
                 {isRecording ? (
@@ -605,28 +651,42 @@ function TextareaWithVoice({
                 )}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{isRecording ? `Stop voice recording for ${label}` : `Start voice recording for ${label}`}</TooltipContent>
+            <TooltipContent>
+              {isRecording
+                ? `Stop voice recording for ${label}`
+                : `Start voice recording for ${label}`}
+            </TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
-      <div className={`relative ${isRecording ? "ring-2 ring-red-500 rounded-md" : ""}`}>
+      <div
+        className={`relative ${
+          isRecording ? "ring-2 ring-red-500 rounded-md" : ""
+        }`}
+      >
         <Textarea
-          {...register(field)} // Register the specific field name
+          {...register(field)}
           placeholder={placeholder}
-          className={`min-h-[120px] border-teal-200 focus:border-teal-500 focus:ring-teal-500 pr-10 ${ // Add padding right if needed for indicator
-            isRecording ? "border-red-500 focus:border-red-600 focus:ring-red-600" : "" // Adjust focus styles when recording
+          className={`min-h-[120px] border-teal-200 focus:border-teal-500 focus:ring-teal-500 pr-10 ${
+            isRecording
+              ? "border-red-500 focus:border-red-600 focus:ring-red-600"
+              : ""
           }`}
-          // Optionally disable textarea while recording to prevent manual edits clashing?
-          // disabled={isRecording}
         />
         {isRecording && (
           <div className="absolute top-2 right-2 flex items-center gap-1 pointer-events-none">
             <span className="animate-pulse h-2 w-2 bg-red-500 rounded-full"></span>
-            <span className="animate-pulse h-2 w-2 bg-red-500 rounded-full" style={{ animationDelay: "0.2s" }}></span>
-            <span className="animate-pulse h-2 w-2 bg-red-500 rounded-full" style={{ animationDelay: "0.4s" }}></span>
+            <span
+              className="animate-pulse h-2 w-2 bg-red-500 rounded-full"
+              style={{ animationDelay: "0.2s" }}
+            ></span>
+            <span
+              className="animate-pulse h-2 w-2 bg-red-500 rounded-full"
+              style={{ animationDelay: "0.4s" }}
+            ></span>
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }

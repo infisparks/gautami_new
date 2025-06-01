@@ -37,7 +37,7 @@ import {
   Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
 } from "@/components/ui/carousel"
 
-import  format  from "date-fns/format"
+import format from "date-fns/format"
 import { jsPDF } from "jspdf"
 import { Eye, Download, X, FileImage, Loader2 } from "lucide-react"
 
@@ -180,10 +180,13 @@ export default function InvestigationSheet() {
   })
   const entryTypeAdd = wAdd("entryType")
 
+  /* Firebase path base for this component */
+  const dbPath = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/investigationsheet`
+
   /* Fetch list */
   useEffect(() => {
-    const ref = dbRef(db, `patients/${patientId}/ipd/${ipdId}/investigations`)
-    return onValue(ref, (snap) => {
+    const refPath = dbRef(db, dbPath)
+    return onValue(refPath, (snap) => {
       setIsLoading(false)
       if (!snap.exists()) return setInvestigations([])
       const list: InvestigationRecord[] = Object.entries(snap.val()).map(
@@ -214,12 +217,12 @@ export default function InvestigationSheet() {
     try {
       const compressed = await compressImage(file, 200, 1200)
       const name = `${Date.now()}_${compressed.name}`
-      const ref  = storageRef(storage,
-        `patients/${patientId}/ipd/${ipdId}/images/${name}`,
+      const refStorage = storageRef(storage,
+        `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/images/${name}`,
       )
 
       /* 1️⃣ upload */
-      const snap = await uploadBytes(ref, compressed)
+      const snap = await uploadBytes(refStorage, compressed)
 
       /* 2️⃣ url */
       const url = await getDownloadURL(snap.ref)
@@ -261,9 +264,7 @@ export default function InvestigationSheet() {
       const entry: InvestigationEntry = { dateTime: d.dateTime, value, type }
 
       await set(
-        push(dbRef(db,
-          `patients/${patientId}/ipd/${ipdId}/investigations`,
-        )),
+        push(dbRef(db, dbPath)),
         { testName: d.testName, entries: [entry], enteredBy: auth.currentUser?.email ?? "unknown" },
       )
 
@@ -308,7 +309,7 @@ export default function InvestigationSheet() {
 
       await update(
         dbRef(db,
-          `patients/${patientId}/ipd/${ipdId}/investigations/${addRowId}`,
+          `${dbPath}/${addRowId}`,
         ),
         { entries: updated },
       )
@@ -626,4 +627,3 @@ export default function InvestigationSheet() {
     </div>
   )
 }
- 

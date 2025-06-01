@@ -3,40 +3,99 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
-import { ref, onValue, update } from "firebase/database"
-import { db } from "@/lib/firebase"
+import { ref, onValue, update, push, set } from "firebase/database"
+import { db, auth } from "@/lib/firebase"
+import { onAuthStateChanged } from "firebase/auth"
 import Select from "react-select"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import { toast } from "react-toastify"
-import { User, Phone, Clock, Home, Users, Calendar, Bed, UserCheck, Check, AlertCircle } from "lucide-react"
+import {
+  User,
+  Phone,
+  Clock,
+  Home,
+  Users,
+  Calendar,
+  Bed,
+  UserCheck,
+  Check,
+  AlertCircle,
+} from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog"
 
 /* ---------------------------
    Types & Options
 --------------------------- */
 export interface IPDFormInput {
+  // Patient Basic Info
   name: string
   phone: string
   gender: { label: string; value: string } | null
   age: number
   address?: string
+
+  // Relative
   relativeName: string
   relativePhone: string
   relativeAddress?: string
+
+  // IPD Specifics
   date: Date
   time: string
+  admissionSource: { label: string; value: string } | null
+  admissionType: { label: string; value: string } | null
   roomType: { label: string; value: string } | null
   bed: { label: string; value: string } | null
   doctor: { label: string; value: string } | null
   referDoctor?: string
-  admissionType: { label: string; value: string } | null
+
+  // Billing
+  deposit?: number
+  paymentMode: { label: string; value: string } | null
+}
+
+interface PatientRecord {
+  name: string
+  phone: string
+  gender: string
+  age: number
+  address: string
+}
+
+interface IPDRecord {
+  uhid: string
+  relativeName: string
+  relativePhone: string
+  relativeAddress: string
+  admissionDate: string
+  admissionTime: string
+  admissionSource: string
+  admissionType: string
+  roomType: string
+  bed: string
+  doctor: string
+  referDoctor: string
+  createdAt: string
+  status: string
+  updatedAt?: string
+  lastModifiedBy?: string
+}
+
+interface BillingRecord {
+  totalDeposit: number
 }
 
 const GenderOptions = [
@@ -52,12 +111,25 @@ const AdmissionTypeOptions = [
   { value: "day_observation", label: "Day Observation" },
 ]
 
+const AdmissionSourceOptions = [
+  { value: "opd", label: "OPD" },
+  { value: "casualty", label: "Casualty" },
+  { value: "referral", label: "Referral" },
+]
+
 const RoomTypeOptions = [
-  { value: "female_ward", label: "Female Ward" },
-  { value: "icu", label: "ICU" },
-  { value: "male_ward", label: "Male Ward" },
+  { value: "casualty", label: "Casualty" },
   { value: "deluxe", label: "Deluxe" },
+  { value: "female", label: "Female Ward" },
+  { value: "icu", label: "ICU" },
+  { value: "male", label: "Male Ward" },
   { value: "nicu", label: "NICU" },
+  { value: "suit", label: "Suit" },
+]
+
+const PaymentModeOptions = [
+  { value: "cash", label: "Cash" },
+  { value: "online", label: "Online" },
 ]
 
 function formatAMPM(date: Date): string {
@@ -104,11 +176,14 @@ export default function EditIPDPage() {
   const { patienteditId, ipdeditId } = useParams()
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
   const [doctors, setDoctors] = useState<{ label: string; value: string }[]>([])
   const [beds, setBeds] = useState<{ label: string; value: string }[]>([])
   const [showBedsPopup, setShowBedsPopup] = useState(false)
   const [allBeds, setAllBeds] = useState<any[]>([])
-  // Save the originally selected bed so we can update its status if needed.
+  const [originalPatient, setOriginalPatient] = useState<PatientRecord | null>(null)
+  const [originalIPD, setOriginalIPD] = useState<IPDRecord | null>(null)
+  const [originalBilling, setOriginalBilling] = useState<BillingRecord | null>(null)
   const [oldBedInfo, setOldBedInfo] = useState<{ roomType: string; bedId: string } | null>(null)
 
   const {
@@ -130,13 +205,28 @@ export default function EditIPDPage() {
       relativeAddress: "",
       date: new Date(),
       time: formatAMPM(new Date()),
+      admissionSource: null,
+      admissionType: null,
       roomType: null,
       bed: null,
       doctor: null,
       referDoctor: "",
-      admissionType: null,
+      deposit: 0,
+      paymentMode: PaymentModeOptions[0],
     },
   })
+
+  // Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user && user.email) {
+        setCurrentUserEmail(user.email)
+      } else {
+        setCurrentUserEmail(null)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   /* ---------------------------
      Fetch Doctors
@@ -158,42 +248,86 @@ export default function EditIPDPage() {
   }, [])
 
   /* ---------------------------
+     Fetch Patient Basic Info
+  --------------------------- */
+  useEffect(() => {
+    if (!patienteditId) return
+    const patientRef = ref(db, `patients/patientinfo/${patienteditId}`)
+    const unsubscribe = onValue(patientRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        toast.error("Patient not found.")
+        return
+      }
+      const data = snapshot.val() as PatientRecord
+      setOriginalPatient(data)
+      setValue("name", data.name)
+      setValue("phone", data.phone)
+      const genderMatch = GenderOptions.find((g) => g.value.toLowerCase() === data.gender?.toLowerCase())
+      setValue("gender", genderMatch || null)
+      setValue("age", data.age)
+      setValue("address", data.address)
+    })
+    return () => unsubscribe()
+  }, [patienteditId, setValue])
+
+  /* ---------------------------
      Fetch Existing IPD Record Data
   --------------------------- */
   useEffect(() => {
     if (!patienteditId || !ipdeditId) return
-    const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`)
+    const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patienteditId}/${ipdeditId}`)
     const unsubscribe = onValue(ipdRef, (snapshot) => {
       if (!snapshot.exists()) {
         toast.error("IPD record not found.")
         return
       }
-      const data = snapshot.val()
-      setValue("name", data.name)
-      setValue("phone", data.phone)
-      const genderMatch = GenderOptions.find((g) => g.value.toLowerCase() === (data.gender || "").toLowerCase())
-      setValue("gender", genderMatch || null)
-      setValue("age", data.age)
-      setValue("address", data.address)
+      const data = snapshot.val() as IPDRecord
+      setOriginalIPD(data)
+
+      // Set form fields from IPD record
       setValue("relativeName", data.relativeName)
       setValue("relativePhone", data.relativePhone)
       setValue("relativeAddress", data.relativeAddress)
-      setValue("date", new Date(data.date))
-      setValue("time", data.time)
-      const roomTypeMatch = RoomTypeOptions.find((r) => r.value === data.roomType)
-      setValue("roomType", roomTypeMatch || null)
+      setValue("date", new Date(data.admissionDate))
+      setValue("time", data.admissionTime)
+      const srcMatch = AdmissionSourceOptions.find((s) => s.value === data.admissionSource)
+      setValue("admissionSource", srcMatch || null)
+      const typeMatch = AdmissionTypeOptions.find((a) => a.value === data.admissionType)
+      setValue("admissionType", typeMatch || null)
+      const roomMatch = RoomTypeOptions.find((r) => r.value === data.roomType)
+      setValue("roomType", roomMatch || null)
       setOldBedInfo(data.bed ? { roomType: data.roomType, bedId: data.bed } : null)
       if (data.bed) {
         setValue("bed", { label: `Bed ${data.bed}`, value: data.bed })
       }
-      const doctorMatch = doctors.find((d) => d.value === data.doctor)
-      setValue("doctor", doctorMatch || null)
+      const docMatch = doctors.find((d) => d.value === data.doctor)
+      setValue("doctor", docMatch || null)
       setValue("referDoctor", data.referDoctor)
-      const admissionTypeMatch = AdmissionTypeOptions.find((a) => a.value === data.admissionType)
-      setValue("admissionType", admissionTypeMatch || null)
     })
     return () => unsubscribe()
   }, [patienteditId, ipdeditId, setValue, doctors])
+
+  /* ---------------------------
+     Fetch Existing Billing Data
+  --------------------------- */
+  useEffect(() => {
+    if (!patienteditId || !ipdeditId) return
+    const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}`)
+    const unsubscribe = onValue(billingRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setOriginalBilling({ totalDeposit: 0 })
+        setValue("deposit", 0)
+        setValue("paymentMode", PaymentModeOptions[0])
+        return
+      }
+      const data = snapshot.val() as BillingRecord
+      setOriginalBilling(data)
+      setValue("deposit", data.totalDeposit || 0)
+      // Payment mode inference: default to cash if none
+      setValue("paymentMode", PaymentModeOptions[0])
+    })
+    return () => unsubscribe()
+  }, [patienteditId, ipdeditId, setValue])
 
   /* ---------------------------
      Fetch Beds Based on Selected Room Type
@@ -214,8 +348,11 @@ export default function EditIPDPage() {
       }
       const data = snapshot.val()
       const bedList = Object.keys(data)
-        // Allow available beds or the one already assigned.
-        .filter((k) => data[k].status === "Available" || (oldBedInfo && k === oldBedInfo.bedId))
+        // Allow available beds or the one already assigned
+        .filter((k) => {
+          const status = data[k].status
+          return status === "Available" || (oldBedInfo && k === oldBedInfo.bedId)
+        })
         .map((k) => ({
           label: `Bed ${data[k].bedNumber}`,
           value: k,
@@ -255,14 +392,130 @@ export default function EditIPDPage() {
     setShowBedsPopup(!showBedsPopup)
   }
 
+  // Function to detect changes between original and new data
+  const detectChanges = (origP: PatientRecord, origI: IPDRecord, origB: BillingRecord, upd: IPDFormInput) => {
+    const changes: Array<{ field: string; oldValue: any; newValue: any }> = []
+
+    // Patient fields
+    if (String(origP.name || "") !== String(upd.name || "")) {
+      changes.push({ field: "name", oldValue: origP.name, newValue: upd.name })
+    }
+    if (String(origP.phone || "") !== String(upd.phone || "")) {
+      changes.push({ field: "phone", oldValue: origP.phone, newValue: upd.phone })
+    }
+    if (String(origP.gender || "") !== String(upd.gender?.value || "")) {
+      changes.push({ field: "gender", oldValue: origP.gender, newValue: upd.gender?.value })
+    }
+    if (String(origP.age || "") !== String(upd.age || "")) {
+      changes.push({ field: "age", oldValue: origP.age, newValue: upd.age })
+    }
+    if (String(origP.address || "") !== String(upd.address || "")) {
+      changes.push({ field: "address", oldValue: origP.address, newValue: upd.address || "" })
+    }
+
+    // IPD fields
+    const toISO = (date: Date) => date.toISOString()
+    if (String(origI.relativeName || "") !== String(upd.relativeName || "")) {
+      changes.push({ field: "relativeName", oldValue: origI.relativeName, newValue: upd.relativeName })
+    }
+    if (String(origI.relativePhone || "") !== String(upd.relativePhone || "")) {
+      changes.push({ field: "relativePhone", oldValue: origI.relativePhone, newValue: upd.relativePhone })
+    }
+    if (String(origI.relativeAddress || "") !== String(upd.relativeAddress || "")) {
+      changes.push({
+        field: "relativeAddress",
+        oldValue: origI.relativeAddress,
+        newValue: upd.relativeAddress || "",
+      })
+    }
+    if (String(origI.admissionDate || "") !== toISO(upd.date)) {
+      changes.push({ field: "admissionDate", oldValue: origI.admissionDate, newValue: toISO(upd.date) })
+    }
+    if (String(origI.admissionTime || "") !== String(upd.time || "")) {
+      changes.push({ field: "admissionTime", oldValue: origI.admissionTime, newValue: upd.time })
+    }
+    if (String(origI.admissionSource || "") !== String(upd.admissionSource?.value || "")) {
+      changes.push({
+        field: "admissionSource",
+        oldValue: origI.admissionSource,
+        newValue: upd.admissionSource?.value,
+      })
+    }
+    if (String(origI.admissionType || "") !== String(upd.admissionType?.value || "")) {
+      changes.push({
+        field: "admissionType",
+        oldValue: origI.admissionType,
+        newValue: upd.admissionType?.value,
+      })
+    }
+    if (String(origI.roomType || "") !== String(upd.roomType?.value || "")) {
+      changes.push({ field: "roomType", oldValue: origI.roomType, newValue: upd.roomType?.value })
+    }
+    if (String(origI.bed || "") !== String(upd.bed?.value || "")) {
+      changes.push({ field: "bed", oldValue: origI.bed, newValue: upd.bed?.value })
+    }
+    if (String(origI.doctor || "") !== String(upd.doctor?.value || "")) {
+      changes.push({ field: "doctor", oldValue: origI.doctor, newValue: upd.doctor?.value })
+    }
+    if (String(origI.referDoctor || "") !== String(upd.referDoctor || "")) {
+      changes.push({ field: "referDoctor", oldValue: origI.referDoctor, newValue: upd.referDoctor || "" })
+    }
+
+    // Billing fields
+    if (String(origB.totalDeposit || "") !== String(upd.deposit || 0)) {
+      changes.push({
+        field: "deposit",
+        oldValue: origB.totalDeposit,
+        newValue: upd.deposit || 0,
+      })
+    }
+
+    return changes
+  }
+
   /* ---------------------------
      Form Submission
   --------------------------- */
   const onSubmit = async (data: IPDFormInput) => {
+    if (!originalPatient || !originalIPD || !originalBilling) {
+      toast.error("Original data not fully loaded")
+      return
+    }
+
     setLoading(true)
     try {
-      // If the bed has changed, update the status of the old bed to "Available" and the new one to "Occupied."
-      if (oldBedInfo && data.roomType?.value && data.bed?.value && data.bed.value !== oldBedInfo.bedId) {
+      // Detect changes
+      const changes = detectChanges(originalPatient, originalIPD, originalBilling, data)
+
+      if (changes.length === 0) {
+        toast.info("No changes detected")
+        setLoading(false)
+        return
+      }
+
+      // 1) Update patientinfo if basic info changed
+      const patientUpdates: any = {}
+      if (String(originalPatient.name) !== String(data.name)) patientUpdates.name = data.name
+      if (String(originalPatient.phone) !== String(data.phone)) patientUpdates.phone = data.phone
+      if (String(originalPatient.gender) !== String(data.gender?.value || "")) {
+        patientUpdates.gender = data.gender?.value || ""
+      }
+      if (String(originalPatient.age) !== String(data.age)) patientUpdates.age = data.age
+      if (String(originalPatient.address) !== String(data.address || "")) {
+        patientUpdates.address = data.address || ""
+      }
+      if (Object.keys(patientUpdates).length > 0) {
+        patientUpdates.updatedAt = new Date().toISOString()
+        await update(ref(db, `patients/patientinfo/${patienteditId}`), patientUpdates)
+      }
+
+      // 2) Handle bed status changes
+      if (
+        oldBedInfo &&
+        data.roomType?.value &&
+        data.bed?.value &&
+        data.bed.value !== oldBedInfo.bedId
+      ) {
         const oldBedRef = ref(db, `beds/${oldBedInfo.roomType}/${oldBedInfo.bedId}`)
         await update(oldBedRef, { status: "Available" })
         const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
@@ -272,27 +525,62 @@ export default function EditIPDPage() {
         await update(newBedRef, { status: "Occupied" })
       }
 
-      // Update the IPD record.
-      const ipdRef = ref(db, `patients/${patienteditId}/ipd/${ipdeditId}`)
-      const ipdData = {
-        name: data.name,
-        phone: data.phone,
-        gender: data.gender?.value || "",
-        age: data.age,
-        address: data.address || "",
+      // 3) Update IPD record
+      const ipdData: any = {
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
         relativeAddress: data.relativeAddress || "",
-        date: data.date.toISOString(),
-        time: data.time,
+        admissionDate: data.date.toISOString(),
+        admissionTime: data.time,
+        admissionSource: data.admissionSource?.value || "",
+        admissionType: data.admissionType?.value || "",
         roomType: data.roomType?.value || "",
         bed: data.bed?.value || "",
         doctor: data.doctor?.value || "",
         referDoctor: data.referDoctor || "",
-        admissionType: data.admissionType?.value || "",
         updatedAt: new Date().toISOString(),
+        lastModifiedBy: currentUserEmail || "unknown",
       }
-      await update(ipdRef, ipdData)
+      await update(
+        ref(db, `patients/ipddetail/userinfoipd/${patienteditId}/${ipdeditId}`),
+        ipdData
+      )
+
+      // 4) Update billing if deposit changed
+      const prevDeposit = originalBilling.totalDeposit || 0
+      const newDeposit = data.deposit || 0
+      if (String(prevDeposit) !== String(newDeposit)) {
+        // Update totalDeposit
+        await update(
+          ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}`),
+          { totalDeposit: newDeposit }
+        )
+        // Add a new payment entry
+        const paymentRef = push(
+          ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}/payments`)
+        )
+        await update(paymentRef, {
+          amount: newDeposit - prevDeposit,
+          date: new Date().toISOString(),
+          paymentType: data.paymentMode?.value || "",
+          type: "deposit",
+          createdAt: new Date().toISOString(),
+        })
+      }
+
+      // 5) Save change tracking
+      const changesRef = ref(db, "ipdChanges")
+      const newChangeRef = push(changesRef)
+      await set(newChangeRef, {
+        type: "edit",
+        ipdId: ipdeditId,
+        patientId: patienteditId,
+        patientName: data.name,
+        changes,
+        editedBy: currentUserEmail || "unknown",
+        editedAt: new Date().toISOString(),
+      })
+
       toast.success("IPD record updated successfully!")
       router.push("/billing")
     } catch (err) {
@@ -313,7 +601,9 @@ export default function EditIPDPage() {
             </div>
             <div>
               <CardTitle className="text-2xl font-bold">Edit IPD Record</CardTitle>
-              <CardDescription className="text-indigo-100 mt-1">Update patient admission information</CardDescription>
+              <CardDescription className="text-indigo-100 mt-1">
+                Update patient admission and billing information
+              </CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -398,7 +688,12 @@ export default function EditIPDPage() {
                     Address
                   </Label>
                   <div className="relative">
-                    <Input id="address" {...register("address")} className="pl-9" placeholder="Patient address" />
+                    <Input
+                      id="address"
+                      {...register("address")}
+                      className="pl-9"
+                      placeholder="Patient address"
+                    />
                     <Home className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
                 </div>
@@ -427,7 +722,9 @@ export default function EditIPDPage() {
                     />
                     <Users className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
-                  {errors.relativeName && <p className="text-xs text-red-500">Relative name is required</p>}
+                  {errors.relativeName && (
+                    <p className="text-xs text-red-500">Relative name is required</p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -443,14 +740,20 @@ export default function EditIPDPage() {
                     />
                     <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
-                  {errors.relativePhone && <p className="text-xs text-red-500">Relative phone is required</p>}
+                  {errors.relativePhone && (
+                    <p className="text-xs text-red-500">Relative phone is required</p>
+                  )}
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="relativeAddress" className="text-sm font-medium">
                     Relative Address
                   </Label>
-                  <Input id="relativeAddress" {...register("relativeAddress")} placeholder="Relative's address" />
+                  <Input
+                    id="relativeAddress"
+                    {...register("relativeAddress")}
+                    placeholder="Relative's address"
+                  />
                 </div>
               </div>
             </div>
@@ -463,7 +766,7 @@ export default function EditIPDPage() {
                 <Calendar className="h-5 w-5 text-indigo-600" />
                 <h2 className="text-lg font-semibold text-slate-800">Admission Details</h2>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="space-y-2">
                   <Label htmlFor="date" className="text-sm font-medium">
                     Admission Date <span className="text-red-500">*</span>
@@ -507,6 +810,29 @@ export default function EditIPDPage() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label htmlFor="admissionSource" className="text-sm font-medium">
+                    Admission Source <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="admissionSource"
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={AdmissionSourceOptions}
+                        placeholder="Select Source"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                      />
+                    )}
+                  />
+                  {errors.admissionSource && (
+                    <p className="text-xs text-red-500">Source is required</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
                   <Label htmlFor="admissionType" className="text-sm font-medium">
                     Admission Type <span className="text-red-500">*</span>
                   </Label>
@@ -518,13 +844,15 @@ export default function EditIPDPage() {
                       <Select
                         {...field}
                         options={AdmissionTypeOptions}
-                        placeholder="Select Admission Type"
+                        placeholder="Select Type"
                         styles={selectStyles}
                         classNamePrefix="react-select"
                       />
                     )}
                   />
-                  {errors.admissionType && <p className="text-xs text-red-500">Admission type is required</p>}
+                  {errors.admissionType && (
+                    <p className="text-xs text-red-500">Type is required</p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -539,7 +867,7 @@ export default function EditIPDPage() {
                       <Select
                         {...field}
                         options={RoomTypeOptions}
-                        placeholder="Select Room Type"
+                        placeholder="Select Room"
                         styles={selectStyles}
                         classNamePrefix="react-select"
                         onChange={(val) => {
@@ -549,7 +877,9 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.roomType && <p className="text-xs text-red-500">Room type is required</p>}
+                  {errors.roomType && (
+                    <p className="text-xs text-red-500">Room is required</p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -563,7 +893,7 @@ export default function EditIPDPage() {
                       size="sm"
                       onClick={toggleBedsPopup}
                       disabled={!selectedRoomType}
-                      className="h-8 px-2 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                      className="h-8 px-2 text-indigo-600 text-xs hover:text-indigo-700 hover:bg-indigo-50"
                     >
                       <Bed className="h-3 w-3 mr-1" />
                       View All Beds
@@ -584,7 +914,7 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.bed && <p className="text-xs text-red-500">Bed selection is required</p>}
+                  {errors.bed && <p className="text-xs text-red-500">Bed is required</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -621,6 +951,63 @@ export default function EditIPDPage() {
                     />
                     <UserCheck className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Billing Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Badge className="bg-amber-100 text-amber-800">
+                  Billing
+                </Badge>
+                <h2 className="text-lg font-semibold text-slate-800">Deposit & Payment Mode</h2>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label htmlFor="deposit" className="text-sm font-medium">
+                    Deposit Amount
+                  </Label>
+                  <div className="relative">
+                    <span className="absolute top-3 left-3 text-gray-400">₹</span>
+                    <input
+                      id="deposit"
+                      type="number"
+                      {...register("deposit", { min: { value: 0, message: "Deposit must be ≥ 0" } })}
+                      placeholder="Enter deposit amount"
+                      className={`w-full pl-8 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                        errors.deposit ? "border-red-500" : "border-gray-300"
+                      }`}
+                    />
+                  </div>
+                  {errors.deposit && (
+                    <p className="text-xs text-red-500">{errors.deposit.message}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="paymentMode" className="text-sm font-medium">
+                    Payment Mode
+                  </Label>
+                  <Controller
+                    name="paymentMode"
+                    control={control}
+                    rules={{ required: "Payment mode is required" }}
+                    render={({ field }) => (
+                      <Select
+                        {...field}
+                        options={PaymentModeOptions}
+                        placeholder="Select Mode"
+                        styles={selectStyles}
+                        classNamePrefix="react-select"
+                      />
+                    )}
+                  />
+                  {errors.paymentMode && (
+                    <p className="text-xs text-red-500">{errors.paymentMode.message}</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -690,7 +1077,11 @@ export default function EditIPDPage() {
                         <td className="px-4 py-3">
                           <Badge
                             variant={bed.status === "Available" ? "default" : "secondary"}
-                            className={`${bed.status === "Available" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}
+                            className={`${
+                              bed.status === "Available"
+                                ? "bg-green-100 text-green-800"
+                                : "bg-amber-100 text-amber-800"
+                            }`}
                           >
                             {bed.status}
                           </Badge>
@@ -718,4 +1109,3 @@ export default function EditIPDPage() {
     </div>
   )
 }
-

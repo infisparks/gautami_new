@@ -8,7 +8,7 @@ import { db, auth } from "@/lib/firebase";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import  format  from "date-fns/format";
+import format from "date-fns/format";
 
 // Define interface for a doctor visit record.
 interface DoctorVisit {
@@ -38,13 +38,16 @@ export default function DoctorVisits() {
   const [visits, setVisits] = useState<DoctorVisit[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch doctor visits from Firebase.
+  // Fetch doctor visits from the new Firebase path.
   useEffect(() => {
-    const visitsRef = ref(db, `patients/${patientId}/ipd/${ipdId}/doctorVisits`);
+    const visitsRef = ref(
+      db,
+      `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/doctorvisit`
+    );
     const unsubscribe = onValue(visitsRef, (snapshot) => {
       setIsLoading(false);
       if (snapshot.exists()) {
-        const data = snapshot.val();
+        const data = snapshot.val() as Record<string, Omit<DoctorVisit, "id">>;
         const loaded: DoctorVisit[] = Object.keys(data).map((key) => ({
           id: key,
           ...data[key],
@@ -63,12 +66,15 @@ export default function DoctorVisits() {
   const onSubmit: SubmitHandler<DoctorVisitFormInputs> = async (data) => {
     try {
       const enteredBy = auth.currentUser?.email || "unknown";
-      const newVisit: DoctorVisit = {
+      const newVisit: Omit<DoctorVisit, "id"> = {
         doctorName: data.doctorName,
         dateTime: data.dateTime,
         enteredBy,
       };
-      const visitsRef = ref(db, `patients/${patientId}/ipd/${ipdId}/doctorVisits`);
+      const visitsRef = ref(
+        db,
+        `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/doctorvisit`
+      );
       await push(visitsRef, newVisit);
       reset({
         doctorName: "",

@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Dialog, Transition } from "@headlessui/react"
-import  format  from "date-fns/format"
+import format from "date-fns/format"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Pencil } from "lucide-react"
 
@@ -27,21 +27,21 @@ interface DrugChartEntry {
   stat: string
   enteredBy: string
   timestamp: string
-  signatures?: Signature[] // Array of appended signatures
-  status: "active" | "hold" | "omit" // Status of the drug chart entry
-  editHistory?: EditRecord[] // Track edit history
+  signatures?: Signature[]
+  status: "active" | "hold" | "omit"
+  editHistory?: EditRecord[]
 }
 
 interface Signature {
-  dateTime: string // user-chosen date/time, default current
-  by: string // user email
-  timestamp: string // submission timestamp
+  dateTime: string
+  by: string
+  timestamp: string
 }
 
 interface EditRecord {
-  editedBy: string // user email
-  timestamp: string // edit timestamp
-  previousValues: Partial<DrugChartEntry> // Previous values before edit
+  editedBy: string
+  timestamp: string
+  previousValues: Partial<DrugChartEntry>
 }
 
 interface DrugChartFormInputs {
@@ -64,7 +64,7 @@ interface SignatureFormInputs {
 export default function DrugChartPage() {
   const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string }
 
-  // === Form for creating a NEW drug chart entry ===
+  // --- New-Entry form
   const { register, handleSubmit, reset } = useForm<DrugChartFormInputs>({
     defaultValues: {
       dateTime: new Date().toISOString().slice(0, 16),
@@ -83,7 +83,7 @@ export default function DrugChartPage() {
   const [entries, setEntries] = useState<DrugChartEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-  // For creating a new signature
+  // Signature modal state
   const [signatureModalOpen, setSignatureModalOpen] = useState(false)
   const [entryForSignature, setEntryForSignature] = useState<DrugChartEntry | null>(null)
   const {
@@ -96,19 +96,17 @@ export default function DrugChartPage() {
     },
   })
 
-  // For editing an existing entry
+  // Edit modal state
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [entryForEdit, setEntryForEdit] = useState<DrugChartEntry | null>(null)
-  const {
-    register: registerEdit,
-    handleSubmit: handleSubmitEdit,
-    reset: resetEdit,
-    // setValue: setEditValue,
-  } = useForm<DrugChartFormInputs>()
+  const { register: registerEdit, handleSubmit: handleSubmitEdit, reset: resetEdit } =
+    useForm<DrugChartFormInputs>()
 
-  // ====== Fetch existing entries from Firebase ======
+  // --- Fetch existing entries from:
+  // patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart
   useEffect(() => {
-    const drugChartRef = ref(db, `patients/${patientId}/ipd/${ipdId}/drugChart`)
+    const path = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart`
+    const drugChartRef = ref(db, path)
     const unsubscribe = onValue(drugChartRef, (snapshot) => {
       setIsLoading(false)
       if (snapshot.exists()) {
@@ -116,11 +114,12 @@ export default function DrugChartPage() {
         const loaded: DrugChartEntry[] = Object.keys(data).map((key) => ({
           id: key,
           ...data[key],
-          // Ensure status exists for backward compatibility
           status: data[key].status || "active",
         }))
-        // Sort entries by dateTime descending
-        loaded.sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime())
+        // sort by dateTime descending
+        loaded.sort(
+          (a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime()
+        )
         setEntries(loaded)
       } else {
         setEntries([])
@@ -129,7 +128,7 @@ export default function DrugChartPage() {
     return () => unsubscribe()
   }, [patientId, ipdId])
 
-  // ====== Create a NEW drug chart entry ======
+  // --- Create a new drug-chart entry
   const onSubmit: SubmitHandler<DrugChartFormInputs> = async (data) => {
     try {
       const enteredBy = auth.currentUser?.email || "unknown"
@@ -140,9 +139,11 @@ export default function DrugChartPage() {
         signatures: [],
         status: data.status || "active",
       }
-      const drugChartRef = ref(db, `patients/${patientId}/ipd/${ipdId}/drugChart`)
+      const path = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart`
+      const drugChartRef = ref(db, path)
       await push(drugChartRef, newEntry)
-      // Reset the form
+
+      // reset form
       reset({
         dateTime: new Date().toISOString().slice(0, 16),
         duration: "",
@@ -155,23 +156,21 @@ export default function DrugChartPage() {
         stat: "",
         status: "active",
       })
-    } catch (error) {
-      console.error("Error saving drug chart entry:", error)
+    } catch (err) {
+      console.error("Error saving drug chart entry:", err)
     }
   }
 
-  // ====== Opening the signature modal ======
+  // --- Open signature modal
   const handleSignatureClick = (entry: DrugChartEntry) => {
     setEntryForSignature(entry)
-    // Pre-fill the signature form with the current date/time
     resetSign({ dateTime: new Date().toISOString().slice(0, 16) })
     setSignatureModalOpen(true)
   }
 
-  // ====== Opening the edit modal ======
+  // --- Open edit modal
   const handleEditClick = (entry: DrugChartEntry) => {
     setEntryForEdit(entry)
-    // Pre-fill the edit form with the entry's current values
     resetEdit({
       dateTime: entry.dateTime,
       duration: entry.duration,
@@ -187,9 +186,10 @@ export default function DrugChartPage() {
     setEditModalOpen(true)
   }
 
-  // ====== Saving a signature for an existing entry ======
+  // --- Submit signature
   const onSubmitSignature: SubmitHandler<SignatureFormInputs> = async (data) => {
     if (!entryForSignature || !entryForSignature.id) return
+
     try {
       const by = auth.currentUser?.email || "unknown"
       const signature: Signature = {
@@ -197,34 +197,35 @@ export default function DrugChartPage() {
         by,
         timestamp: new Date().toISOString(),
       }
-      // Build a new array of signatures
       const oldSignatures = entryForSignature.signatures || []
       const newSignatures = [...oldSignatures, signature]
       const updatedEntry: DrugChartEntry = {
         ...entryForSignature,
         signatures: newSignatures,
       }
-      // Save to Firebase
-      const entryRef = ref(db, `patients/${patientId}/ipd/${ipdId}/drugChart/${entryForSignature.id}`)
+      // save entire entry back under same ID
+      const path = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart/${entryForSignature.id}`
+      const entryRef = ref(db, path)
       await set(entryRef, updatedEntry)
 
-      // Update local state
-      setEntries((prev) => prev.map((ent) => (ent.id === entryForSignature.id ? updatedEntry : ent)))
+      // update local state
+      setEntries((prev) =>
+        prev.map((ent) => (ent.id === entryForSignature.id ? updatedEntry : ent))
+      )
 
       setSignatureModalOpen(false)
       setEntryForSignature(null)
-    } catch (error) {
-      console.error("Error saving signature:", error)
+    } catch (err) {
+      console.error("Error saving signature:", err)
     }
   }
 
-  // ====== Saving edits to an existing entry ======
+  // --- Submit edit
   const onSubmitEdit: SubmitHandler<DrugChartFormInputs> = async (data) => {
     if (!entryForEdit || !entryForEdit.id) return
+
     try {
       const editedBy = auth.currentUser?.email || "unknown"
-
-      // Create an edit record
       const editRecord: EditRecord = {
         editedBy,
         timestamp: new Date().toISOString(),
@@ -241,64 +242,70 @@ export default function DrugChartPage() {
           status: entryForEdit.status,
         },
       }
-
-      // Build the updated entry with edit history
       const oldEditHistory = entryForEdit.editHistory || []
       const updatedEntry: DrugChartEntry = {
         ...entryForEdit,
         ...data,
         editHistory: [...oldEditHistory, editRecord],
       }
+      // push only the updated fields + editHistory
+      const path = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart/${entryForEdit.id}`
+      const entryRef = ref(db, path)
+      await update(entryRef, {
+        dateTime: data.dateTime,
+        duration: data.duration,
+        dosage: data.dosage,
+        drugName: data.drugName,
+        dose: data.dose,
+        route: data.route,
+        frequency: data.frequency,
+        specialInstruction: data.specialInstruction,
+        stat: data.stat,
+        status: data.status,
+        editHistory: updatedEntry.editHistory,
+      })
 
-      // Save to Firebase
-      const entryRef = ref(db, `patients/${patientId}/ipd/${ipdId}/drugChart/${entryForEdit.id}`)
-      await update(entryRef, updatedEntry)
-
-      // Update local state
-      setEntries((prev) => prev.map((ent) => (ent.id === entryForEdit.id ? updatedEntry : ent)))
+      // update local state
+      setEntries((prev) =>
+        prev.map((ent) => (ent.id === entryForEdit.id ? updatedEntry : ent))
+      )
 
       setEditModalOpen(false)
       setEntryForEdit(null)
-    } catch (error) {
-      console.error("Error updating drug chart entry:", error)
+    } catch (err) {
+      console.error("Error updating drug chart entry:", err)
     }
   }
 
-  // ====== Update status of an entry ======
+  // --- Change status only
   const handleStatusChange = async (entry: DrugChartEntry, newStatus: "active" | "hold" | "omit") => {
     if (!entry.id) return
+
     try {
       const editedBy = auth.currentUser?.email || "unknown"
-
-      // Create an edit record
       const editRecord: EditRecord = {
         editedBy,
         timestamp: new Date().toISOString(),
-        previousValues: {
-          status: entry.status,
-        },
+        previousValues: { status: entry.status },
       }
-
-      // Build the updated entry with edit history
       const oldEditHistory = entry.editHistory || []
       const updatedEntry: DrugChartEntry = {
         ...entry,
         status: newStatus,
         editHistory: [...oldEditHistory, editRecord],
       }
-
-      // Save to Firebase
-      const entryRef = ref(db, `patients/${patientId}/ipd/${ipdId}/drugChart/${entry.id}`)
+      const path = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/drugchart/${entry.id}`
+      const entryRef = ref(db, path)
       await update(entryRef, { status: newStatus, editHistory: updatedEntry.editHistory })
 
-      // Update local state
-      setEntries((prev) => prev.map((ent) => (ent.id === entry.id ? updatedEntry : ent)))
-    } catch (error) {
-      console.error("Error updating entry status:", error)
+      setEntries((prev) =>
+        prev.map((ent) => (ent.id === entry.id ? updatedEntry : ent))
+      )
+    } catch (err) {
+      console.error("Error updating entry status:", err)
     }
   }
 
-  // Get background color based on status
   const getStatusBgColor = (status: string) => {
     switch (status) {
       case "active":
@@ -312,19 +319,17 @@ export default function DrugChartPage() {
     }
   }
 
-  // Group the entries by day
+  // group by day string
   const groupedEntries = entries.reduce((acc: Record<string, DrugChartEntry[]>, entry) => {
     const day = format(new Date(entry.dateTime), "dd MMM yyyy")
-    if (!acc[day]) {
-      acc[day] = []
-    }
+    if (!acc[day]) acc[day] = []
     acc[day].push(entry)
     return acc
   }, {})
 
   return (
     <div className="p-4">
-      {/* New Entry Form */}
+      {/* === New Entry Form === */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-xl font-semibold text-slate-800">New Drug Chart Entry</CardTitle>
@@ -396,7 +401,7 @@ export default function DrugChartPage() {
         </CardContent>
       </Card>
 
-      {/* List of Entries */}
+      {/* === List of Entries === */}
       <div>
         <h2 className="text-2xl font-bold text-slate-800 mb-4">Drug Chart Entries</h2>
         {isLoading ? (
@@ -415,23 +420,32 @@ export default function DrugChartPage() {
                     {dayEntries.map((entry) => (
                       <div
                         key={entry.id}
-                        className={`border p-2 rounded shadow-sm flex flex-col gap-2 ${getStatusBgColor(entry.status || "active")}`}
+                        className={`border p-2 rounded shadow-sm flex flex-col gap-2 ${getStatusBgColor(
+                          entry.status || "active"
+                        )}`}
                       >
                         <div className="flex justify-between flex-wrap">
                           <div>
-                            <p className="font-medium mb-1">Time: {format(new Date(entry.dateTime), "hh:mm a")}</p>
+                            <p className="font-medium mb-1">
+                              Time: {format(new Date(entry.dateTime), "hh:mm a")}
+                            </p>
                             <p className="text-sm">Drug: {entry.drugName}</p>
                             <p className="text-sm">Duration: {entry.duration}</p>
                             <p className="text-sm">Dosage: {entry.dosage}</p>
                             <p className="text-sm">Dose: {entry.dose}</p>
                             <p className="text-sm">Route: {entry.route}</p>
                             <p className="text-sm">Frequency: {entry.frequency}</p>
-                            <p className="text-sm">Special Instruction: {entry.specialInstruction}</p>
+                            <p className="text-sm">
+                              Special Instruction: {entry.specialInstruction}
+                            </p>
                             <p className="text-sm">Stat: {entry.stat}</p>
-                            <p className="text-xs text-gray-500 mt-1">Entered By: {entry.enteredBy}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Entered By: {entry.enteredBy}
+                            </p>
                             {entry.editHistory && entry.editHistory.length > 0 && (
                               <p className="text-xs text-gray-500">
-                                Last Edited By: {entry.editHistory[entry.editHistory.length - 1].editedBy}
+                                Last Edited By:{" "}
+                                {entry.editHistory[entry.editHistory.length - 1].editedBy}
                               </p>
                             )}
                           </div>
@@ -464,15 +478,21 @@ export default function DrugChartPage() {
                             </div>
                           </div>
                         </div>
-                        {/* Signatures list (if any) */}
+
+                        {/* List signatures */}
                         {entry.signatures && entry.signatures.length > 0 && (
                           <div className="mt-2 border-t pt-2">
                             <p className="text-sm font-semibold text-slate-700 mb-1">Signatures:</p>
                             <div className="space-y-1">
                               {entry.signatures.map((sig, idx) => (
-                                <div key={idx} className="text-xs text-gray-700 flex items-center gap-2">
-                                  <span>-</span>
-                                  <span>{format(new Date(sig.dateTime), "dd MMM yyyy, hh:mm a")}</span>
+                                <div
+                                  key={idx}
+                                  className="text-xs text-gray-700 flex items-center gap-2"
+                                >
+                                  <span>–</span>
+                                  <span>
+                                    {format(new Date(sig.dateTime), "dd MMM yyyy, hh:mm a")}
+                                  </span>
                                   <span className="text-gray-500">by {sig.by}</span>
                                 </div>
                               ))}
@@ -489,7 +509,7 @@ export default function DrugChartPage() {
         )}
       </div>
 
-      {/* Signature Modal */}
+      {/* === Signature Modal === */}
       <Transition appear show={signatureModalOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setSignatureModalOpen(false)}>
           <Transition.Child
@@ -503,6 +523,7 @@ export default function DrugChartPage() {
           >
             <div className="fixed inset-0 bg-black bg-opacity-40" />
           </Transition.Child>
+
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center p-4 text-center">
               <Transition.Child
@@ -518,11 +539,12 @@ export default function DrugChartPage() {
                   <Dialog.Title as="h3" className="text-lg font-medium leading-6 text-gray-900">
                     Add Signature
                   </Dialog.Title>
+
                   <form onSubmit={handleSubmitSign(onSubmitSignature)} className="mt-4 space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Date &amp; Time</label>
                       <Input type="datetime-local" {...registerSign("dateTime")} className="w-full" />
-                      <p className="text-xs text-gray-500 mt-1">(Auto-filled, can be changed if needed)</p>
+                      <p className="text-xs text-gray-500 mt-1">(Auto-filled, can be changed)</p>
                     </div>
                     <div className="mt-4 flex justify-end gap-2">
                       <Button type="button" variant="outline" onClick={() => setSignatureModalOpen(false)}>
@@ -538,7 +560,7 @@ export default function DrugChartPage() {
         </Dialog>
       </Transition>
 
-      {/* Edit Modal */}
+      {/* === Edit Modal === */}
       <Transition appear show={editModalOpen} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setEditModalOpen(false)}>
           <Transition.Child
@@ -552,6 +574,7 @@ export default function DrugChartPage() {
           >
             <div className="fixed inset-0 bg-black bg-opacity-40" />
           </Transition.Child>
+
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center p-4 text-center">
               <Transition.Child
@@ -567,6 +590,7 @@ export default function DrugChartPage() {
                   <Dialog.Title as="h3" className="text-lg font-medium leading-6 text-gray-900">
                     Edit Drug Chart Entry
                   </Dialog.Title>
+
                   <form onSubmit={handleSubmitEdit(onSubmitEdit)} className="mt-4 space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Date &amp; Time</label>
@@ -583,7 +607,12 @@ export default function DrugChartPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Dosage</label>
-                      <Input type="text" placeholder="Enter dosage" {...registerEdit("dosage")} className="w-full" />
+                      <Input
+                        type="text"
+                        placeholder="Enter dosage"
+                        {...registerEdit("dosage")}
+                        className="w-full"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Drug Name</label>
@@ -596,7 +625,12 @@ export default function DrugChartPage() {
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Dose</label>
-                      <Input type="text" placeholder="Enter dose" {...registerEdit("dose")} className="w-full" />
+                      <Input
+                        type="text"
+                        placeholder="Enter dose"
+                        {...registerEdit("dose")}
+                        className="w-full"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-slate-700">Route</label>

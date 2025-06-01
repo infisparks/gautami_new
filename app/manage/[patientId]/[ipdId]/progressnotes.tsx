@@ -30,9 +30,13 @@ export default function ProgressNotes() {
   const [notes, setNotes] = useState<ProgressNote[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // New Firebase path:
+  // patients/ipddetail/userdetailipd/${patientId}/${ipdId}/progressNotes
+  const basePath = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/progressNotes`;
+
   // Fetch all progress notes for the given patient
   useEffect(() => {
-    const notesRef = ref(db, `patients/${patientId}/ipd/${ipdId}/progressNotes`);
+    const notesRef = ref(db, basePath);
     const unsubscribe = onValue(notesRef, (snapshot) => {
       setIsLoading(false);
       if (snapshot.exists()) {
@@ -41,7 +45,7 @@ export default function ProgressNotes() {
           id: key,
           ...data[key],
         }));
-        // Optional: sort by timestamp descending
+        // Sort by timestamp descending
         loadedNotes.sort(
           (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
@@ -53,7 +57,7 @@ export default function ProgressNotes() {
     return () => unsubscribe();
   }, [patientId, ipdId]);
 
-  // When the form is submitted, save the new note with the current timestamp and staff email.
+  // When the form is submitted, save the new note
   const onSubmit: SubmitHandler<ProgressNoteFormInputs> = async (data) => {
     if (data.note.trim() === "") return;
     try {
@@ -63,7 +67,7 @@ export default function ProgressNotes() {
         enteredBy,
         timestamp: new Date().toISOString(),
       };
-      const notesRef = ref(db, `patients/${patientId}/ipd/${ipdId}/progressNotes`);
+      const notesRef = ref(db, basePath);
       await push(notesRef, newNote);
       reset({ note: "" });
     } catch (error) {

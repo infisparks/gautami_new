@@ -1,169 +1,174 @@
-"use client"
+"use client";
 
-import type React from "react"
-import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
-import { ref, onValue, set } from "firebase/database"
-import { useForm, type SubmitHandler } from "react-hook-form"
-import { db, auth } from "@/lib/firebase"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import format from "date-fns/format"
-import { AlertCircle, CheckCircle2, ClipboardList, Loader2, Save } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import React, { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { useForm, SubmitHandler } from "react-hook-form";
+import { ref, onValue, set } from "firebase/database";
+import { db, auth } from "@/lib/firebase";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import format from "date-fns/format";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ClipboardList,
+  Loader2,
+  Save,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // ======================= Interfaces ======================= //
 
 // Based on your updated JSON schema.
 interface AdmissionAssessment {
   cardiovascular_assessments?: {
-    colour?: string // from ["pink","pale","cyanotic"]
+    colour?: string; // from ["pink","pale","cyanotic"]
     vitals?: {
-      rhythm?: string
-      bp?: string
-      heart_sound?: string
-    }
-    storipheries?: string // from ["warm","cold"]
-    pedal_pulse_felt?: string // from ["feeble","absent"]
+      rhythm?: string;
+      bp?: string;
+      heart_sound?: string;
+    };
+    storipheries?: string; // from ["warm","cold"]
+    pedal_pulse_felt?: string; // from ["feeble","absent"]
     edema?: {
-      status?: string // from ["absent","present"]
-      present_site?: string
-    }
-    chest_pain?: string // ["absent","present"]
-    dvt?: string // ["none","low","med","high"]
-  }
+      status?: string; // from ["absent","present"]
+      present_site?: string;
+    };
+    chest_pain?: string; // ["absent","present"]
+    dvt?: string; // ["none","low","med","high"]
+  };
   respiratory_assessment?: {
-    respirations?: string // from ["regular","labored","non-labored"]
-    use_of_accessory_muscles?: string // ["equal","unequal"]
-    rr?: string // "number"
-    o2_saturation?: string // "percentage"
+    respirations?: string; // from ["regular","labored","non-labored"]
+    use_of_accessory_muscles?: string; // ["equal","unequal"]
+    rr?: string; // "number"
+    o2_saturation?: string; // "percentage"
     on_auscultation?: {
-      air_entry?: string // ["equal","unequal"]
-    }
+      air_entry?: string; // ["equal","unequal"]
+    };
     food?: {
-      consumed?: string // ["no","yes"]
-      details?: string // "string"
-    }
-    abnormal_breath_sound?: string // ["absent","present"]
+      consumed?: string; // ["no","yes"]
+      details?: string; // "string"
+    };
+    abnormal_breath_sound?: string; // ["absent","present"]
     cough?: {
-      status?: string // ["absent","present"]
-      type?: string // ["productive","non-productive"]
-      since_when?: string
-    }
-    secretions?: string // ["frequent","occasional","purulent","mucopurulent"]
-  }
+      status?: string; // ["absent","present"]
+      type?: string; // ["productive","non-productive"]
+      since_when?: string;
+    };
+    secretions?: string; // ["frequent","occasional","purulent","mucopurulent"]
+  };
   urinary_system?: {
-    if_voiding?: string // ["anuric","incontinent","catheter","av_fistula","other"]
-    u_line?: string // ["clear","cloudy","other"]
-    sediments?: string // ["concentrated","yellow"]
-  }
+    if_voiding?: string; // ["anuric","incontinent","catheter","av_fistula","other"]
+    u_line?: string; // ["clear","cloudy","other"]
+    sediments?: string; // ["concentrated","yellow"]
+  };
   gastrointestinal_system?: {
-    abdomen?: string // ["soft","tender","guarding"]
-    diet?: string // ["normal","lfd","srd","diabetic_diet"]
-    bowl_sounds?: string // ["normal","absent"]
+    abdomen?: string; // ["soft","tender","guarding"]
+    diet?: string; // ["normal","lfd","srd","diabetic_diet"]
+    bowl_sounds?: string; // ["normal","absent"]
     last_bowel_movement?: {
-      date?: string // "date"
-      time?: string // "time"
-    }
-  }
+      date?: string; // "date"
+      time?: string; // "time"
+    };
+  };
   musculoskeletal_assessment?: {
-    range_of_motion_to_all_extremities?: string // ["yes","no"]
+    range_of_motion_to_all_extremities?: string; // ["yes","no"]
     present_swelling_tenderness?: {
-      status?: string // ["absent","present"]
-      present_site?: string
-    }
-  }
+      status?: string; // ["absent","present"]
+      present_site?: string;
+    };
+  };
   integumentary_system?: {
-    colour?: string // ["cool","warm"]
-    moisture?: string // ["dry","moist"]
-    braden_risk_score?: string // "number"
+    colour?: string; // ["cool","warm"]
+    moisture?: string; // ["dry","moist"]
+    braden_risk_score?: string; // "number"
     vitals?: {
-      head?: string // "intact"
-      crum?: string // "intact"
-      redness?: string // "boolean" => we handle as "yes"/"no" for simplicity
-      peel_sore?: string // "boolean" => "yes"/"no"
-    }
+      head?: string; // "intact"
+      crum?: string; // "intact"
+      redness?: string; // ["yes","no"]
+      peel_sore?: string; // ["yes","no"]
+    };
     pressure_sore?: {
-      position?: string // ["L","R"]
-      size?: string // "string"
-      healing_status?: string // ["healing","non_healing"]
-    }
-  }
+      position?: string; // ["L","R"]
+      size?: string; // "string"
+      healing_status?: string; // ["healing","non_healing"]
+    };
+  };
   meta?: {
-    date?: string // "date"
-    time?: string // "time"
-    name_of_rn?: string
-    signature?: string
-    loc?: string // "level of consciousness"
-    gcs?: string // "glasgowcoma scale"
-  }
+    date?: string; // "date"
+    time?: string; // "time"
+    name_of_rn?: string;
+    signature?: string;
+    loc?: string; // "level of consciousness"
+    gcs?: string; // "glasgowcoma scale"
+  };
   admission_info?: {
-    arrival_to_unit_by?: string // ["walking","wheel_chair","stretcher"]
-    admitted_from?: string // ["home","clinic","nursing_home","casualty"]
-    patient_belongings?: string // ["watch","jewellery","any_other"] - single selection or text
-    relationship?: string
-    informant_name?: string
-  }
+    arrival_to_unit_by?: string; // ["walking","wheel_chair","stretcher"]
+    admitted_from?: string; // ["home","clinic","nursing_home","casualty"]
+    patient_belongings?: string; // ["watch","jewellery","any_other"]
+    relationship?: string;
+    informant_name?: string;
+  };
   assessment_info?: {
-    any_allergies?: string // ["no","yes"]
-    latex_allergy?: string // ["yes","no"]
+    any_allergies?: string; // ["no","yes"]
+    latex_allergy?: string; // ["yes","no"]
     medications?: {
-      status?: string // ["no","yes"]
-      if_yes?: string
-    }
+      status?: string; // ["no","yes"]
+      if_yes?: string;
+    };
     food?: {
-      consumption?: string // ["yes","no"]
-    }
-    habits?: string // ["alcohol","smoking","any_other"] => single selection for simplicity
-  }
+      consumption?: string; // ["yes","no"]
+    };
+    habits?: string; // ["alcohol","smoking","any_other"]
+  };
   medical_history?: {
-    conditions?: string[] // multiple selection among listed conditions
-  }
+    conditions?: string[]; // multiple selection
+  };
   pregnancy_info?: {
-    are_you_pregnant?: string // ["not_applicable","yes_due_date","no"]
-    due_date?: string // "date"
-    lmp?: string // "date"
-  }
+    are_you_pregnant?: string; // ["not_applicable","yes_due_date","no"]
+    due_date?: string; // "date"
+    lmp?: string; // "date"
+  };
   surgery_history?: {
     major_illness_surgery_accidents?: {
-      description?: string
-      date_event?: string // "date"
-    }
-  }
-  implants?: string[] // ["prosthesis","pacemaker","aicd","any_other"] => multi
+      description?: string;
+      date_event?: string; // "date"
+    };
+  };
+  implants?: string[]; // multiple selection
   activity_exercise?: {
-    requires_assisting_devices?: string // "boolean" => "yes"/"no"
-    devices?: string[] // ["walker","cane","other"] => multi
-    difficulty_with_adl?: string // ["no","yes"]
-    adl_tasks?: string[] // ["bathing","toileting","climbing_stairs","walking","feeding","house_chores"] => multi
-  }
+    requires_assisting_devices?: string; // ["yes","no"]
+    devices?: string[]; // multiple selection
+    difficulty_with_adl?: string; // ["no","yes"]
+    adl_tasks?: string[]; // multiple selection
+  };
   neurologic_assessment?: {
-    speech?: string // ["clear","slurred"]
-    loc?: string // ["alert_oriented","drowsy","sedated","unresponsive","disoriented","other"]
-    physical_limitation?: string // ["no_limitations","hearing_impairment"]
-    gsc?: string
-  }
+    speech?: string; // ["clear","slurred"]
+    loc?: string; // ["alert_oriented","drowsy","sedated","unresponsive","disoriented","other"]
+    physical_limitation?: string; // ["no_limitations","hearing_impairment"]
+    gsc?: string;
+  };
   pain_assessment?: {
-    pain_score?: string // "number (0-10)"
-    location?: string
-  }
-  enteredBy?: string
-  timestamp?: string
+    pain_score?: string; // "number (0-10)"
+    location?: string;
+  };
+  enteredBy?: string;
+  timestamp?: string;
 }
 
 // The form inputs exclude the admin fields:
-type AdmissionAssessmentInputs = Omit<AdmissionAssessment, "enteredBy" | "timestamp">
+type AdmissionAssessmentInputs = Omit<AdmissionAssessment, "enteredBy" | "timestamp">;
 
 // ======================= Component ======================= //
 
 export default function AdmissionAssessmentForm() {
-  const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string }
-  const [assessment, setAssessment] = useState<AdmissionAssessment | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
+  const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string };
+  const [assessment, setAssessment] = useState<AdmissionAssessment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const {
     register,
@@ -172,76 +177,87 @@ export default function AdmissionAssessmentForm() {
     formState: { isDirty },
   } = useForm<AdmissionAssessmentInputs>({
     defaultValues: {},
-  })
+  });
+
+  // Firebase path for admission assessment under new JSON structure
+  const dbPath = `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/admissionassesment`;
 
   useEffect(() => {
-    const assessmentRef = ref(db, `patients/${patientId}/ipd/${ipdId}/admissionAssessment`)
+    const assessmentRef = ref(db, dbPath);
     const unsubscribe = onValue(assessmentRef, (snapshot) => {
-      setLoading(false)
+      setLoading(false);
       if (snapshot.exists()) {
-        const data = snapshot.val() as AdmissionAssessment
-        setAssessment(data)
-        reset(data)
+        const data = snapshot.val() as AdmissionAssessment;
+        setAssessment(data);
+        reset(data);
       } else {
-        setAssessment(null)
-        reset({})
+        setAssessment(null);
+        reset({});
       }
-    })
-    return () => unsubscribe()
-  }, [patientId, ipdId, reset])
+    });
+    return () => unsubscribe();
+  }, [patientId, ipdId, reset]);
 
   // Helper to remove empty fields recursively before saving
   function removeEmptyValues(obj: any): any {
     if (Array.isArray(obj)) {
-      // Remove empty strings, but keep array structure
-      return obj.filter((val) => val && val.trim && val.trim() !== "")
+      return obj.filter((val) => val && val.trim && val.trim() !== "");
     } else if (obj && typeof obj === "object") {
-      const newObj: any = {}
+      const newObj: any = {};
       Object.keys(obj).forEach((key) => {
-        const value = removeEmptyValues(obj[key])
-        const isEmptyArray = Array.isArray(value) && value.length === 0
-        const isEmptyObject = typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0
-        if (value !== "" && value !== null && value !== undefined && !isEmptyArray && !isEmptyObject) {
-          newObj[key] = value
+        const value = removeEmptyValues(obj[key]);
+        const isEmptyArray = Array.isArray(value) && value.length === 0;
+        const isEmptyObject =
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 0;
+        if (
+          value !== "" &&
+          value !== null &&
+          value !== undefined &&
+          !isEmptyArray &&
+          !isEmptyObject
+        ) {
+          newObj[key] = value;
         }
-      })
-      return newObj
+      });
+      return newObj;
     } else if (typeof obj === "string") {
-      return obj.trim() === "" ? "" : obj.trim()
+      return obj.trim() === "" ? "" : obj.trim();
     }
-    return obj
+    return obj;
   }
 
   const onSubmit: SubmitHandler<AdmissionAssessmentInputs> = async (data) => {
     try {
-      setSaving(true)
-      setSaveSuccess(false)
+      setSaving(true);
+      setSaveSuccess(false);
 
-      const cleaned = removeEmptyValues(data)
+      const cleaned = removeEmptyValues(data);
       const finalData: AdmissionAssessment = {
         ...cleaned,
         enteredBy: auth.currentUser?.email || "unknown",
         timestamp: new Date().toISOString(),
-      }
+      };
 
-      const assessmentRef = ref(db, `patients/${patientId}/ipd/${ipdId}/admissionAssessment`)
-      await set(assessmentRef, finalData)
-      setAssessment(finalData)
-      setSaveSuccess(true)
+      const assessmentRef = ref(db, dbPath);
+      await set(assessmentRef, finalData);
+      setAssessment(finalData);
+      setSaveSuccess(true);
 
-      // Reset the form with the new data to reset isDirty state
-      reset(finalData)
+      // Reset form to clear dirty state
+      reset(finalData);
 
-      // Auto-hide success message after 3 seconds
+      // Hide success message after 3 seconds
       setTimeout(() => {
-        setSaveSuccess(false)
-      }, 3000)
+        setSaveSuccess(false);
+      }, 3000);
     } catch (error) {
-      console.error("Error saving assessment:", error)
+      console.error("Error saving assessment:", error);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   if (loading) {
     return (
@@ -251,7 +267,7 @@ export default function AdmissionAssessmentForm() {
           <p className="text-muted-foreground">Loading Assessment Form...</p>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -266,7 +282,8 @@ export default function AdmissionAssessmentForm() {
             {assessment?.timestamp && (
               <div className="text-sm text-slate-500 flex flex-col md:flex-row md:items-center gap-2">
                 <Badge variant="outline" className="w-fit">
-                  Last Updated: {format(new Date(assessment.timestamp), "PPpp")}
+                  Last Updated:{" "}
+                  {format(new Date(assessment.timestamp), "PPpp")}
                 </Badge>
                 <Badge variant="outline" className="w-fit">
                   By: {assessment.enteredBy}
@@ -292,7 +309,11 @@ export default function AdmissionAssessmentForm() {
                   fieldName="cardiovascular_assessments.vitals.rhythm"
                   register={register}
                 />
-                <InputBlock label="Vitals - BP" fieldName="cardiovascular_assessments.vitals.bp" register={register} />
+                <InputBlock
+                  label="Vitals - BP"
+                  fieldName="cardiovascular_assessments.vitals.bp"
+                  register={register}
+                />
                 <InputBlock
                   label="Vitals - Heart Sound"
                   fieldName="cardiovascular_assessments.vitals.heart_sound"
@@ -351,7 +372,11 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                   options={["", "equal", "unequal"]}
                 />
-                <InputBlock label="RR (Respiratory Rate)" fieldName="respiratory_assessment.rr" register={register} />
+                <InputBlock
+                  label="RR (Respiratory Rate)"
+                  fieldName="respiratory_assessment.rr"
+                  register={register}
+                />
                 <InputBlock
                   label="O2 Saturation"
                   fieldName="respiratory_assessment.o2_saturation"
@@ -369,7 +394,11 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                   options={["", "no", "yes"]}
                 />
-                <InputBlock label="Food Details" fieldName="respiratory_assessment.food.details" register={register} />
+                <InputBlock
+                  label="Food Details"
+                  fieldName="respiratory_assessment.food.details"
+                  register={register}
+                />
                 <SelectBlock
                   label="Abnormal Breath Sound"
                   fieldName="respiratory_assessment.abnormal_breath_sound"
@@ -409,7 +438,14 @@ export default function AdmissionAssessmentForm() {
                   label="If Voiding"
                   fieldName="urinary_system.if_voiding"
                   register={register}
-                  options={["", "anuric", "incontinent", "catheter", "av_fistula", "other"]}
+                  options={[
+                    "",
+                    "anuric",
+                    "incontinent",
+                    "catheter",
+                    "av_fistula",
+                    "other",
+                  ]}
                 />
                 <SelectBlock
                   label="U-Line"
@@ -448,7 +484,9 @@ export default function AdmissionAssessmentForm() {
                   options={["", "normal", "absent"]}
                 />
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Bowel Movement (Date)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Last Bowel Movement (Date)
+                  </label>
                   <Input
                     type="date"
                     {...register("gastrointestinal_system.last_bowel_movement.date")}
@@ -456,7 +494,9 @@ export default function AdmissionAssessmentForm() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Last Bowel Movement (Time)</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Last Bowel Movement (Time)
+                  </label>
                   <Input
                     type="time"
                     {...register("gastrointestinal_system.last_bowel_movement.time")}
@@ -509,9 +549,16 @@ export default function AdmissionAssessmentForm() {
                   fieldName="integumentary_system.braden_risk_score"
                   register={register}
                 />
-                {/* Vitals sub-object */}
-                <InputBlock label="Head" fieldName="integumentary_system.vitals.head" register={register} />
-                <InputBlock label="Crum" fieldName="integumentary_system.vitals.crum" register={register} />
+                <InputBlock
+                  label="Head"
+                  fieldName="integumentary_system.vitals.head"
+                  register={register}
+                />
+                <InputBlock
+                  label="Crum"
+                  fieldName="integumentary_system.vitals.crum"
+                  register={register}
+                />
                 <SelectBlock
                   label="Redness"
                   fieldName="integumentary_system.vitals.redness"
@@ -524,7 +571,6 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                   options={["", "yes", "no"]}
                 />
-                {/* Pressure Sore */}
                 <SelectBlock
                   label="Pressure Sore Position"
                   fieldName="integumentary_system.pressure_sore.position"
@@ -549,17 +595,29 @@ export default function AdmissionAssessmentForm() {
             <FormSection title="Meta Info">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Date
+                  </label>
                   <Input type="date" {...register("meta.date")} className="w-full" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Time</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Time
+                  </label>
                   <Input type="time" {...register("meta.time")} className="w-full" />
                 </div>
-                <InputBlock label="Name of RN" fieldName="meta.name_of_rn" register={register} />
-                <InputBlock label="Signature" fieldName="meta.signature" register={register} />
-                <InputBlock label="LOC (Level of Consciousness)" fieldName="meta.loc" register={register} />
-                <InputBlock label="GCS (Glasgow Coma Scale)" fieldName="meta.gcs" register={register} />
+                <InputBlock
+                  label="Name of RN"
+                  fieldName="meta.name_of_rn"
+                  register={register}
+                />
+                <InputBlock
+                  label="Signature"
+                  fieldName="meta.signature"
+                  register={register}
+                />
+                <InputBlock label="LOC" fieldName="meta.loc" register={register} />
+                <InputBlock label="GCS" fieldName="meta.gcs" register={register} />
               </div>
             </FormSection>
 
@@ -584,8 +642,16 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                   options={["", "watch", "jewellery", "any_other"]}
                 />
-                <InputBlock label="Relationship" fieldName="admission_info.relationship" register={register} />
-                <InputBlock label="Informant Name" fieldName="admission_info.informant_name" register={register} />
+                <InputBlock
+                  label="Relationship"
+                  fieldName="admission_info.relationship"
+                  register={register}
+                />
+                <InputBlock
+                  label="Informant Name"
+                  fieldName="admission_info.informant_name"
+                  register={register}
+                />
               </div>
             </FormSection>
 
@@ -664,12 +730,24 @@ export default function AdmissionAssessmentForm() {
                   options={["", "not_applicable", "yes_due_date", "no"]}
                 />
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Due Date</label>
-                  <Input type="date" {...register("pregnancy_info.due_date")} className="w-full" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Due Date
+                  </label>
+                  <Input
+                    type="date"
+                    {...register("pregnancy_info.due_date")}
+                    className="w-full"
+                  />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">LMP</label>
-                  <Input type="date" {...register("pregnancy_info.lmp")} className="w-full" />
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    LMP
+                  </label>
+                  <Input
+                    type="date"
+                    {...register("pregnancy_info.lmp")}
+                    className="w-full"
+                  />
                 </div>
               </div>
             </FormSection>
@@ -683,10 +761,14 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                 />
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Date of Event</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Date of Event
+                  </label>
                   <Input
                     type="date"
-                    {...register("surgery_history.major_illness_surgery_accidents.date_event")}
+                    {...register(
+                      "surgery_history.major_illness_surgery_accidents.date_event"
+                    )}
                     className="w-full"
                   />
                 </div>
@@ -762,7 +844,15 @@ export default function AdmissionAssessmentForm() {
                   label="LOC"
                   fieldName="neurologic_assessment.loc"
                   register={register}
-                  options={["", "alert_oriented", "drowsy", "sedated", "unresponsive", "disoriented", "other"]}
+                  options={[
+                    "",
+                    "alert_oriented",
+                    "drowsy",
+                    "sedated",
+                    "unresponsive",
+                    "disoriented",
+                    "other",
+                  ]}
                 />
                 <SelectBlock
                   label="Physical Limitation"
@@ -770,15 +860,27 @@ export default function AdmissionAssessmentForm() {
                   register={register}
                   options={["", "no_limitations", "hearing_impairment"]}
                 />
-                <InputBlock label="GCS" fieldName="neurologic_assessment.gsc" register={register} />
+                <InputBlock
+                  label="GCS"
+                  fieldName="neurologic_assessment.gsc"
+                  register={register}
+                />
               </div>
             </FormSection>
 
             {/* ========== Pain Assessment ========== */}
             <FormSection title="Pain Assessment">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <InputBlock label="Pain Score (0-10)" fieldName="pain_assessment.pain_score" register={register} />
-                <InputBlock label="Pain Location" fieldName="pain_assessment.location" register={register} />
+                <InputBlock
+                  label="Pain Score (0-10)"
+                  fieldName="pain_assessment.pain_score"
+                  register={register}
+                />
+                <InputBlock
+                  label="Pain Location"
+                  fieldName="pain_assessment.location"
+                  register={register}
+                />
               </div>
             </FormSection>
 
@@ -786,7 +888,10 @@ export default function AdmissionAssessmentForm() {
             <div className="sticky bottom-0 left-0 right-0 p-4 bg-white border-t flex justify-between items-center mt-8">
               <div>
                 {isDirty && (
-                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                  <Badge
+                    variant="outline"
+                    className="bg-amber-50 text-amber-700 border-amber-200"
+                  >
                     <AlertCircle className="h-3 w-3 mr-1" />
                     Unsaved changes
                   </Badge>
@@ -794,7 +899,9 @@ export default function AdmissionAssessmentForm() {
                 {saveSuccess && (
                   <Alert className="bg-green-50 text-green-700 border-green-200 py-2 px-3">
                     <CheckCircle2 className="h-4 w-4 mr-2" />
-                    <AlertDescription>Assessment saved successfully!</AlertDescription>
+                    <AlertDescription>
+                      Assessment saved successfully!
+                    </AlertDescription>
                   </Alert>
                 )}
               </div>
@@ -818,7 +925,8 @@ export default function AdmissionAssessmentForm() {
           {assessment?.timestamp && (
             <div className="mt-6 text-sm text-gray-500">
               <p>
-                <strong>Last Updated:</strong> {format(new Date(assessment.timestamp), "PPpp")}
+                <strong>Last Updated:</strong>{" "}
+                {format(new Date(assessment.timestamp), "PPpp")}
               </p>
               <p>
                 <strong>Entered By:</strong> {assessment.enteredBy}
@@ -828,10 +936,10 @@ export default function AdmissionAssessmentForm() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
 
-// ========== Reusable Form Components ==========
+// ========== Reusable Form Components ========== //
 
 // Form Section with title
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
@@ -842,7 +950,7 @@ function FormSection({ title, children }: { title: string; children: React.React
       </div>
       <div className="p-4">{children}</div>
     </div>
-  )
+  );
 }
 
 // For <select> with single choice
@@ -852,10 +960,10 @@ function SelectBlock({
   register,
   options,
 }: {
-  label: string
-  fieldName: string
-  register: any
-  options: string[]
+  label: string;
+  fieldName: string;
+  register: any;
+  options: string[];
 }) {
   return (
     <div>
@@ -866,12 +974,16 @@ function SelectBlock({
       >
         {options.map((opt) => (
           <option key={opt} value={opt}>
-            {opt === "" ? "--Select--" : opt.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+            {opt === ""
+              ? "--Select--"
+              : opt
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (l) => l.toUpperCase())}
           </option>
         ))}
       </select>
     </div>
-  )
+  );
 }
 
 // For <input type="text"> fields
@@ -880,9 +992,9 @@ function InputBlock({
   fieldName,
   register,
 }: {
-  label: string
-  fieldName: string
-  register: any
+  label: string;
+  fieldName: string;
+  register: any;
 }) {
   return (
     <div>
@@ -894,7 +1006,7 @@ function InputBlock({
         className="w-full focus:ring-2 focus:ring-primary/20"
       />
     </div>
-  )
+  );
 }
 
 // For multiple checkboxes -> array of strings
@@ -904,10 +1016,10 @@ function CheckboxGroup({
   register,
   options,
 }: {
-  label: string
-  fieldName: string
-  register: any
-  options: { value: string; label: string }[]
+  label: string;
+  fieldName: string;
+  register: any;
+  options: { value: string; label: string }[];
 }) {
   return (
     <div>
@@ -929,7 +1041,7 @@ function CheckboxGroup({
         ))}
       </div>
     </div>
-  )
+  );
 }
 
 // For multiple checkboxes -> array of strings
@@ -939,10 +1051,10 @@ function MultiCheckboxGroup({
   register,
   options,
 }: {
-  label: string
-  fieldName: string
-  register: any
-  options: { value: string; label: string }[]
+  label: string;
+  fieldName: string;
+  register: any;
+  options: { value: string; label: string }[];
 }) {
   return (
     <div>
@@ -964,5 +1076,5 @@ function MultiCheckboxGroup({
         ))}
       </div>
     </div>
-  )
+  );
 }
