@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { db } from "../../../lib/firebase"
-import { ref, onValue } from "firebase/database"
+import { ref, get } from "firebase/database"
+import { format } from "date-fns"
 import {
   Calendar,
   Clock,
@@ -15,13 +16,14 @@ import {
   User,
   Users,
   Stethoscope,
-  Microscope,
-  Scissors,
   ChevronRight,
   MapPin,
-  Loader2,
   Activity,
   Clipboard,
+  ArrowLeft,
+  TrendingUp,
+  Building2,
+  FileCheck,
 } from "lucide-react"
 
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,17 +32,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 
-// Room type mapping for better display
-const roomTypeMap: Record<string, string> = {
-  deluxe: "Deluxe Room",
-  female_ward: "Female Ward",
-  male_ward: "Male Ward",
-  icu: "ICU",
-  nicu: "NICU",
-}
-
-interface IPatientRecord {
+interface IPatientInfo {
   address?: string
   age?: number
   createdAt?: string | number
@@ -48,362 +42,521 @@ interface IPatientRecord {
   name?: string
   phone?: string
   uhid?: string
-  opd?: Record<string, any>
-  ipd?: Record<string, any>
-  pathology?: Record<string, any>
-  surgery?: Record<string, any>
-  ot?: Record<string, any> | any
-  mortality?: Record<string, any>
+  updatedAt?: string | number
+}
+
+interface IOPDRecord {
+  id: string
+  amount?: number
+  appointmentType?: string
+  createdAt?: string
+  date?: string
+  doctor?: string
+  enteredBy?: string
+  message?: string
+  name?: string
+  opdType?: string
+  originalAmount?: number
+  patientId?: string
+  paymentMethod?: string
+  referredBy?: string
+  serviceName?: string
+  time?: string
+  discount?: string
+}
+
+interface IIPDRecord {
+  id: string
+  admissionDate?: string
+  admissionSource?: string
+  admissionTime?: string
+  admissionType?: string
+  bed?: string
+  createdAt?: string
+  doctor?: string
+  name?: string
+  referDoctor?: string
+  relativeAddress?: string
+  relativeName?: string
+  relativePhone?: string
+  roomType?: string
+  services?: any[]
+  status?: string
+  uhid?: string
+  dischargeDate?: string
+  discount?: number
+}
+
+interface IOTRecord {
+  id: string
+  createdAt?: string
+  date?: string
+  message?: string
+  time?: string
+  updatedAt?: string
+}
+
+interface IDoctor {
+  name: string
+  specialist?: string
+  department?: string
+}
+
+const roomTypeMap: Record<string, string> = {
+  deluxe: "Deluxe Room",
+  female: "Female Ward",
+  male: "Male Ward",
+  female_ward: "Female Ward",
+  male_ward: "Male Ward",
+  icu: "ICU",
+  nicu: "NICU",
+  casualty: "Casualty",
+  suit: "Suite",
 }
 
 export default function PatientDetailsPage() {
   const { id } = useParams()
-  const [activeTab, setActiveTab] = useState("ipd")
-  const [patientData, setPatientData] = useState<IPatientRecord | null>(null)
+  const router = useRouter()
+  const [activeTab, setActiveTab] = useState("overview")
+  const [patientInfo, setPatientInfo] = useState<IPatientInfo | null>(null)
+  const [opdRecords, setOpdRecords] = useState<IOPDRecord[]>([])
+  const [ipdRecords, setIpdRecords] = useState<IIPDRecord[]>([])
+  const [otRecords, setOtRecords] = useState<IOTRecord[]>([])
+  const [doctors, setDoctors] = useState<Record<string, IDoctor>>({})
   const [loading, setLoading] = useState(true)
-  const [doctors, setDoctors] = useState<Record<string, string>>({})
+  const [stats, setStats] = useState({
+    totalOPD: 0,
+    totalIPD: 0,
+    totalOT: 0,
+    totalAmount: 0,
+  })
 
-  // Fetch patient data from Firebase
   useEffect(() => {
     if (!id) return
-
-    // Fetch doctors first for name mapping
-    const doctorsRef = ref(db, "doctors")
-    onValue(doctorsRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        const doctorMap: Record<string, string> = {}
-        Object.entries(data).forEach(([key, value]: [string, any]) => {
-          doctorMap[key] = value.name
-        })
-        setDoctors(doctorMap)
-      }
-    })
-
-    // Fetch patient data
-    const patientRef = ref(db, `patients/${id}`)
-    const unsubscribe = onValue(patientRef, (snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        setPatientData({ ...data, uhid: id })
-      } else {
-        setPatientData(null)
-      }
-      setLoading(false)
-    })
-
-    return () => unsubscribe()
+    fetchPatientData()
   }, [id])
 
-  // Format date for display
-  const formatDate = (dateString: string | number) => {
-    if (!dateString) return "N/A"
+  const fetchPatientData = async () => {
+    setLoading(true)
+    try {
+      // Fetch doctors first
+      const doctorsRef = ref(db, "doctors")
+      const doctorsSnap = await get(doctorsRef)
+      const doctorsData: Record<string, IDoctor> = {}
+      if (doctorsSnap.exists()) {
+        Object.entries(doctorsSnap.val()).forEach(([key, value]: [string, any]) => {
+          doctorsData[key] = {
+            name: value.name,
+            specialist: value.specialist,
+            department: value.department,
+          }
+        })
+      }
+      setDoctors(doctorsData)
 
-    const date = new Date(dateString)
-    if (isNaN(date.getTime())) return "Invalid Date"
+      // Fetch patient info
+      const patientInfoRef = ref(db, `patients/patientinfo/${id}`)
+      const patientInfoSnap = await get(patientInfoRef)
+      if (patientInfoSnap.exists()) {
+        setPatientInfo(patientInfoSnap.val())
+      }
 
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
+      // Fetch OPD records
+      const opdRef = ref(db, `patients/opddetail/${id}`)
+      const opdSnap = await get(opdRef)
+      const opdData: IOPDRecord[] = []
+      if (opdSnap.exists()) {
+        Object.entries(opdSnap.val()).forEach(([key, value]: [string, any]) => {
+          opdData.push({ id: key, ...value })
+        })
+      }
+      setOpdRecords(opdData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()))
+
+      // Fetch IPD records
+      const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${id}`)
+      const ipdSnap = await get(ipdRef)
+      const ipdData: IIPDRecord[] = []
+      if (ipdSnap.exists()) {
+        Object.entries(ipdSnap.val()).forEach(([key, value]: [string, any]) => {
+          ipdData.push({ id: key, ...value })
+        })
+      }
+      setIpdRecords(ipdData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()))
+
+      // Fetch OT records
+      const otRef = ref(db, `patients/ot/otdetail/${id}`)
+      const otSnap = await get(otRef)
+      const otData: IOTRecord[] = []
+      if (otSnap.exists()) {
+        Object.entries(otSnap.val()).forEach(([key, value]: [string, any]) => {
+          otData.push({ id: key, ...value })
+        })
+      }
+      setOtRecords(otData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()))
+
+      // Calculate stats
+      const totalAmount =
+        opdData.reduce((sum, record) => sum + (record.amount || 0), 0) +
+        ipdData.reduce((sum, record) => {
+          const services = record.services || []
+          return sum + services.reduce((serviceSum: number, service: any) => serviceSum + (service.amount || 0), 0)
+        }, 0)
+
+      setStats({
+        totalOPD: opdData.length,
+        totalIPD: ipdData.length,
+        totalOT: otData.length,
+        totalAmount,
+      })
+    } catch (error) {
+      console.error("Error fetching patient data:", error)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // Get initials for avatar
+  const formatDate = (dateString: string | number | undefined) => {
+    if (!dateString) return "N/A"
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return "Invalid Date"
+    return format(date, "MMM dd, yyyy")
+  }
+
+  const formatDateTime = (dateString: string | number | undefined) => {
+    if (!dateString) return "N/A"
+    const date = new Date(dateString)
+    if (isNaN(date.getTime())) return "Invalid Date"
+    return format(date, "MMM dd, yyyy 'at' hh:mm a")
+  }
+
   const getInitials = (name: string) => {
     return name
       .split(" ")
       .map((part) => part[0])
       .join("")
       .toUpperCase()
+      .slice(0, 2)
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-          <p className="text-muted-foreground">Loading patient data...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+        <div className="container mx-auto px-4 py-8">
+          <div className="space-y-6">
+            <Skeleton className="h-8 w-64" />
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-4">
+                  <Skeleton className="h-20 w-20 rounded-full" />
+                  <div className="space-y-2 flex-1">
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-4 w-64" />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => (
+                <Card key={i}>
+                  <CardContent className="p-6">
+                    <Skeleton className="h-4 w-24 mb-2" />
+                    <Skeleton className="h-8 w-16" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  if (!patientData) {
+  if (!patientInfo) {
     return (
-      <div className="container mx-auto py-12 px-4 text-center">
-        <h1 className="text-2xl font-bold mb-4">Patient Not Found</h1>
-        <p className="text-muted-foreground mb-8">
-          The patient you are looking for does not exist or has been removed.
-        </p>
-        <Link href="/patient-management">
-          <Button>Return to Patient Management</Button>
-        </Link>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-8 text-center">
+            <User className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-slate-900 mb-2">Patient Not Found</h2>
+            <p className="text-slate-600 mb-6">The patient you are looking for does not exist or has been removed.</p>
+            <Button onClick={() => router.push("/patientadmin")} className="w-full">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Patient Management
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
-  // Process IPD records
-  const ipdRecords = patientData.ipd
-    ? Object.entries(patientData.ipd).map(([key, value]) => ({
-        id: key,
-        ...value,
-      }))
-    : []
-
-  // Process OPD records
-  const opdRecords = patientData.opd
-    ? Object.entries(patientData.opd).map(([key, value]) => ({
-        id: key,
-        ...value,
-      }))
-    : []
-
-  // Process Pathology records
-  const pathologyRecords = patientData.pathology
-    ? Object.entries(patientData.pathology).map(([key, value]) => ({
-        id: key,
-        ...value,
-      }))
-    : []
-
-  // Process Surgery records - handle both object and collection
-  let surgeryRecords = []
-  if (patientData.surgery) {
-    if (patientData.surgery.surgeryTitle) {
-      // It's a single object
-      surgeryRecords = [{ id: "single", ...patientData.surgery }]
-    } else {
-      // It's a collection
-      surgeryRecords = Object.entries(patientData.surgery).map(([key, value]) => ({
-        id: key,
-        ...value,
-      }))
-    }
-  }
-  // Process OT records - handle both object and collection
-  let otRecords: { id: string; [key: string]: any }[] = []
-  if (patientData.ot) {
-    if (patientData.ot.date || patientData.ot.createdAt) {
-      // It's a single object
-      otRecords = [{ id: "single", ...patientData.ot }]
-    } else {
-      // It's a collection
-      otRecords = Object.entries(patientData.ot).map(([key, value]) => ({
-        id: key,
-        ...(value as { [key: string]: any }),
-      }))
-    }
-  }
-
   return (
-    <main className="container mx-auto py-6 px-4 md:px-6">
-      {/* Patient Profile Card */}
-      <Card className="mb-8 border-l-4 border-l-emerald-500">
-        <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row gap-6 items-start md:items-center">
-            <Avatar className="h-20 w-20 border-2 border-emerald-100">
-              <AvatarFallback className="bg-emerald-100 text-emerald-700 text-xl font-semibold">
-                {getInitials(patientData.name || "")}
-              </AvatarFallback>
-            </Avatar>
-
-            <div className="flex-1 space-y-1.5">
-              <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
-                <h1 className="text-2xl font-bold">{patientData.name}</h1>
-                <Badge variant="outline" className="w-fit bg-emerald-50 text-emerald-700 border-emerald-200">
-                  ID: {patientData.uhid}
-                </Badge>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-muted-foreground mt-2">
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4" />
-                  <span>
-                    {patientData.gender === "male" ? "Male" : "Female"}, {patientData.age} years
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Phone className="h-4 w-4" />
-                  <span>{patientData.phone}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4" />
-                  <span>{patientData.address}</span>
-                </div>
-              </div>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-8">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/patient-management")}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Patient Details</h1>
+            <p className="text-slate-600">Complete medical record overview</p>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Tabs for different sections */}
-      <Tabs defaultValue="ipd" className="mb-6" onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-5 mb-6">
-          <TabsTrigger value="ipd" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            <span className="hidden sm:inline">IPD Records</span>
-            <span className="sm:hidden">IPD</span>
-          </TabsTrigger>
-          <TabsTrigger value="opd" className="flex items-center gap-2">
-            <Stethoscope className="h-4 w-4" />
-            <span className="hidden sm:inline">OPD Records</span>
-            <span className="sm:hidden">OPD</span>
-          </TabsTrigger>
-          <TabsTrigger value="pathology" className="flex items-center gap-2">
-            <Microscope className="h-4 w-4" />
-            <span className="hidden sm:inline">Pathology</span>
-            <span className="sm:hidden">Path</span>
-          </TabsTrigger>
-          <TabsTrigger value="surgery" className="flex items-center gap-2">
-            <Scissors className="h-4 w-4" />
-            <span className="hidden sm:inline">Surgery</span>
-            <span className="sm:hidden">Surg</span>
-          </TabsTrigger>
-          <TabsTrigger value="ot" className="flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            <span className="hidden sm:inline">OT Records</span>
-            <span className="sm:hidden">OT</span>
-          </TabsTrigger>
-        </TabsList>
+        {/* Patient Profile Card */}
+        <Card className="mb-8 border-l-4 border-l-emerald-500 shadow-lg">
+          <CardContent className="p-8">
+            <div className="flex flex-col lg:flex-row gap-8 items-start lg:items-center">
+              <Avatar className="h-24 w-24 border-4 border-emerald-100 shadow-lg">
+                <AvatarFallback className="bg-emerald-100 text-emerald-700 text-2xl font-bold">
+                  {getInitials(patientInfo.name || "")}
+                </AvatarFallback>
+              </Avatar>
 
-        {/* IPD Records Tab */}
-        <TabsContent value="ipd" className="space-y-6">
-          {ipdRecords.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No IPD records found for this patient.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {ipdRecords.map((record) => (
-                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <CardHeader className="bg-slate-50 pb-3">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">
-                        {roomTypeMap[record.roomType] || record.roomType}
-                      </CardTitle>
-                      <Badge
-                        variant={record.roomType === "icu" || record.roomType === "nicu" ? "destructive" : "secondary"}
-                      >
-                        {record.roomType.toUpperCase()}
-                      </Badge>
+              <div className="flex-1 space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+                  <h2 className="text-3xl font-bold text-slate-900">{patientInfo.name}</h2>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 px-3 py-1">
+                      ID: {patientInfo.uhid}
+                    </Badge>
+                    <Badge
+                      variant="secondary"
+                      className={`px-3 py-1 ${
+                        patientInfo.gender === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"
+                      }`}
+                    >
+                      {patientInfo.gender === "male" ? "Male" : "Female"}, {patientInfo.age} years
+                    </Badge>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-slate-600">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <Phone className="h-4 w-4 text-blue-600" />
                     </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>Admitted: {formatDate(record.date)}</span>
-                    </CardDescription>
-                  </CardHeader>
+                    <div>
+                      <p className="text-sm text-slate-500">Phone</p>
+                      <p className="font-medium">{patientInfo.phone}</p>
+                    </div>
+                  </div>
 
-                  <CardContent className="pt-4">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <MapPin className="h-4 w-4 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Address</p>
+                      <p className="font-medium">{patientInfo.address || "Not provided"}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Calendar className="h-4 w-4 text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Registered</p>
+                      <p className="font-medium">{formatDate(patientInfo.createdAt)}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <Card className="border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total OPD</p>
+                  <p className="text-3xl font-bold text-blue-600">{stats.totalOPD}</p>
+                </div>
+                <div className="p-3 bg-blue-100 rounded-full">
+                  <Stethoscope className="h-6 w-6 text-blue-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-emerald-500 shadow-md hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total IPD</p>
+                  <p className="text-3xl font-bold text-emerald-600">{stats.totalIPD}</p>
+                </div>
+                <div className="p-3 bg-emerald-100 rounded-full">
+                  <Building2 className="h-6 w-6 text-emerald-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-orange-500 shadow-md hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total OT</p>
+                  <p className="text-3xl font-bold text-orange-600">{stats.totalOT}</p>
+                </div>
+                <div className="p-3 bg-orange-100 rounded-full">
+                  <Activity className="h-6 w-6 text-orange-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-l-4 border-l-purple-500 shadow-md hover:shadow-lg transition-shadow">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-slate-600">Total Amount</p>
+                  <p className="text-3xl font-bold text-purple-600">₹{stats.totalAmount.toLocaleString()}</p>
+                </div>
+                <div className="p-3 bg-purple-100 rounded-full">
+                  <TrendingUp className="h-6 w-6 text-purple-600" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tabs */}
+        <Tabs defaultValue="overview" className="space-y-6" onValueChange={setActiveTab}>
+          <TabsList className="grid grid-cols-4 w-full max-w-2xl mx-auto">
+            <TabsTrigger value="overview" className="flex items-center gap-2">
+              <Clipboard className="h-4 w-4" />
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="opd" className="flex items-center gap-2">
+              <Stethoscope className="h-4 w-4" />
+              OPD ({stats.totalOPD})
+            </TabsTrigger>
+            <TabsTrigger value="ipd" className="flex items-center gap-2">
+              <Building2 className="h-4 w-4" />
+              IPD ({stats.totalIPD})
+            </TabsTrigger>
+            <TabsTrigger value="ot" className="flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              OT ({stats.totalOT})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Recent OPD */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Stethoscope className="h-5 w-5 text-blue-600" />
+                    Recent OPD Visits
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {opdRecords.slice(0, 3).length === 0 ? (
+                    <p className="text-slate-500 text-center py-4">No OPD records found</p>
+                  ) : (
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          Doctor:{" "}
-                          <span className="font-medium">
-                            {doctors[record.doctor] || record.doctorName || "Not assigned"}
-                          </span>
-                        </span>
-                      </div>
-
-                      {record.referDoctor && (
-                        <div className="flex items-center gap-2">
-                          <Stethoscope className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">
-                            Referred by: <span className="font-medium">{record.referDoctor}</span>
-                          </span>
+                      {opdRecords.slice(0, 3).map((record) => (
+                        <div key={record.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div>
+                            <p className="font-medium">{record.serviceName}</p>
+                            <p className="text-sm text-slate-600">{formatDate(record.date)}</p>
+                          </div>
+                          <Badge variant="outline">₹{record.amount}</Badge>
                         </div>
-                      )}
-
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          Relative: <span className="font-medium">{record.relativeName}</span>
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          Contact: <span className="font-medium">{record.relativePhone}</span>
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          Time: <span className="font-medium">{record.time}</span>
-                        </span>
-                      </div>
+                      ))}
                     </div>
-                  </CardContent>
+                  )}
+                </CardContent>
+              </Card>
 
-                  <Separator />
-
-                  <CardFooter className="flex justify-between py-3 bg-slate-50">
-                    <Link href={`/manage/${patientData.uhid}/${record.id}`} passHref>
-                      <Button variant="outline" size="sm" className="text-xs">
-                        Manage
-                      </Button>
-                    </Link>
-                    <Link href={`/drugchart/${patientData.uhid}/${record.id}`} passHref>
-                      <Button variant="outline" size="sm" className="text-xs">
-                        <Pills className="h-3.5 w-3.5 mr-1" />
-                        Drugs
-                      </Button>
-                    </Link>
-                    <Link href={`/billing/${patientData.uhid}/${record.id}`} passHref>
-                      <Button variant="outline" size="sm" className="text-xs">
-                        <CreditCard className="h-3.5 w-3.5 mr-1" />
-                        Billing
-                      </Button>
-                    </Link>
-                  </CardFooter>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* OPD Records Tab */}
-        <TabsContent value="opd" className="space-y-6">
-          {opdRecords.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No OPD records found for this patient.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {opdRecords.map((record) => (
-                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <CardHeader className="bg-blue-50 pb-3">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">{record.serviceName || "OPD Visit"}</CardTitle>
-                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-                        ₹{record.amount || 0}
-                      </Badge>
-                    </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>
-                        {formatDate(record.date)}, {record.time}
-                      </span>
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="pt-4">
+              {/* Recent IPD */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Building2 className="h-5 w-5 text-emerald-600" />
+                    Recent IPD Admissions
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {ipdRecords.slice(0, 3).length === 0 ? (
+                    <p className="text-slate-500 text-center py-4">No IPD records found</p>
+                  ) : (
                     <div className="space-y-3">
+                      {ipdRecords.slice(0, 3).map((record) => (
+                        <div key={record.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div>
+                            <p className="font-medium">{roomTypeMap[record.roomType || ""] || record.roomType}</p>
+                            <p className="text-sm text-slate-600">{formatDate(record.admissionDate)}</p>
+                          </div>
+                          <Badge variant={record.status === "active" ? "default" : "secondary"}>
+                            {record.status || "Active"}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* OPD Records Tab - No buttons, full details only */}
+          <TabsContent value="opd" className="space-y-6">
+            {opdRecords.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Stethoscope className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No OPD Records</h3>
+                  <p className="text-slate-500">This patient has no OPD visit records.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {opdRecords.map((record) => (
+                  <Card key={record.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-blue-500">
+                    <CardHeader className="pb-3">
+                      <div className="flex justify-between items-start">
+                        <CardTitle className="text-lg font-semibold text-slate-900">
+                          {record.serviceName || "OPD Visit"}
+                        </CardTitle>
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                          ₹{record.amount || 0}
+                        </Badge>
+                      </div>
+                      <CardDescription className="flex items-center gap-2">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>
+                          {formatDate(record.date)} at {record.time}
+                        </span>
+                      </CardDescription>
+                    </CardHeader>
+
+                    <CardContent className="space-y-3">
                       <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-muted-foreground" />
+                        <User className="h-4 w-4 text-slate-500" />
                         <span className="text-sm">
                           Doctor:{" "}
-                          <span className="font-medium">
-                            {doctors[record.doctor] || record.doctorName || "Not assigned"}
-                          </span>
+                          <span className="font-medium">{doctors[record.doctor || ""]?.name || "Not assigned"}</span>
                         </span>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <CreditCard className="h-4 w-4 text-muted-foreground" />
+                        <CreditCard className="h-4 w-4 text-slate-500" />
                         <span className="text-sm">
                           Payment: <span className="font-medium capitalize">{record.paymentMethod || "Cash"}</span>
                         </span>
@@ -411,7 +564,7 @@ export default function PatientDetailsPage() {
 
                       {record.appointmentType && (
                         <div className="flex items-center gap-2">
-                          <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                          <Clipboard className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
                             Type: <span className="font-medium capitalize">{record.appointmentType}</span>
                           </span>
@@ -420,7 +573,7 @@ export default function PatientDetailsPage() {
 
                       {record.referredBy && (
                         <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
+                          <Users className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
                             Referred by: <span className="font-medium">{record.referredBy}</span>
                           </span>
@@ -428,234 +581,242 @@ export default function PatientDetailsPage() {
                       )}
 
                       {record.message && (
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
+                        <div className="flex items-start gap-2">
+                          <FileText className="h-4 w-4 text-slate-500 mt-0.5" />
                           <span className="text-sm">
                             Note: <span className="font-medium">{record.message}</span>
                           </span>
                         </div>
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
 
-        {/* Pathology Tab */}
-        <TabsContent value="pathology" className="space-y-6">
-          {pathologyRecords.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No pathology records found for this patient.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {pathologyRecords.map((record) => (
-                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <CardHeader className="bg-purple-50 pb-3">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">{record.bloodTestName}</CardTitle>
-                      <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">
-                        ₹{record.amount || 0}
-                      </Badge>
-                    </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>
-                        {record.timestamp
-                          ? formatDate(record.timestamp)
-                          : record.createdAt
-                            ? formatDate(record.createdAt)
-                            : "N/A"}
-                      </span>
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="pt-4">
-                    <div className="space-y-3">
-                      {record.referBy && (
+                      {record.enteredBy && (
                         <div className="flex items-center gap-2">
-                          <User className="h-4 w-4 text-muted-foreground" />
+                          <User className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
-                            Referred by: <span className="font-medium">{record.referBy}</span>
+                            Entered by: <span className="font-medium">{record.enteredBy}</span>
                           </span>
                         </div>
                       )}
 
-                      {record.paymentMethod && (
+                      {record.discount && (
                         <div className="flex items-center gap-2">
-                          <CreditCard className="h-4 w-4 text-muted-foreground" />
+                          <CreditCard className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
-                            Payment: <span className="font-medium capitalize">{record.paymentMethod}</span>
+                            Discount: <span className="font-medium">{record.discount}%</span>
                           </span>
                         </div>
                       )}
 
-                      {record.paymentId && (
+                      {record.originalAmount && record.originalAmount !== record.amount && (
                         <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
+                          <CreditCard className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
-                            Payment ID: <span className="font-medium">{record.paymentId}</span>
+                            Original Amount: <span className="font-medium">₹{record.originalAmount}</span>
                           </span>
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
 
-                      {record.ipdId && (
-                        <div className="flex items-center gap-2">
-                          <Clipboard className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">
-                            IPD ID: <span className="font-medium">{record.ipdId}</span>
-                          </span>
-                        </div>
-                      )}
-
-                      <div className="flex justify-end">
-                        <Button variant="outline" size="sm" className="text-xs">
-                          View Report
-                          <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                        </Button>
+          {/* IPD Records Tab - With navigation buttons */}
+          <TabsContent value="ipd" className="space-y-6">
+            {ipdRecords.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Building2 className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No IPD Records</h3>
+                  <p className="text-slate-500">This patient has no IPD admission records.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {ipdRecords.map((record) => (
+                  <Card key={record.id} className="hover:shadow-lg transition-shadow border-l-4 border-l-emerald-500">
+                    <CardHeader className="pb-3">
+                      <div className="flex justify-between items-start">
+                        <CardTitle className="text-lg font-semibold text-slate-900">
+                          {roomTypeMap[record.roomType || ""] || record.roomType}
+                        </CardTitle>
+                        <Badge
+                          variant={
+                            record.roomType === "icu" || record.roomType === "nicu" ? "destructive" : "secondary"
+                          }
+                        >
+                          {(record.roomType || "").toUpperCase()}
+                        </Badge>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
+                      <CardDescription className="flex items-center gap-2">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>Admitted: {formatDate(record.admissionDate)}</span>
+                      </CardDescription>
+                    </CardHeader>
 
-        {/* Surgery Tab */}
-        <TabsContent value="surgery" className="space-y-6">
-          {surgeryRecords.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No surgery records found for this patient.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {surgeryRecords.map((record) => (
-                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <CardHeader className="bg-amber-50 pb-3">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">{record.surgeryTitle || "Surgery"}</CardTitle>
-                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
-                        Surgery
-                      </Badge>
-                    </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>
-                        {record.surgeryDate
-                          ? record.surgeryDate
-                          : record.updatedAt
-                            ? formatDate(record.updatedAt)
-                            : "N/A"}
-                      </span>
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="pt-4">
-                    <div className="space-y-3">
-                      <div className="flex items-start gap-2">
-                        <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <CardContent className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-slate-500" />
                         <span className="text-sm">
-                          Diagnosis: <span className="font-medium">{record.finalDiagnosis || "Not specified"}</span>
+                          Doctor:{" "}
+                          <span className="font-medium">{doctors[record.doctor || ""]?.name || "Not assigned"}</span>
                         </span>
                       </div>
 
-                      {record.ipdId && (
+                      {record.referDoctor && (
                         <div className="flex items-center gap-2">
-                          <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          <Stethoscope className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
-                            IPD ID: <span className="font-medium">{record.ipdId}</span>
+                            Referred by: <span className="font-medium">{record.referDoctor}</span>
                           </span>
                         </div>
                       )}
 
-                      <div className="flex justify-end">
-                        <Button variant="outline" size="sm" className="text-xs">
-                          View Details
-                          <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                        </Button>
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-slate-500" />
+                        <span className="text-sm">
+                          Relative: <span className="font-medium">{record.relativeName}</span>
+                        </span>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
 
-        {/* OT Tab */}
-        <TabsContent value="ot" className="space-y-6">
-          {otRecords.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">No OT records found for this patient.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {otRecords.map((record) => (
-                <Card key={record.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                  <CardHeader className="bg-pink-50 pb-3">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-lg font-semibold">OT Procedure</CardTitle>
-                      <Badge variant="outline" className="bg-pink-50 text-pink-700 border-pink-200">
-                        OT
-                      </Badge>
-                    </div>
-                    <CardDescription className="flex items-center gap-2 mt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>{record.date ? record.date : record.createdAt ? formatDate(record.createdAt) : "N/A"}</span>
-                      {record.time && (
-                        <>
-                          <Clock className="h-3.5 w-3.5 ml-2" />
-                          <span>{record.time}</span>
-                        </>
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-slate-500" />
+                        <span className="text-sm">
+                          Contact: <span className="font-medium">{record.relativePhone}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-slate-500" />
+                        <span className="text-sm">
+                          Time: <span className="font-medium">{record.admissionTime}</span>
+                        </span>
+                      </div>
+
+                      {record.dischargeDate && (
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4 text-slate-500" />
+                          <span className="text-sm">
+                            Discharged: <span className="font-medium">{formatDate(record.dischargeDate)}</span>
+                          </span>
+                        </div>
                       )}
-                    </CardDescription>
-                  </CardHeader>
+                    </CardContent>
 
-                  <CardContent className="pt-4">
-                    <div className="space-y-3">
+                    <Separator />
+
+                    <CardFooter className="flex flex-wrap gap-2 py-3">
+                      <Link href={`/manage/${id}/${record.id}`}>
+                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                          <Clipboard className="h-3.5 w-3.5" />
+                          Manage
+                        </Button>
+                      </Link>
+                      <Link href={`/drugchart/${id}/${record.id}`}>
+                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                          <Pills className="h-3.5 w-3.5" />
+                          Drugs
+                        </Button>
+                      </Link>
+                      <Link href={`/billing/${id}/${record.id}`}>
+                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                          <CreditCard className="h-3.5 w-3.5" />
+                          Billing
+                        </Button>
+                      </Link>
+                      <Link href={`/discharge-summary/${id}/${record.id}`}>
+                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                          <FileCheck className="h-3.5 w-3.5" />
+                          Discharge
+                        </Button>
+                      </Link>
+                    </CardFooter>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* OT Records Tab - With navigation to OT page */}
+          <TabsContent value="ot" className="space-y-6">
+            {otRecords.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Activity className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-slate-900 mb-2">No OT Records</h3>
+                  <p className="text-slate-500">This patient has no OT procedure records.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {otRecords.map((record) => (
+                  <Card
+                    key={record.id}
+                    className="hover:shadow-lg transition-shadow border-l-4 border-l-orange-500 cursor-pointer"
+                    onClick={() => router.push(`/ot/${id}/${record.id}`)}
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex justify-between items-start">
+                        <CardTitle className="text-lg font-semibold text-slate-900">OT Procedure</CardTitle>
+                        <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                          OT
+                        </Badge>
+                      </div>
+                      <CardDescription className="flex items-center gap-2">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>{formatDate(record.date)}</span>
+                        {record.time && (
+                          <>
+                            <Clock className="h-3.5 w-3.5 ml-2" />
+                            <span>{record.time}</span>
+                          </>
+                        )}
+                      </CardDescription>
+                    </CardHeader>
+
+                    <CardContent className="space-y-3">
                       {record.message && (
                         <div className="flex items-start gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                          <FileText className="h-4 w-4 text-slate-500 mt-0.5" />
                           <span className="text-sm">
                             Notes: <span className="font-medium">{record.message}</span>
                           </span>
                         </div>
                       )}
 
-                      {record.ipdId && (
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-4 w-4 text-slate-500" />
+                        <span className="text-sm">
+                          Created: <span className="font-medium">{formatDateTime(record.createdAt)}</span>
+                        </span>
+                      </div>
+
+                      {record.updatedAt && record.updatedAt !== record.createdAt && (
                         <div className="flex items-center gap-2">
-                          <Clipboard className="h-4 w-4 text-muted-foreground" />
+                          <Clock className="h-4 w-4 text-slate-500" />
                           <span className="text-sm">
-                            IPD ID: <span className="font-medium">{record.ipdId}</span>
+                            Updated: <span className="font-medium">{formatDateTime(record.updatedAt)}</span>
                           </span>
                         </div>
                       )}
+                    </CardContent>
 
-                      <div className="flex justify-end">
-                        <Link href={`/ot/${patientData.uhid}/${record.ipdId || record.id}`} passHref>
-                          <Button variant="outline" size="sm" className="text-xs">
-                            View Details
-                            <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                          </Button>
-                        </Link>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+                    <Separator />
 
-      <div className="mt-8 flex justify-center">
-        <Link href="/patient-management">
-          <Button variant="outline">Back to Patient Management</Button>
-        </Link>
+                    <CardFooter className="flex justify-end py-3">
+                      <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        View Details
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
-    </main>
+    </div>
   )
 }

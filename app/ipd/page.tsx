@@ -504,7 +504,7 @@ const IPDBookingPage: React.FC = () => {
       const ipdData = {
         // Patient reference only
         uhid: patientId,
-
+        name: data.name,
         // Relative information
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,

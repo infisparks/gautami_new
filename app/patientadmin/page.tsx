@@ -1,40 +1,23 @@
 "use client"
 
-import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { db } from "../../lib/firebase"
-import { ref, onValue } from "firebase/database"
-import Head from "next/head"
+import { ref, get, query, orderByChild, limitToLast, endAt, startAt, onChildAdded, onChildRemoved, onChildChanged } from "firebase/database"
 import { format } from "date-fns"
-import { Search, Download, FileText, Calendar, User, Activity, Users } from "lucide-react"
-import { ToastContainer, toast } from "react-toastify"
-import "react-toastify/dist/ReactToastify.css"
+import { Search, User, Users, Download, Plus, Filter, Calendar, Phone, MapPin } from 'lucide-react'
+import { toast } from "sonner"
 import * as XLSX from "xlsx"
-import jsPDF from "jspdf"
-import "jspdf-autotable"
 
-// ─────────────────── Interfaces ───────────────────
-interface IDoctorEntry {
-  department: string
-  id: string
-  ipdCharges?: Record<string, number>
-  name: string
-  opdCharge?: number
-  specialist?: string
-}
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-export interface IAppointment {
-  id: string
-  name: string
-  phone: string
-  type: "OPD" | "IPD" | "Pathology" | "Surgery" | "Mortality"
-  date: string
-  doctor: string
-  uhid: string
-}
-
-interface IPatientRecord {
+interface IPatientInfo {
   address?: string
   age?: string | number
   createdAt?: string | number
@@ -42,508 +25,447 @@ interface IPatientRecord {
   name?: string
   phone?: string
   uhid?: string
-  opd?: Record<string, any>
-  ipd?: Record<string, any>
-  pathology?: Record<string, any>
-  surgery?: Record<string, any>
-  mortality?: Record<string, any>
+  updatedAt?: string | number
 }
 
-// ─────────────────── Component ───────────────────
+interface IPatientRecord {
+  uhid: string
+  name: string
+  phone: string
+  createdAt: string
+  address?: string
+  age?: string | number
+  gender?: string
+  updatedAt?: string | number
+}
+
 const PatientManagement: React.FC = () => {
   const router = useRouter()
 
-  // ---------- State ----------
-  const [doctors, setDoctors] = useState<IDoctorEntry[]>([])
-  const [appointments, setAppointments] = useState<IAppointment[]>([])
-  const [filteredAppointments, setFilteredAppointments] = useState<IAppointment[]>([])
+  // State
+  const [patients, setPatients] = useState<IPatientRecord[]>([])
+  const [filteredPatients, setFilteredPatients] = useState<IPatientRecord[]>([])
   const [loading, setLoading] = useState<boolean>(true)
-
-  // Filters
+  const [lastCreatedAt, setLastCreatedAt] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState<boolean>(true)
   const [searchQuery, setSearchQuery] = useState<string>("")
-  const [selectedType, setSelectedType] = useState<string>("all")
-  const todayISO = format(new Date(), "yyyy-MM-dd")
-  const [startDate, setStartDate] = useState<string>(todayISO)
-  const [endDate, setEndDate] = useState<string>(todayISO)
+  const [genderFilter, setGenderFilter] = useState<string>("all")
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false)
 
-  // Raw data
-  const [rawPatients, setRawPatients] = useState<{ [uhid: string]: IPatientRecord }>({})
-  const doctorMap = useRef<{ [doctorId: string]: string }>({})
+  const patientMap = useRef<Record<string, boolean>>({})
+  const PAGE_SIZE = 20
+  const STORAGE_KEY = "cachedPatients"
 
-  // ---------- Fetch doctors ----------
+  // Load from sessionStorage
   useEffect(() => {
-    const doctorsRef = ref(db, "doctors")
-    const unsub = onValue(doctorsRef, (snap) => {
-      const val = snap.val()
-      if (val) {
-        const docs: IDoctorEntry[] = Object.entries(val).map(([id, v]: any) => ({ ...v, id }))
-        setDoctors(docs)
-        console.log("Doctors loaded:", docs)
-      } else {
-        setDoctors([])
+    const cached = sessionStorage.getItem(STORAGE_KEY)
+    if (cached) {
+      try {
+        const parsed: IPatientRecord[] = JSON.parse(cached)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPatients(parsed)
+          setFilteredPatients(parsed)
+          const last = parsed[parsed.length - 1].createdAt
+          setLastCreatedAt(last as string)
+          setHasMore(parsed.length >= PAGE_SIZE)
+          patientMap.current = parsed.reduce((acc, p) => ({ ...acc, [p.uhid!]: true }), {} as Record<string, boolean>)
+          setLoading(false)
+          return
+        }
+      } catch {
+        // ignore parse errors
       }
-    })
-    return () => unsub()
+    }
+    fetchInitialPatients()
   }, [])
 
-  useEffect(() => {
-    doctorMap.current = doctors.reduce((acc, d) => ({ ...acc, [d.id]: d.name }), {} as Record<string, string>)
-  }, [doctors])
-
-  // ---------- Fetch patients ----------
-  useEffect(() => {
-    const patRef = ref(db, "patients")
-    const unsub = onValue(
-      patRef,
-      (snap) => {
-        const val = snap.val()
-        const list: IAppointment[] = []
-        const raw: { [uhid: string]: IPatientRecord } = {}
-
-        console.log("Raw patient data:", val)
-
-        if (val) {
-          Object.entries(val).forEach(([uhid, pdataRaw]) => {
-            const pdata = pdataRaw as IPatientRecord
-            raw[uhid] = pdata
-            const name = pdata.name || "Unknown"
-            const phone = pdata.phone || ""
-
-            // Helper function to create appointment entries
-            const pushItem = (key: string, type: IAppointment["type"], appointmentData: any) => {
-              let date = new Date().toISOString()
-
-              // Handle different date formats
-              if (appointmentData.date) {
-                try {
-                  date = new Date(appointmentData.date).toISOString()
-                } catch (e) {
-                  console.warn("Invalid date format:", appointmentData.date)
-                }
-              } else if (appointmentData.createdAt) {
-                try {
-                  if (typeof appointmentData.createdAt === "number") {
-                    date = new Date(appointmentData.createdAt).toISOString()
-                  } else {
-                    date = new Date(appointmentData.createdAt).toISOString()
-                  }
-                } catch (e) {
-                  console.warn("Invalid createdAt format:", appointmentData.createdAt)
-                }
-              }
-
-              list.push({
-                id: `${uhid}_${key}`,
-                name,
-                phone,
-                type,
-                date,
-                doctor: appointmentData.doctor || "",
-                uhid,
-              })
-            }
-
-            // Process OPD appointments
-            if (pdata.opd) {
-              Object.entries(pdata.opd).forEach(([k, v]: any) => {
-                pushItem(k, "OPD", v)
-              })
-            }
-
-            // Process IPD appointments
-            if (pdata.ipd) {
-              Object.entries(pdata.ipd).forEach(([k, v]: any) => {
-                pushItem(k, "IPD", v)
-              })
-            }
-
-            // Process Pathology
-            if (pdata.pathology) {
-              Object.entries(pdata.pathology).forEach(([k, v]: any) => {
-                pushItem(k, "Pathology", v)
-              })
-            }
-
-            // Process Surgery
-            if (pdata.surgery) {
-              Object.entries(pdata.surgery).forEach(([k, v]: any) => {
-                pushItem(k, "Surgery", v)
-              })
-            }
-
-            // Process Mortality
-            if (pdata.mortality) {
-              Object.entries(pdata.mortality).forEach(([k, v]: any) => {
-                pushItem(k, "Mortality", v)
-              })
-            }
+  // Fetch Initial Patients
+  const fetchInitialPatients = useCallback(async () => {
+    setLoading(true)
+    try {
+      const patientsRef = ref(db, "patients/patientinfo")
+      const q = query(patientsRef, orderByChild("createdAt"), limitToLast(PAGE_SIZE))
+      const snap = await get(q)
+      const temp: IPatientRecord[] = []
+      
+      snap.forEach((child) => {
+        const val = child.val() as IPatientInfo
+        if (val.uhid && val.createdAt) {
+          temp.push({
+            uhid: val.uhid,
+            name: val.name || "Unknown",
+            phone: val.phone || "",
+            address: val.address,
+            age: val.age,
+            gender: val.gender,
+            createdAt: val.createdAt as string,
+            updatedAt: val.updatedAt,
           })
         }
+      })
+      
+      temp.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-        console.log("Processed appointments:", list)
-        setRawPatients(raw)
-        setAppointments(list)
-        setFilteredAppointments(list)
-        setLoading(false)
-      },
-      (error) => {
-        console.error("Firebase error:", error)
-        setLoading(false)
-        toast.error("Failed to load patient data")
-      },
-    )
-    return () => unsub()
+      const map: Record<string, boolean> = {}
+      temp.forEach((p) => {
+        map[p.uhid] = true
+      })
+      patientMap.current = map
+
+      setPatients(temp)
+      setFilteredPatients(temp)
+      if (temp.length < PAGE_SIZE) {
+        setHasMore(false)
+      }
+      if (temp.length > 0) {
+        setLastCreatedAt(temp[temp.length - 1].createdAt)
+      }
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(temp))
+    } catch (error) {
+      console.error("Error fetching initial patients:", error)
+      toast.error("Failed to load patients")
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
-  // ---------- Filters ----------
-  useEffect(() => {
-    let tmp = [...appointments]
-
-    // Filter by type
-    if (selectedType !== "all") {
-      tmp = tmp.filter((a) => a.type.toLowerCase() === selectedType.toLowerCase())
-    }
-
-    // Filter by date range
+  // Load More Patients
+  const loadMore = async () => {
+    if (!lastCreatedAt) return
+    setLoading(true)
     try {
-      const startDateTime = new Date(startDate + "T00:00:00")
-      const endDateTime = new Date(endDate + "T23:59:59")
-
-      tmp = tmp.filter((a) => {
-        const appointmentDate = new Date(a.date)
-        return appointmentDate >= startDateTime && appointmentDate <= endDateTime
+      const patientsRef = ref(db, "patients/patientinfo")
+      const q = query(
+        patientsRef,
+        orderByChild("createdAt"),
+        endAt(lastCreatedAt),
+        limitToLast(PAGE_SIZE + 1)
+      )
+      const snap = await get(q)
+      const temp: IPatientRecord[] = []
+      
+      snap.forEach((child) => {
+        const val = child.val() as IPatientInfo
+        if (val.uhid && val.createdAt) {
+          temp.push({
+            uhid: val.uhid,
+            name: val.name || "Unknown",
+            phone: val.phone || "",
+            address: val.address,
+            age: val.age,
+            gender: val.gender,
+            createdAt: val.createdAt as string,
+            updatedAt: val.updatedAt,
+          })
+        }
       })
-    } catch (e) {
-      console.warn("Date filter error:", e)
-    }
+      
+      temp.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      tmp = tmp.filter(
-        (a) => a.name.toLowerCase().includes(q) || a.phone.includes(q) || a.uhid.toLowerCase().includes(q),
+      const filtered: IPatientRecord[] = []
+      for (const p of temp) {
+        if (!patientMap.current[p.uhid!]) {
+          filtered.push(p)
+        }
+      }
+
+      if (filtered.length === 0) {
+        setHasMore(false)
+      } else {
+        const newPatients = [...patients, ...filtered]
+        setPatients(newPatients)
+        applyFilters(newPatients, searchQuery, genderFilter)
+        filtered.forEach((p) => {
+          patientMap.current[p.uhid!] = true
+        })
+        const last = filtered[filtered.length - 1].createdAt
+        setLastCreatedAt(last)
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newPatients))
+        if (filtered.length < PAGE_SIZE) {
+          setHasMore(false)
+        }
+      }
+    } catch (error) {
+      console.error("Error loading more patients:", error)
+      toast.error("Failed to load more patients")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Apply Filters
+  const applyFilters = (patientList: IPatientRecord[], search: string, gender: string) => {
+    let filtered = [...patientList]
+
+    if (search.trim()) {
+      const searchLower = search.toLowerCase()
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(searchLower) ||
+          p.phone.includes(search) ||
+          p.uhid.toLowerCase().includes(searchLower)
       )
     }
 
-    // Sort by date (latest first)
-    tmp.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    if (gender !== "all") {
+      filtered = filtered.filter((p) => p.gender === gender)
+    }
 
-    setFilteredAppointments(tmp)
-  }, [appointments, selectedType, startDate, endDate, searchQuery])
-
-  // ---------- Handlers ----------
-  const handleRowClick = (a: IAppointment) => {
-    router.push(`/allusermanage/${a.uhid}`)
+    setFilteredPatients(filtered)
   }
 
-  const handleToday = () => {
-    const today = format(new Date(), "yyyy-MM-dd")
-    setStartDate(today)
-    setEndDate(today)
+  // Handle Search
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const q = e.target.value
+    setSearchQuery(q)
+    applyFilters(patients, q, genderFilter)
   }
 
-  // ---------- Export ----------
+  // Handle Gender Filter
+  const handleGenderFilter = (value: string) => {
+    setGenderFilter(value)
+    applyFilters(patients, searchQuery, value)
+  }
+
+  // Export Excel
   const exportExcel = () => {
-    const data = filteredAppointments.map((i) => ({
-      "Patient Name": i.name,
-      Phone: i.phone,
-      UHID: i.uhid,
-      Type: i.type,
-      Date: format(new Date(i.date), "PPP"),
-      Doctor: doctorMap.current[i.doctor] || "N/A",
+    const data = filteredPatients.map((p) => ({
+      Name: p.name,
+      Phone: p.phone,
+      UHID: p.uhid,
+      Age: p.age || "",
+      Gender: p.gender || "",
+      Address: p.address || "",
+      CreatedAt: format(new Date(p.createdAt), "PPP"),
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, "Patients")
-    XLSX.writeFile(wb, `Patient_Management_${format(new Date(), "yyyyMMdd")}.xlsx`)
-    toast.success("Excel file downloaded successfully!")
+    XLSX.writeFile(wb, `Patients_${format(new Date(), "yyyyMMdd_HHmmss")}.xlsx`)
+    toast.success("Excel downloaded successfully")
   }
 
-  const exportPdf = () => {
-    const doc = new jsPDF()
-    doc.setFontSize(18)
-    doc.text("Patient Management Report", 14, 22)
-    doc.setFontSize(11)
-    doc.text(`Generated on: ${format(new Date(), "PPP")}`, 14, 32)
-
-    const cols = ["Name", "Phone", "UHID", "Type", "Date", "Doctor"]
-    const rows = filteredAppointments.map((i) => [
-      i.name,
-      i.phone,
-      i.uhid,
-      i.type,
-      format(new Date(i.date), "PPP"),
-      doctorMap.current[i.doctor] || "N/A",
-    ])
-    ;(doc as any).autoTable({
-      head: [cols],
-      body: rows,
-      startY: 40,
-      headStyles: { fillColor: [22, 160, 133] },
-      alternateRowStyles: { fillColor: [242, 242, 242] },
-      styles: { fontSize: 8 },
-    })
-
-    doc.save(`Patient_Management_${format(new Date(), "yyyyMMdd_HHmmss")}.pdf`)
-    toast.success("PDF file downloaded successfully!")
+  // Get Initials
+  const getInitials = (name: string) => {
+    return name
+      .split(" ")
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
   }
 
-  // ---------- Stats ----------
-  const total = appointments.length
-  const opd = appointments.filter((p) => p.type === "OPD").length
-  const ipd = appointments.filter((p) => p.type === "IPD").length
-  const pathology = appointments.filter((p) => p.type === "Pathology").length
-  const surgery = appointments.filter((p) => p.type === "Surgery").length
-  const mortality = appointments.filter((p) => p.type === "Mortality").length
+  // Handle Row Click
+  const handleRowClick = (p: IPatientRecord) => {
+    router.push(`/allusermanage/${p.uhid}`)
+  }
 
-  // ---------- JSX ----------
   return (
-    <>
-      <Head>
-        <title>Patient Management - Admin Dashboard</title>
-        <meta name="description" content="Admin Dashboard for Patient Management" />
-      </Head>
-
-      <ToastContainer position="top-right" />
-
-      <main className="min-h-screen bg-gray-100 p-6">
-        <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold text-center text-green-600 mb-10">Patient Management Dashboard</h1>
-
-          {loading ? (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-32 w-32 border-t-2 border-b-2 border-green-500" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 mb-2">Patient Management</h1>
+              <p className="text-slate-600">Manage and view all patient records</p>
             </div>
-          ) : (
-            <>
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6 mb-10">
-                <StatCard title="Total Records" value={total} icon={<Users className="text-green-500" size={24} />} />
-                <StatCard title="OPD" value={opd} icon={<User className="text-blue-500" size={24} />} />
-                <StatCard title="IPD" value={ipd} icon={<Activity className="text-red-500" size={24} />} />
-                <StatCard
-                  title="Pathology"
-                  value={pathology}
-                  icon={<FileText className="text-yellow-500" size={24} />}
+            <div className="flex items-center gap-3">
+              <Button onClick={exportExcel} variant="outline" className="flex items-center gap-2">
+                <Download className="h-4 w-4" />
+                Export Excel
+              </Button>
+              <Button className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700">
+                <Plus className="h-4 w-4" />
+                Add Patient
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card className="border-l-4 border-l-emerald-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium text-slate-600">Total Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-slate-900">{patients.length}</div>
+              <p className="text-xs text-slate-500 mt-1">Active records</p>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-l-4 border-l-blue-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium text-slate-600">Male Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-slate-900">
+                {patients.filter(p => p.gender === 'male').length}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {patients.length > 0 ? Math.round((patients.filter(p => p.gender === 'male').length / patients.length) * 100) : 0}% of total
+              </p>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-l-4 border-l-pink-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium text-slate-600">Female Patients</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-slate-900">
+                {patients.filter(p => p.gender === 'female').length}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                {patients.length > 0 ? Math.round((patients.filter(p => p.gender === 'female').length / patients.length) * 100) : 0}% of total
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Filters */}
+        <Card className="mb-6">
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 h-4 w-4" />
+                <Input
+                  type="text"
+                  placeholder="Search by name, phone, or UHID..."
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  className="pl-10"
                 />
-                <StatCard title="Surgery" value={surgery} icon={<Activity className="text-purple-500" size={24} />} />
-                <StatCard title="Mortality" value={mortality} icon={<FileText className="text-gray-500" size={24} />} />
               </div>
+              <Select value={genderFilter} onValueChange={handleGenderFilter}>
+                <SelectTrigger className="w-full md:w-48">
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Filter by gender" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Genders</SelectItem>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
 
-              {/* Filters */}
-              <div className="bg-white p-6 rounded-lg shadow-md mb-10">
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
-                  {/* Search */}
-                  <FilterLabel label="Search Patients">
-                    <div className="relative">
-                      <input
-                        type="text"
-                        placeholder="Name, Phone, or UHID"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                      />
-                      <Search className="absolute left-3 top-2.5 text-gray-400" size={20} />
+        {/* Patient Cards */}
+        <div className="space-y-4">
+          {loading && patients.length === 0 ? (
+            <div className="space-y-4">
+              {[...Array(5)].map((_, i) => (
+                <Card key={i}>
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-4">
+                      <Skeleton className="h-12 w-12 rounded-full" />
+                      <div className="space-y-2 flex-1">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-3 w-32" />
+                      </div>
+                      <Skeleton className="h-8 w-20" />
                     </div>
-                  </FilterLabel>
-
-                  {/* Type Filter */}
-                  <FilterLabel label="Filter by Type">
-                    <select
-                      value={selectedType}
-                      onChange={(e) => setSelectedType(e.target.value)}
-                      className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                    >
-                      <option value="all">All Types</option>
-                      <option value="opd">OPD</option>
-                      <option value="ipd">IPD</option>
-                      <option value="pathology">Pathology</option>
-                      <option value="surgery">Surgery</option>
-                      <option value="mortality">Mortality</option>
-                    </select>
-                  </FilterLabel>
-
-                  {/* Start Date */}
-                  <FilterLabel label="Start Date">
-                    <DateInput value={startDate} onChange={setStartDate} />
-                  </FilterLabel>
-
-                  {/* End Date */}
-                  <FilterLabel label="End Date">
-                    <DateInput value={endDate} onChange={setEndDate} />
-                  </FilterLabel>
-
-                  {/* Today Button */}
-                  <div className="flex items-end">
-                    <button
-                      onClick={handleToday}
-                      className="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md transition duration-200"
-                    >
-                      Today
-                    </button>
-                  </div>
-
-                  {/* Export Buttons */}
-                  <div className="flex space-x-2">
-                    <ExportButton onClick={exportExcel} icon={<Download className="mr-2" size={16} />}>
-                      Excel
-                    </ExportButton>
-                    <ExportButton onClick={exportPdf} icon={<FileText className="mr-2" size={16} />}>
-                      PDF
-                    </ExportButton>
-                  </div>
-                </div>
-              </div>
-
-              {/* Results Summary */}
-              <div className="bg-white p-4 rounded-lg shadow-md mb-6">
-                <p className="text-sm text-gray-600">
-                  Showing {filteredAppointments.length} of {total} total records
-                  {searchQuery && ` for "${searchQuery}"`}
-                  {selectedType !== "all" && ` in ${selectedType.toUpperCase()}`}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : filteredPatients.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Users className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 mb-2">No patients found</h3>
+                <p className="text-slate-500">
+                  {searchQuery.trim() || genderFilter !== "all"
+                    ? "Try adjusting your search or filters"
+                    : "No patients have been added yet"}
                 </p>
-              </div>
-
-              {/* Table */}
-              <div className="bg-white rounded-lg shadow-md overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <Th>Patient Name</Th>
-                        <Th>Phone Number</Th>
-                        <Th>UHID</Th>
-                        <Th>Type</Th>
-                        <Th>Date</Th>
-                        <Th>Doctor</Th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredAppointments.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-500">
-                            {loading ? "Loading..." : "No patients found matching your criteria."}
-                          </td>
-                        </tr>
-                      ) : (
-                        filteredAppointments.map((appt) => (
-                          <tr
-                            key={appt.id}
-                            className="hover:bg-gray-50 cursor-pointer transition duration-150"
-                            onClick={() => handleRowClick(appt)}
+              </CardContent>
+            </Card>
+          ) : (
+            filteredPatients.map((patient) => (
+              <Card
+                key={patient.uhid}
+                className="hover:shadow-md transition-all duration-200 cursor-pointer border-l-4 border-l-transparent hover:border-l-emerald-500"
+                onClick={() => handleRowClick(patient)}
+              >
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-4">
+                      <Avatar className="h-12 w-12 border-2 border-emerald-100">
+                        <AvatarFallback className="bg-emerald-100 text-emerald-700 font-semibold">
+                          {getInitials(patient.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-lg font-semibold text-slate-900">{patient.name}</h3>
+                          <Badge variant="outline" className="text-xs">
+                            {patient.uhid}
+                          </Badge>
+                          <Badge 
+                            variant="secondary" 
+                            className={`text-xs ${
+                              patient.gender === 'male' 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : 'bg-pink-100 text-pink-700'
+                            }`}
                           >
-                            <TdName name={appt.name} />
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{appt.phone || "N/A"}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900">{appt.uhid}</td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <TypeBadge type={appt.type} />
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {format(new Date(appt.date), "PPP")}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {doctorMap.current[appt.doctor] || "N/A"}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
+                            {patient.gender === 'male' ? 'Male' : 'Female'}, {patient.age}
+                          </Badge>
+                        </div>
+                        
+                        <div className="flex items-center gap-4 text-sm text-slate-600">
+                          <div className="flex items-center gap-1">
+                            <Phone className="h-3 w-3" />
+                            <span>{patient.phone}</span>
+                          </div>
+                          {patient.address && (
+                            <div className="flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              <span className="truncate max-w-48">{patient.address}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            <span>{format(new Date(patient.createdAt), "MMM dd, yyyy")}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <Button variant="outline" size="sm">
+                      View Details
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
           )}
         </div>
-      </main>
-    </>
-  )
-}
 
-// ─────────────────── Helper Components ───────────────────
-const StatCard: React.FC<{ title: string; value: number; icon: React.ReactNode }> = ({ title, value, icon }) => (
-  <div className="bg-white p-6 rounded-lg shadow-md">
-    <div className="flex items-center justify-between mb-4">
-      <h2 className="text-lg font-semibold text-gray-800">{title}</h2>
-      {icon}
-    </div>
-    <p className="text-2xl font-bold text-gray-900">{value}</p>
-  </div>
-)
+        {/* Load More */}
+        {hasMore && !loading && !searchQuery.trim() && genderFilter === "all" && (
+          <div className="flex justify-center mt-8">
+            <Button onClick={loadMore} variant="outline" className="px-8">
+              Load More Patients
+            </Button>
+          </div>
+        )}
 
-const FilterLabel: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div>
-    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-    {children}
-  </div>
-)
-
-const DateInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
-  <div className="relative">
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full pl-10 pr-4 py-2 border rounded-md focus:ring-2 focus:ring-green-500 focus:border-transparent"
-    />
-    <Calendar className="absolute left-3 top-2.5 text-gray-400" size={20} />
-  </div>
-)
-
-const ExportButton: React.FC<{ onClick: () => void; icon: React.ReactNode; children: React.ReactNode }> = ({
-  onClick,
-  icon,
-  children,
-}) => (
-  <button
-    onClick={onClick}
-    className="flex items-center justify-center bg-green-500 text-white px-3 py-2 rounded-md hover:bg-green-600 transition duration-300 text-sm"
-  >
-    {icon}
-    {children}
-  </button>
-)
-
-const Th: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{children}</th>
-)
-
-const TdName: React.FC<{ name: string }> = ({ name }) => (
-  <td className="px-6 py-4 whitespace-nowrap">
-    <div className="flex items-center">
-      <div className="flex-shrink-0 h-10 w-10">
-        <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-          <User className="h-6 w-6 text-gray-400" />
-        </div>
-      </div>
-      <div className="ml-4">
-        <div className="text-sm font-medium text-gray-900">{name}</div>
+        {loading && patients.length > 0 && (
+          <div className="flex justify-center mt-8">
+            <div className="flex items-center gap-2 text-slate-600">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-emerald-500"></div>
+              <span>Loading more patients...</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
-  </td>
-)
-
-const TypeBadge: React.FC<{ type: string }> = ({ type }) => {
-  const getTypeStyles = (type: string) => {
-    switch (type) {
-      case "OPD":
-        return "bg-green-100 text-green-800"
-      case "IPD":
-        return "bg-yellow-100 text-yellow-800"
-      case "Pathology":
-        return "bg-blue-100 text-blue-800"
-      case "Surgery":
-        return "bg-purple-100 text-purple-800"
-      case "Mortality":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
-
-  return (
-    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeStyles(type)}`}>
-      {type}
-    </span>
   )
 }
 
