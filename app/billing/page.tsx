@@ -1,8 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
-import { ref, onValue } from "firebase/database"
+import { useEffect, useState, useCallback } from "react"
+import { ref, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database"
 import { db } from "@/lib/firebase"
 import { useRouter } from "next/navigation"
 import {
@@ -16,6 +16,7 @@ import {
   FileText,
   Clipboard,
   Stethoscope,
+  ChevronDown,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -50,248 +51,270 @@ export interface BillingRecord {
   relativePhone?: string
   relativeAddress?: string
   dischargeDate?: string
+  admissionDate?: string
   amount: number // totalDeposit
   roomType?: string
   bed?: string
   services: ServiceItem[]
   payments: Payment[]
   discount?: number
+  createdAt?: string
 }
 
-export default function PatientsPage() {
-  const [demographics, setDemographics] = useState<
-    Record<
-      string,
-      {
-        name: string
-        phone: string
-        address?: string
-        age?: string | number
-        gender?: string
-      }
-    >
-  >({})
-  const [ipdInfo, setIpdInfo] = useState<
-    Record<
-      string,
-      // each patientId maps to an object of ipdId → ipdNode
-      Record<
-        string,
-        {
-          relativeName?: string
-          relativePhone?: string
-          relativeAddress?: string
-          roomType?: string
-          bed?: string
-          services?: any[]
-          dischargeDate?: string
-          discount?: number
-        }
-      >
-    >
-  >({})
-  const [billingInfo, setBillingInfo] = useState<
-    Record<
-      string,
-      // each patientId maps to an object of ipdId → billing node ({ totalDeposit, payments: { [paymentId]: { ... } }})
-      Record<
-        string,
-        {
-          totalDeposit?: number
-          payments?: Record<string, { amount: number; paymentType: string; date: string; type?: string }>
-        }
-      >
-    >
-  >({})
-  const [allRecords, setAllRecords] = useState<BillingRecord[]>([])
+const ITEMS_PER_PAGE = 10
+
+export default function OptimizedPatientsPage() {
+  const [nonDischargedRecords, setNonDischargedRecords] = useState<BillingRecord[]>([])
+  const [dischargedRecords, setDischargedRecords] = useState<BillingRecord[]>([])
   const [filteredRecords, setFilteredRecords] = useState<BillingRecord[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedTab, setSelectedTab] = useState<"non-discharge" | "discharge">("non-discharge")
   const [selectedWard, setSelectedWard] = useState("All")
   const [isLoading, setIsLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMoreDischarged, setHasMoreDischarged] = useState(true)
+  const [lastDischargedKey, setLastDischargedKey] = useState<string | null>(null)
   const router = useRouter()
 
-  /* ----------------------------------------
-     1) Load all patient demographics once
-  ----------------------------------------- */
-  useEffect(() => {
-    const infoRef = ref(db, "patients/patientinfo")
-    const unsubscribe = onValue(infoRef, (snap) => {
-      if (!snap.exists()) {
-        setDemographics({})
-        return
+  // Combine IPD info and billing info into a single record
+  const combineRecordData = useCallback(
+    (patientId: string, ipdId: string, ipdData: any, billingData: any): BillingRecord => {
+      const servicesArray: ServiceItem[] = []
+      if (Array.isArray(ipdData.services)) {
+        ipdData.services.forEach((svc: any) => {
+          servicesArray.push({
+            serviceName: svc.serviceName || "",
+            doctorName: svc.doctorName || "",
+            type: svc.type || "service",
+            amount: Number(svc.amount) || 0,
+            createdAt: svc.createdAt || "",
+          })
+        })
       }
-      const data: Record<string, any> = snap.val()
-      const demoMap: typeof demographics = {}
-      Object.keys(data).forEach((pid) => {
-        const node = data[pid] || {}
-        demoMap[pid] = {
-          name: node.name || "Unknown",
-          phone: node.phone || "",
-          address: node.address || "",
-          age: node.age || "",
-          gender: node.gender || "",
-        }
-      })
-      setDemographics(demoMap)
-    })
-    return () => unsubscribe()
-  }, [])
 
-  /* ----------------------------------------
-     2) Load all IPD details once
-  ----------------------------------------- */
+      const paymentsArray: Payment[] = []
+      if (billingData?.payments) {
+        Object.keys(billingData.payments).forEach((payId) => {
+          const pay = billingData.payments[payId]
+          paymentsArray.push({
+            id: payId,
+            amount: Number(pay.amount) || 0,
+            paymentType: pay.paymentType || "cash",
+            date: pay.date || new Date().toISOString(),
+          })
+        })
+      }
+
+      return {
+        patientId,
+        ipdId,
+        name: ipdData.name || "Unknown",
+        mobileNumber: ipdData.phone || "",
+        address: ipdData.address || "",
+        age: ipdData.age || "",
+        gender: ipdData.gender || "",
+        relativeName: ipdData.relativeName || "",
+        relativePhone: ipdData.relativePhone || "",
+        relativeAddress: ipdData.relativeAddress || "",
+        dischargeDate: ipdData.dischargeDate || "",
+        admissionDate: ipdData.admissionDate || "",
+        amount: billingData?.totalDeposit ? Number(billingData.totalDeposit) : 0,
+        roomType: ipdData.roomType || "",
+        bed: ipdData.bed || "",
+        services: servicesArray,
+        payments: paymentsArray,
+        discount: ipdData.discount ? Number(ipdData.discount) : 0,
+        createdAt: ipdData.createdAt || "",
+      }
+    },
+    [],
+  )
+
+  // Load non-discharged patients (all of them since they're active)
   useEffect(() => {
     const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
-    const unsubscribe = onValue(ipdRef, (snap) => {
-      if (!snap.exists()) {
-        setIpdInfo({})
-        return
-      }
-      const data: Record<string, any> = snap.val()
-      const ipdMap: typeof ipdInfo = {}
-      Object.keys(data).forEach((pid) => {
-        const perPatient: Record<string, any> = data[pid] || {}
-        ipdMap[pid] = {}
-        Object.keys(perPatient).forEach((ipdId) => {
-          const ipdNode = perPatient[ipdId] || {}
-          ipdMap[pid][ipdId] = {
-            relativeName: ipdNode.relativeName || "",
-            relativePhone: ipdNode.relativePhone || "",
-            relativeAddress: ipdNode.relativeAddress || "",
-            roomType: ipdNode.roomType || "",
-            bed: ipdNode.bed || "",
-            services: ipdNode.services || [],
-            dischargeDate: ipdNode.dischargeDate || "",
-            discount: ipdNode.discount ? Number(ipdNode.discount) : 0,
-          }
-        })
-      })
-      setIpdInfo(ipdMap)
-    })
-    return () => unsubscribe()
-  }, [])
-
-  /* ----------------------------------------
-     3) Load all billing details once
-  ----------------------------------------- */
-  useEffect(() => {
     const billingRef = ref(db, "patients/ipddetail/userbillinginfoipd")
-    const unsubscribe = onValue(billingRef, (snap) => {
-      if (!snap.exists()) {
-        setBillingInfo({})
-        return
-      }
-      const data: Record<string, any> = snap.val()
-      const billMap: typeof billingInfo = {}
-      Object.keys(data).forEach((pid) => {
-        const perPatient: Record<string, any> = data[pid] || {}
-        billMap[pid] = {}
-        Object.keys(perPatient).forEach((ipdId) => {
-          const billingNode = perPatient[ipdId] || {}
-          billMap[pid][ipdId] = {
-            totalDeposit: billingNode.totalDeposit ? Number(billingNode.totalDeposit) : 0,
-            payments: billingNode.payments || {},
+
+    const ipdData: Record<string, Record<string, any>> = {}
+    const billingData: Record<string, Record<string, any>> = {}
+    let ipdLoaded = false
+    let billingLoaded = false
+
+    const updateNonDischargedRecords = () => {
+      if (!ipdLoaded || !billingLoaded) return
+
+      const records: BillingRecord[] = []
+
+      Object.keys(ipdData).forEach((patientId) => {
+        Object.keys(ipdData[patientId] || {}).forEach((ipdId) => {
+          const ipdRecord = ipdData[patientId][ipdId]
+          // Only include non-discharged patients
+          if (!ipdRecord.dischargeDate) {
+            const billingRecord = billingData[patientId]?.[ipdId] || {}
+            records.push(combineRecordData(patientId, ipdId, ipdRecord, billingRecord))
           }
         })
       })
-      setBillingInfo(billMap)
-    })
-    return () => unsubscribe()
-  }, [])
 
-  /* ----------------------------------------------------
-     4) Whenever any of demographics, ipdInfo, billingInfo
-       changes, recombine into a flat array of BillingRecord
-  ----------------------------------------------------- */
-  useEffect(() => {
-    // Mark loading done once we have attempted to fetch
-    setIsLoading(false)
-
-    const combined: BillingRecord[] = []
-
-    // ipdInfo: { [pid]: { [ipdId]: ipdNode } }
-    Object.keys(ipdInfo).forEach((pid) => {
-      const perPatientIpds = ipdInfo[pid] || {}
-      const demo = demographics[pid] || {
-        name: "Unknown",
-        phone: "",
-        address: "",
-        age: "",
-        gender: "",
-      }
-      const perBilling = billingInfo[pid] || {}
-
-      Object.keys(perPatientIpds).forEach((ipdId) => {
-        const ipdNode = perPatientIpds[ipdId]
-        const billingNode = perBilling[ipdId] || { totalDeposit: 0, payments: {} }
-
-        // Build services array:
-        const servicesArray: ServiceItem[] = []
-        if (Array.isArray(ipdNode.services)) {
-          ipdNode.services.forEach((svc: any) => {
-            servicesArray.push({
-              serviceName: svc.serviceName || "",
-              doctorName: svc.doctorName || "",
-              type: svc.type || "service",
-              amount: Number(svc.amount) || 0,
-              createdAt: svc.createdAt || "",
-            })
-          })
-        }
-
-        // Build payments array from billingNode.payments
-        const paymentsArray: Payment[] = []
-        if (billingNode.payments) {
-          Object.keys(billingNode.payments).forEach((payId) => {
-            const pay = billingNode.payments![payId]
-            paymentsArray.push({
-              id: payId,
-              amount: Number(pay.amount) || 0,
-              paymentType: pay.paymentType || "cash",
-              date: pay.date || new Date().toISOString(),
-            })
-          })
-        }
-
-        combined.push({
-          patientId: pid,
-          ipdId,
-          name: demo.name,
-          mobileNumber: demo.phone,
-          address: demo.address,
-          age: demo.age,
-          gender: demo.gender,
-          relativeName: ipdNode.relativeName,
-          relativePhone: ipdNode.relativePhone,
-          relativeAddress: ipdNode.relativeAddress,
-          dischargeDate: ipdNode.dischargeDate,
-          amount: billingNode.totalDeposit || 0,
-          roomType: ipdNode.roomType,
-          bed: ipdNode.bed,
-          services: servicesArray,
-          payments: paymentsArray,
-          discount: ipdNode.discount,
-        })
-      })
-    })
-
-    setAllRecords(combined)
-  }, [demographics, ipdInfo, billingInfo])
-
-  /* ----------------------------------------
-     5) Filter & sort as before
-  ----------------------------------------- */
-  useEffect(() => {
-    const term = searchTerm.trim().toLowerCase()
-    let records = [...allRecords]
-
-    // Tab filtering: non-discharged vs discharged
-    if (selectedTab === "non-discharge") {
-      records = records.filter((rec) => !rec.dischargeDate)
-    } else {
-      records = records.filter((rec) => rec.dischargeDate)
+      setNonDischargedRecords(records)
+      setIsLoading(false)
     }
+
+    // Listen to IPD changes
+    const unsubscribeIpd = onChildAdded(ipdRef, (snapshot) => {
+      const patientId = snapshot.key!
+      const patientIpdData = snapshot.val() || {}
+      ipdData[patientId] = patientIpdData
+      ipdLoaded = true
+      updateNonDischargedRecords()
+    })
+
+    const unsubscribeIpdChanged = onChildChanged(ipdRef, (snapshot) => {
+      const patientId = snapshot.key!
+      const patientIpdData = snapshot.val() || {}
+      ipdData[patientId] = patientIpdData
+      updateNonDischargedRecords()
+    })
+
+    const unsubscribeIpdRemoved = onChildRemoved(ipdRef, (snapshot) => {
+      const patientId = snapshot.key!
+      delete ipdData[patientId]
+      updateNonDischargedRecords()
+    })
+
+    // Listen to billing changes
+    const unsubscribeBilling = onChildAdded(billingRef, (snapshot) => {
+      const patientId = snapshot.key!
+      const patientBillingData = snapshot.val() || {}
+      billingData[patientId] = patientBillingData
+      billingLoaded = true
+      updateNonDischargedRecords()
+    })
+
+    const unsubscribeBillingChanged = onChildChanged(billingRef, (snapshot) => {
+      const patientId = snapshot.key!
+      const patientBillingData = snapshot.val() || {}
+      billingData[patientId] = patientBillingData
+      updateNonDischargedRecords()
+    })
+
+    const unsubscribeBillingRemoved = onChildRemoved(billingRef, (snapshot) => {
+      const patientId = snapshot.key!
+      delete billingData[patientId]
+      updateNonDischargedRecords()
+    })
+
+    return () => {
+      unsubscribeIpd()
+      unsubscribeIpdChanged()
+      unsubscribeIpdRemoved()
+      unsubscribeBilling()
+      unsubscribeBillingChanged()
+      unsubscribeBillingRemoved()
+    }
+  }, [combineRecordData])
+
+  // Load initial discharged patients (latest 10)
+  const loadDischargedPatients = useCallback(
+    async (loadMore = false) => {
+      if (loadMore) {
+        setLoadingMore(true)
+      }
+
+      try {
+        const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
+        const billingRef = ref(db, "patients/ipddetail/userbillinginfoipd")
+
+        // For discharged patients, we need to manually filter since Firebase doesn't support
+        // complex queries on nested data. We'll load all and filter client-side for now.
+        // In a production app, you'd want to restructure the data for better querying.
+
+        const ipdData: Record<string, Record<string, any>> = {}
+        const billingData: Record<string, Record<string, any>> = {}
+
+        // Load IPD data
+        const ipdSnapshot = await new Promise((resolve) => {
+          const unsubscribe = onChildAdded(ipdRef, (snapshot) => {
+            const patientId = snapshot.key!
+            const patientIpdData = snapshot.val() || {}
+            ipdData[patientId] = patientIpdData
+          })
+
+          // Wait a bit for data to load, then resolve
+          setTimeout(() => {
+            unsubscribe()
+            resolve(ipdData)
+          }, 1000)
+        })
+
+        // Load billing data
+        const billingSnapshot = await new Promise((resolve) => {
+          const unsubscribe = onChildAdded(billingRef, (snapshot) => {
+            const patientId = snapshot.key!
+            const patientBillingData = snapshot.val() || {}
+            billingData[patientId] = patientBillingData
+          })
+
+          setTimeout(() => {
+            unsubscribe()
+            resolve(billingData)
+          }, 1000)
+        })
+
+        // Filter and sort discharged patients
+        const dischargedRecords: BillingRecord[] = []
+
+        Object.keys(ipdData).forEach((patientId) => {
+          Object.keys(ipdData[patientId] || {}).forEach((ipdId) => {
+            const ipdRecord = ipdData[patientId][ipdId]
+            // Only include discharged patients
+            if (ipdRecord.dischargeDate) {
+              const billingRecord = billingData[patientId]?.[ipdId] || {}
+              dischargedRecords.push(combineRecordData(patientId, ipdId, ipdRecord, billingRecord))
+            }
+          })
+        })
+
+        // Sort by discharge date (newest first)
+        dischargedRecords.sort((a, b) => {
+          const dateA = new Date(a.dischargeDate || 0).getTime()
+          const dateB = new Date(b.dischargeDate || 0).getTime()
+          return dateB - dateA
+        })
+
+        if (loadMore) {
+          const currentLength = dischargedRecords.length
+          const startIndex = dischargedRecords.length
+          const newRecords = dischargedRecords.slice(startIndex, startIndex + ITEMS_PER_PAGE)
+
+          setDischargedRecords((prev) => [...prev, ...newRecords])
+          setHasMoreDischarged(startIndex + ITEMS_PER_PAGE < currentLength)
+        } else {
+          const initialRecords = dischargedRecords.slice(0, ITEMS_PER_PAGE)
+          setDischargedRecords(initialRecords)
+          setHasMoreDischarged(dischargedRecords.length > ITEMS_PER_PAGE)
+        }
+      } catch (error) {
+        console.error("Error loading discharged patients:", error)
+      } finally {
+        setLoadingMore(false)
+      }
+    },
+    [combineRecordData],
+  )
+
+  // Load discharged patients when tab changes to discharge
+  useEffect(() => {
+    if (selectedTab === "discharge" && dischargedRecords.length === 0) {
+      loadDischargedPatients()
+    }
+  }, [selectedTab, loadDischargedPatients, dischargedRecords.length])
+
+  // Filter records based on search and ward
+  useEffect(() => {
+    const currentRecords = selectedTab === "non-discharge" ? nonDischargedRecords : dischargedRecords
+    const term = searchTerm.trim().toLowerCase()
+    let records = [...currentRecords]
 
     // Ward filtering
     if (selectedWard !== "All") {
@@ -309,23 +332,9 @@ export default function PatientsPage() {
     }
 
     setFilteredRecords(records)
-  }, [allRecords, searchTerm, selectedTab, selectedWard])
+  }, [nonDischargedRecords, dischargedRecords, searchTerm, selectedTab, selectedWard])
 
-  const getRecordDate = (record: BillingRecord): Date => {
-    if (record.dischargeDate) {
-      return new Date(record.dischargeDate)
-    } else if (record.services.length > 0 && record.services[0].createdAt) {
-      return new Date(record.services[0].createdAt)
-    } else {
-      return new Date(0)
-    }
-  }
-
-  const sortedRecords = [...filteredRecords].sort((a, b) => getRecordDate(b).getTime() - getRecordDate(a).getTime())
-
-  /* ----------------------------------------
-     6) Handlers
-  ----------------------------------------- */
+  // Event handlers
   const handleRowClick = (record: BillingRecord) => {
     router.push(`/billing/${record.patientId}/${record.ipdId}`)
   }
@@ -350,7 +359,12 @@ export default function PatientsPage() {
     router.push(`/ot/${record.patientId}/${record.ipdId}`)
   }
 
-  // Get unique ward names
+  const handleLoadMore = () => {
+    loadDischargedPatients(true)
+  }
+
+  // Get unique ward names from current records
+  const allRecords = [...nonDischargedRecords, ...dischargedRecords]
   const uniqueWards = Array.from(new Set(allRecords.map((record) => record.roomType).filter((ward) => ward)))
 
   // Summary stats
@@ -408,14 +422,14 @@ export default function PatientsPage() {
                       className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
                     >
                       <XCircle className="h-4 w-4 mr-2" />
-                      Non-Discharged
+                      Non-Discharged ({nonDischargedRecords.length})
                     </TabsTrigger>
                     <TabsTrigger
                       value="discharge"
                       className="data-[state=active]:bg-slate-800 data-[state=active]:text-white"
                     >
                       <CheckCircle className="h-4 w-4 mr-2" />
-                      Discharged
+                      Discharged ({dischargedRecords.length})
                     </TabsTrigger>
                   </TabsList>
                 </div>
@@ -460,7 +474,7 @@ export default function PatientsPage() {
 
               <TabsContent value="non-discharge" className="mt-0">
                 {renderPatientsTable(
-                  sortedRecords,
+                  filteredRecords,
                   handleRowClick,
                   handleEditRecord,
                   handleManagePatient,
@@ -472,13 +486,30 @@ export default function PatientsPage() {
 
               <TabsContent value="discharge" className="mt-0">
                 {renderPatientsTable(
-                  sortedRecords,
+                  filteredRecords,
                   handleRowClick,
                   handleEditRecord,
                   handleManagePatient,
                   handleDrugChart,
                   handleOTForm,
                   isLoading,
+                )}
+                {selectedTab === "discharge" && hasMoreDischarged && (
+                  <div className="flex justify-center mt-6">
+                    <Button
+                      onClick={handleLoadMore}
+                      disabled={loadingMore}
+                      variant="outline"
+                      className="flex items-center gap-2"
+                    >
+                      {loadingMore ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-slate-600"></div>
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                      {loadingMore ? "Loading..." : "Load More"}
+                    </Button>
+                  </div>
                 )}
               </TabsContent>
             </Tabs>

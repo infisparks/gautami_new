@@ -1,56 +1,34 @@
-"use client";
+"use client"
 
-import { useState, useEffect } from "react";
-import { useForm, Controller } from "react-hook-form";
-import { db, auth } from "../../lib/firebase";
-import {
-  ref,
-  onChildAdded,
-  onChildChanged,
-  onChildRemoved,
-  get,
-  update,
-  remove,
-  push,
-  onValue,
-  set,
-} from "firebase/database";
-import { onAuthStateChanged } from "firebase/auth";
+import { useState, useEffect, useCallback, useMemo } from "react"
+import { useForm, Controller } from "react-hook-form"
+import { db, auth } from "../../lib/firebase"
+import { ref, query, orderByChild, startAt, endAt, get, update, remove, push, onValue, set } from "firebase/database"
+import { onAuthStateChanged } from "firebase/auth"
 import {
   Phone,
-  MessageSquare,
   DollarSign,
   Edit,
   Trash2,
   Search,
   ArrowLeft,
   Calendar,
-  User as UserIcon,
+  UserIcon,
   Stethoscope,
   History,
-} from "lucide-react";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
-import DatePicker from "react-datepicker";
-import "react-datepicker/dist/react-datepicker.css";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  ChevronDown,
+  RefreshCw,
+} from "lucide-react"
+import { ToastContainer, toast } from "react-toastify"
+import "react-toastify/dist/ReactToastify.css"
+import DatePicker from "react-datepicker"
+import "react-datepicker/dist/react-datepicker.css"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Dialog,
   DialogContent,
@@ -58,9 +36,8 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+} from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -69,81 +46,77 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { useRouter } from "next/navigation";
-import type React from "react";
+} from "@/components/ui/alert-dialog"
+import { useRouter } from "next/navigation"
 
-//
-// ————————————
-//   TYPES & CONSTANTS
-// ————————————
-//
-
-// We only store a “summary” of each OPD record here:
+// Types
 interface OPD_Summary {
-  uhid: string;       // top‐level key under “patients/opddetail”
-  id: string;         // the opdId
-  date: string;       // ISO string
-  time: string;       // e.g. “7:59 AM”
-  serviceName: string;
-  doctor: string;
-  appointmentType: string; // “visithospital” | “oncall”
-  opdType: string;    // usually “opd”
+  uhid: string
+  id: string
+  date: string
+  time: string
+  serviceName: string
+  doctor: string
+  appointmentType: string
+  opdType: string
+  name: string // Patient name from OPD record
+  phone: string // Patient phone from OPD record
+  amount: number
+  createdAt: string
 }
 
-// When editing, we fetch full details into this shape:
 interface OPD_Full {
-  uhid: string;
-  id: string;
-  date: string;
-  time: string;
-  paymentMethod: string;
-  originalAmount: number;
-  amount: number;
-  discount: number;
-  serviceName: string;
-  doctor: string;
-  message?: string;
-  referredBy?: string;
-  appointmentType: string;
-  opdType: string;
-  enteredBy: string;
-  createdAt: string;
+  uhid: string
+  id: string
+  date: string
+  time: string
+  paymentMethod: string
+  originalAmount: number
+  amount: number
+  discount: number
+  serviceName: string
+  doctor: string
+  message?: string
+  referredBy?: string
+  appointmentType: string
+  opdType: string
+  enteredBy: string
+  createdAt: string
+  name: string
+  phone: string
+  age: string | number
+  gender: string
+  address?: string
 }
 
-// When editing, we also need patient info:
-interface PatientInfo {
-  name: string;
-  phone: string;
-  age: string | number;
-  gender: string;
-  address?: string;
-}
-
-// “Doctor” shape remains the same:
 interface Doctor {
-  id: string;
-  name: string;
-  opdCharge: number;
-  specialty?: string;
+  id: string
+  name: string
+  opdCharge: number
+  specialty?: string
 }
 
-// Form data for editing (we’ll convert date back to ISO):
 interface EditFormData {
-  name: string;
-  phone: string;
-  age: number;
-  gender: string;
-  address: string;
-  date: Date;
-  time: string;
-  paymentMethod: string;
-  amount: number;
-  discount: number;
-  serviceName: string;
-  doctor: string;
-  message: string;
-  referredBy: string;
+  name: string
+  phone: string
+  age: number
+  gender: string
+  address: string
+  date: Date
+  time: string
+  paymentMethod: string
+  amount: number
+  discount: number
+  serviceName: string
+  doctor: string
+  message: string
+  referredBy: string
+}
+
+interface FilterOptions {
+  dateFilter: "today" | "week" | "month" | "all"
+  appointmentType: "all" | "visithospital" | "oncall"
+  doctor: string
 }
 
 const PaymentOptions = [
@@ -151,51 +124,50 @@ const PaymentOptions = [
   { value: "online", label: "Online" },
   { value: "card", label: "Card" },
   { value: "upi", label: "UPI" },
-];
+]
 
 const GenderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
-];
+]
 
-//
-// ——————————————
-//   MAIN COMPONENT
-// ——————————————
+const ITEMS_PER_PAGE = 10
+
 export default function ManageOPDPage() {
-  const router = useRouter();
-  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const router = useRouter()
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
 
-  // Summaries of all appointments:
-  const [summaries, setSummaries] = useState<OPD_Summary[]>([]);
-  // Filtered list for search:
-  const [filtered, setFiltered] = useState<OPD_Summary[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Data states
+  const [appointments, setAppointments] = useState<OPD_Summary[]>([])
+  const [filteredAppointments, setFilteredAppointments] = useState<OPD_Summary[]>([])
+  const [displayedAppointments, setDisplayedAppointments] = useState<OPD_Summary[]>([])
+  const [doctors, setDoctors] = useState<Doctor[]>([])
 
-  // All doctors (for dropdown):
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1)
+  const [hasMore, setHasMore] = useState(true)
 
-  // All patient infos (uhid → PatientInfo):
-  const [patientInfos, setPatientInfos] = useState<Record<string, PatientInfo>>({});
+  // Search and filters
+  const [searchQuery, setSearchQuery] = useState("")
+  const [filters, setFilters] = useState<FilterOptions>({
+    dateFilter: "today",
+    appointmentType: "all",
+    doctor: "all",
+  })
 
-  // Loading flags:
-  const [loading, setLoading] = useState(false);
+  // Loading states
+  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
 
-  // EDIT DIALOG:
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [uhidEditing, setUhidEditing] = useState<string | null>(null);
-  const [opdIdEditing, setOpdIdEditing] = useState<string | null>(null);
-  const [patientInfoEditing, setPatientInfoEditing] =
-    useState<PatientInfo | null>(null);
+  // Dialog states
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [uhidEditing, setUhidEditing] = useState<string | null>(null)
+  const [opdIdEditing, setOpdIdEditing] = useState<string | null>(null)
+  const [toDeleteSummary, setToDeleteSummary] = useState<OPD_Summary | null>(null)
 
-  // DELETE DIALOG:
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [toDeleteSummary, setToDeleteSummary] = useState<OPD_Summary | null>(
-    null
-  );
-
-  // Form for editing:
+  // Form for editing
   const {
     register,
     handleSubmit,
@@ -203,32 +175,26 @@ export default function ManageOPDPage() {
     formState: { errors },
     reset,
     watch,
-  } = useForm<EditFormData>();
+  } = useForm<EditFormData>()
 
-  //
-  // ————————————————
-  //   AUTH LISTENER
-  // ————————————————
+  // Auth listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user && user.email) {
-        setCurrentUserEmail(user.email);
+        setCurrentUserEmail(user.email)
       } else {
-        setCurrentUserEmail(null);
+        setCurrentUserEmail(null)
       }
-    });
-    return () => unsub();
-  }, []);
+    })
+    return () => unsub()
+  }, [])
 
-  //
-  // ————————————————
-  //   FETCH DOCTORS ONCE
-  // ————————————————
+  // Fetch doctors
   useEffect(() => {
-    const doctorsRef = ref(db, "doctors");
+    const doctorsRef = ref(db, "doctors")
     const unsub = onValue(doctorsRef, (snap) => {
-      const data = snap.val();
-      const list: Doctor[] = [];
+      const data = snap.val()
+      const list: Doctor[] = []
       if (data) {
         Object.keys(data).forEach((key) => {
           list.push({
@@ -236,495 +202,269 @@ export default function ManageOPDPage() {
             name: data[key].name,
             opdCharge: data[key].opdCharge || 0,
             specialty: data[key].specialty || "",
-          });
-        });
-      }
-      // Prepend “No Doctor” option
-      list.unshift({ id: "no_doctor", name: "No Doctor", opdCharge: 0 });
-      setDoctors(list);
-    });
-    return () => unsub();
-  }, []);
-
-  //
-  // ————————————————
-  //   FETCH ALL PATIENT INFO ONCE
-  // ————————————————
-  useEffect(() => {
-    const patientInfoRef = ref(db, "patients/patientinfo");
-    const unsub = onValue(patientInfoRef, (snap) => {
-      const data = snap.val() || {};
-      const map: Record<string, PatientInfo> = {};
-      Object.keys(data).forEach((uhidKey) => {
-        const info = data[uhidKey];
-        map[uhidKey] = {
-          name: info.name || "",
-          phone: info.phone || "",
-          age: info.age,
-          gender: info.gender,
-          address: info.address || "",
-        };
-      });
-      setPatientInfos(map);
-    });
-    return () => unsub();
-  }, []);
-
-  //
-  // ————————————————————————————————————————
-  //   STREAM “summaries” FROM `patients/opddetail/{uhid}/{opdId}`
-  //   (onChildAdded/Changed/Removed)
-  // ————————————————————————————————————————
-  useEffect(() => {
-    const summaryMap = new Map<string, OPD_Summary>();
-    // key = `${uhid}:${opdId}`
-
-    const listenersPerUhid = new Map<
-      string,
-      {
-        addedUnsub: () => void;
-        changedUnsub: () => void;
-        removedUnsub: () => void;
-      }
-    >();
-
-    // Step 1: listen for any new UHID node under “patients/opddetail”
-    const rootRef = ref(db, "patients/opddetail");
-    const unsubUhidAdded = onChildAdded(rootRef, (uhidSnap) => {
-      const uhid = uhidSnap.key!;
-      const userOpdRef = ref(db, `patients/opddetail/${uhid}`);
-
-      // When a new OPD record is created under this UHID:
-      const unsubAdded = onChildAdded(userOpdRef, (opdSnap) => {
-        const opdData = opdSnap.val();
-        const summary: OPD_Summary = {
-          uhid,
-          id: opdSnap.key!,
-          date: opdData.date,
-          time: opdData.time,
-          serviceName: opdData.serviceName,
-          doctor: opdData.doctor,
-          appointmentType: opdData.appointmentType,
-          opdType: opdData.opdType,
-        };
-        summaryMap.set(`${uhid}:${opdSnap.key!}`, summary);
-        setSummaries(Array.from(summaryMap.values()));
-      });
-
-      // When an existing OPD record changes under this UHID:
-      const unsubChanged = onChildChanged(userOpdRef, (opdSnap) => {
-        const opdData = opdSnap.val();
-        const key = `${uhid}:${opdSnap.key!}`;
-        if (summaryMap.has(key)) {
-          summaryMap.set(key, {
-            uhid,
-            id: opdSnap.key!,
-            date: opdData.date,
-            time: opdData.time,
-            serviceName: opdData.serviceName,
-            doctor: opdData.doctor,
-            appointmentType: opdData.appointmentType,
-            opdType: opdData.opdType,
-          });
-          setSummaries(Array.from(summaryMap.values()));
-        }
-      });
-
-      // When an OPD record is removed under this UHID:
-      const unsubRemoved = onChildRemoved(userOpdRef, (opdSnap) => {
-        const key = `${uhid}:${opdSnap.key!}`;
-        summaryMap.delete(key);
-        setSummaries(Array.from(summaryMap.values()));
-      });
-
-      listenersPerUhid.set(uhid, {
-        addedUnsub: () => unsubAdded(),
-        changedUnsub: () => unsubChanged(),
-        removedUnsub: () => unsubRemoved(),
-      });
-    });
-
-    // When a UHID node is itself removed:
-    const unsubUhidRemoved = onChildRemoved(rootRef, (uhidSnap) => {
-      const uhid = uhidSnap.key!;
-      // Unsubscribe all listeners under that UHID:
-      const entry = listenersPerUhid.get(uhid);
-      if (entry) {
-        entry.addedUnsub();
-        entry.changedUnsub();
-        entry.removedUnsub();
-        listenersPerUhid.delete(uhid);
-      }
-      // Also remove all summaries belonging to that UHID:
-      Array.from(summaryMap.keys()).forEach((key) => {
-        if (key.startsWith(`${uhid}:`)) {
-          summaryMap.delete(key);
-        }
-      });
-      setSummaries(Array.from(summaryMap.values()));
-    });
-
-    // CLEAN UP on unmount:
-    return () => {
-      unsubUhidAdded();
-      unsubUhidRemoved();
-      listenersPerUhid.forEach((entry) => {
-        entry.addedUnsub();
-        entry.changedUnsub();
-        entry.removedUnsub();
-      });
-      listenersPerUhid.clear();
-    };
-  }, []);
-
-  //
-  // ——————————————
-  //   SEARCH FILTER
-  // ——————————————
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFiltered(summaries);
-    } else {
-      const lower = searchQuery.toLowerCase();
-      setFiltered(
-        summaries.filter((s) => {
-          // match serviceName, doctor name, or UHID, or patient name/phone
-          const matchesService = s.serviceName.toLowerCase().includes(lower);
-          const matchesDoctor =
-            doctors.find((d) => d.id === s.doctor)?.name
-              .toLowerCase()
-              .includes(lower) || false;
-          const matchesUhid = s.uhid.toLowerCase().includes(lower);
-          const pInfo = patientInfos[s.uhid];
-          const matchesPatientName = pInfo
-            ? pInfo.name.toLowerCase().includes(lower)
-            : false;
-          const matchesPatientPhone = pInfo
-            ? pInfo.phone.toLowerCase().includes(lower)
-            : false;
-          return (
-            matchesService ||
-            matchesDoctor ||
-            matchesUhid ||
-            matchesPatientName ||
-            matchesPatientPhone
-          );
+          })
         })
-      );
+      }
+      list.unshift({ id: "all", name: "All Doctors", opdCharge: 0 })
+      list.push({ id: "no_doctor", name: "No Doctor", opdCharge: 0 })
+      setDoctors(list)
+    })
+    return () => unsub()
+  }, [])
+
+  // Get date range for filtering
+  const getDateRange = useCallback((filterType: string) => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+
+    switch (filterType) {
+      case "today":
+        return {
+          start: today.toISOString(),
+          end: new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        }
+      case "week":
+        const weekStart = new Date(today)
+        weekStart.setDate(today.getDate() - today.getDay())
+        const weekEnd = new Date(weekStart)
+        weekEnd.setDate(weekStart.getDate() + 7)
+        return {
+          start: weekStart.toISOString(),
+          end: weekEnd.toISOString(),
+        }
+      case "month":
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+        const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 1)
+        return {
+          start: monthStart.toISOString(),
+          end: monthEnd.toISOString(),
+        }
+      default:
+        return null
     }
-  }, [searchQuery, summaries, doctors, patientInfos]);
+  }, [])
 
-  //
-  // ——————————————
-  //   GET DISPLAY NAME FOR DOCTOR
-  // ——————————————
-  const getDoctorName = (id: string) => {
-    return doctors.find((d) => d.id === id)?.name || id;
-  };
-
-  //
-  // ————————————————————————————————
-  //   OPEN EDIT DIALOG → FETCH FULL DETAILS
-  // ————————————————————————————————
-  async function openEditDialog(summary: OPD_Summary) {
-    setLoading(true);
-    try {
-      // 1) Fetch full OPD data:
-      const opdSnap = await get(
-        ref(db, `patients/opddetail/${summary.uhid}/${summary.id}`)
-      );
-      const opdData: OPD_Full = opdSnap.val();
-      if (!opdData) {
-        toast.error("Could not load appointment details.");
-        setLoading(false);
-        return;
-      }
-      // 2) Fetch patient info from “patients/patientinfo/{uhid}”:
-      const patientInfoSnap = await get(
-        ref(db, `patients/patientinfo/${summary.uhid}`)
-      );
-      let patientInfo: PatientInfo;
-      if (patientInfoSnap.exists()) {
-        const info = patientInfoSnap.val();
-        patientInfo = {
-          name: info.name,
-          phone: info.phone,
-          age: info.age,
-          gender: info.gender,
-          address: info.address || "",
-        };
+  // Optimized data fetching with Firebase queries
+  const fetchAppointments = useCallback(
+    async (resetData = false) => {
+      if (resetData) {
+        setInitialLoading(true)
+        setAppointments([])
+        setCurrentPage(1)
       } else {
-        // fallback: blank
-        patientInfo = { name: "", phone: "", age: 0, gender: "", address: "" };
+        setLoading(true)
       }
 
-      // 3) Populate form:
+      try {
+        const allAppointments: OPD_Summary[] = []
+        const opdDetailRef = ref(db, "patients/opddetail")
+
+        // Get all patient UHIDs first
+        const uhidsSnapshot = await get(opdDetailRef)
+        if (!uhidsSnapshot.exists()) {
+          setAppointments([])
+          setFilteredAppointments([])
+          setDisplayedAppointments([])
+          return
+        }
+
+        const uhidsData = uhidsSnapshot.val()
+        const uhids = Object.keys(uhidsData)
+
+        // Fetch appointments for each UHID
+        for (const uhid of uhids) {
+          const userOpdRef = ref(db, `patients/opddetail/${uhid}`)
+          let appointmentQuery
+
+          // Apply date filtering at database level for better performance
+          const dateRange = getDateRange(filters.dateFilter)
+          if (dateRange) {
+            appointmentQuery = query(userOpdRef, orderByChild("date"), startAt(dateRange.start), endAt(dateRange.end))
+          } else {
+            appointmentQuery = query(userOpdRef, orderByChild("createdAt"))
+          }
+
+          const snapshot = await get(appointmentQuery)
+          if (snapshot.exists()) {
+            const appointmentsData = snapshot.val()
+            Object.keys(appointmentsData).forEach((appointmentId) => {
+              const appointment = appointmentsData[appointmentId]
+
+              // Apply appointment type filter
+              if (filters.appointmentType !== "all" && appointment.appointmentType !== filters.appointmentType) {
+                return
+              }
+
+              // Apply doctor filter
+              if (filters.doctor !== "all" && appointment.doctor !== filters.doctor) {
+                return
+              }
+
+              allAppointments.push({
+                uhid,
+                id: appointmentId,
+                date: appointment.date,
+                time: appointment.time,
+                serviceName: appointment.serviceName,
+                doctor: appointment.doctor,
+                appointmentType: appointment.appointmentType,
+                opdType: appointment.opdType,
+                name: appointment.name || "Unknown",
+                phone: appointment.phone || "",
+                amount: appointment.amount || 0,
+                createdAt: appointment.createdAt,
+              })
+            })
+          }
+        }
+
+        // Sort by creation date (newest first)
+        allAppointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+        setAppointments(allAppointments)
+      } catch (error) {
+        console.error("Error fetching appointments:", error)
+        toast.error("Failed to load appointments")
+      } finally {
+        setLoading(false)
+        setInitialLoading(false)
+      }
+    },
+    [filters, getDateRange],
+  )
+
+  // Initial data load
+  useEffect(() => {
+    fetchAppointments(true)
+  }, [fetchAppointments])
+
+  // Enhanced search functionality
+  const performSearch = useCallback((query: string, appointmentsList: OPD_Summary[]) => {
+    if (!query.trim()) {
+      return appointmentsList
+    }
+
+    const searchTerm = query.toLowerCase().trim()
+
+    // Only search if query is 4+ characters for names or 5+ digits for phone numbers
+    const isPhoneSearch = /^\d{5,}$/.test(searchTerm)
+    const isNameSearch = searchTerm.length >= 4
+
+    if (!isPhoneSearch && !isNameSearch) {
+      return appointmentsList
+    }
+
+    return appointmentsList.filter((appointment) => {
+      if (isPhoneSearch) {
+        return appointment.phone.includes(searchTerm)
+      }
+
+      if (isNameSearch) {
+        const matchesName = appointment.name.toLowerCase().includes(searchTerm)
+        const matchesService = appointment.serviceName.toLowerCase().includes(searchTerm)
+        const matchesUhid = appointment.uhid.toLowerCase().includes(searchTerm)
+        const doctorName = getDoctorName(appointment.doctor).toLowerCase()
+        const matchesDoctor = doctorName.includes(searchTerm)
+
+        return matchesName || matchesService || matchesUhid || matchesDoctor
+      }
+
+      return false
+    })
+  }, [])
+
+  // Apply search and update filtered appointments
+  useEffect(() => {
+    const filtered = performSearch(searchQuery, appointments)
+    setFilteredAppointments(filtered)
+    setCurrentPage(1) // Reset to first page when search changes
+  }, [searchQuery, appointments, performSearch])
+
+  // Update displayed appointments based on pagination
+  useEffect(() => {
+    const startIndex = 0
+    const endIndex = currentPage * ITEMS_PER_PAGE
+    const displayed = filteredAppointments.slice(startIndex, endIndex)
+    setDisplayedAppointments(displayed)
+    setHasMore(endIndex < filteredAppointments.length)
+  }, [filteredAppointments, currentPage])
+
+  // Load more appointments
+  const loadMore = useCallback(() => {
+    if (hasMore && !loading) {
+      setCurrentPage((prev) => prev + 1)
+    }
+  }, [hasMore, loading])
+
+  // Get doctor name
+  const getDoctorName = useCallback(
+    (id: string) => {
+      return doctors.find((d) => d.id === id)?.name || id
+    },
+    [doctors],
+  )
+
+  // Handle filter changes
+  const handleFilterChange = useCallback((key: keyof FilterOptions, value: string) => {
+    setFilters((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  // Refresh data
+  const refreshData = useCallback(() => {
+    fetchAppointments(true)
+  }, [fetchAppointments])
+
+  // Open edit dialog
+  const openEditDialog = async (summary: OPD_Summary) => {
+    setLoading(true)
+    try {
+      const opdSnap = await get(ref(db, `patients/opddetail/${summary.uhid}/${summary.id}`))
+      const opdData = opdSnap.val()
+      if (!opdData) {
+        toast.error("Could not load appointment details.")
+        return
+      }
+
       reset({
-        name: patientInfo.name,
-        phone: patientInfo.phone,
-        age: Number(patientInfo.age),
-        gender: patientInfo.gender,
-        address: patientInfo.address,
+        name: opdData.name || "",
+        phone: opdData.phone || "",
+        age: Number(opdData.age || 0),
+        gender: opdData.gender || "",
+        address: opdData.address || "",
         date: new Date(opdData.date),
         time: opdData.time,
         paymentMethod: opdData.paymentMethod,
-        amount: opdData.originalAmount,
-        discount: opdData.discount,
+        amount: opdData.originalAmount || opdData.amount,
+        discount: opdData.discount || 0,
         serviceName: opdData.serviceName,
         doctor: opdData.doctor,
         message: opdData.message || "",
         referredBy: opdData.referredBy || "",
-      });
+      })
 
-      setPatientInfoEditing(patientInfo);
-      setUhidEditing(summary.uhid);
-      setOpdIdEditing(summary.id);
-      setEditDialogOpen(true);
+      setUhidEditing(summary.uhid)
+      setOpdIdEditing(summary.id)
+      setEditDialogOpen(true)
     } catch (err) {
-      console.error(err);
-      toast.error("Error loading edit form.");
+      console.error(err)
+      toast.error("Error loading edit form.")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
-  //
-  // ————————————————————————————————
-  //   SAVE EDITED DATA (WITH CHANGE & MESSAGE LOGGING)
-  // ————————————————————————————————
+  // Save edited appointment
   const handleSaveEdit = async (formData: EditFormData) => {
-    if (!uhidEditing || !opdIdEditing) return;
-    setLoading(true);
+    if (!uhidEditing || !opdIdEditing) return
+    setLoading(true)
+
     try {
-      // 1) Detect changes for tracking:
-      const changes: Array<{
-        field: string;
-        oldValue: any;
-        newValue: any;
-      }> = [];
-      const changeMessages: string[] = [];
-
-      // Fetch original OPD again to compare:
-      const origSnap = await get(
-        ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}`)
-      );
-      const orig: any = origSnap.val() || {};
-
-      // a) Patient Name change (comes from patientInfo)
-      if (patientInfoEditing && patientInfoEditing.name !== formData.name) {
-        changes.push({
-          field: "name",
-          oldValue: patientInfoEditing.name,
-          newValue: formData.name,
-        });
-        changeMessages.push(
-          `Edited Patient Name: “${patientInfoEditing.name}” → “${formData.name}”`
-        );
-      }
-
-      // b) Phone change
-      if (patientInfoEditing && patientInfoEditing.phone !== formData.phone) {
-        changes.push({
-          field: "phone",
-          oldValue: patientInfoEditing.phone,
-          newValue: formData.phone,
-        });
-        changeMessages.push(
-          `Edited Phone Number: “${patientInfoEditing.phone}” → “${formData.phone}”`
-        );
-      }
-
-      // c) Age change
-      if (patientInfoEditing && String(patientInfoEditing.age) !== String(formData.age)) {
-        changes.push({
-          field: "age",
-          oldValue: patientInfoEditing.age,
-          newValue: formData.age,
-        });
-        changeMessages.push(
-          `Edited Age: “${patientInfoEditing.age}” → “${formData.age}”`
-        );
-      }
-
-      // d) Gender change
-      if (patientInfoEditing && patientInfoEditing.gender !== formData.gender) {
-        changes.push({
-          field: "gender",
-          oldValue: patientInfoEditing.gender,
-          newValue: formData.gender,
-        });
-        changeMessages.push(
-          `Edited Gender: “${patientInfoEditing.gender}” → “${formData.gender}”`
-        );
-      }
-
-      // e) Address change
-      if (
-        patientInfoEditing &&
-        (patientInfoEditing.address || "") !== formData.address
-      ) {
-        changes.push({
-          field: "address",
-          oldValue: patientInfoEditing.address || "",
-          newValue: formData.address,
-        });
-        changeMessages.push(
-          `Edited Address: “${patientInfoEditing.address || "Not set"}” → “${formData.address || "Not set"}”`
-        );
-      }
-
-      // f) Appointment fields (OPD node) – compare against orig
-      if (orig.date !== formData.date.toISOString()) {
-        changes.push({
-          field: "date",
-          oldValue: orig.date,
-          newValue: formData.date.toISOString(),
-        });
-        changeMessages.push(
-          `Edited Appointment Date: “${new Date(orig.date).toLocaleDateString()}” → “${formData.date.toLocaleDateString()}”`
-        );
-      }
-      if (orig.time !== formData.time) {
-        changes.push({
-          field: "time",
-          oldValue: orig.time,
-          newValue: formData.time,
-        });
-        changeMessages.push(
-          `Edited Appointment Time: “${orig.time}” → “${formData.time}”`
-        );
-      }
-      if (orig.serviceName !== formData.serviceName) {
-        changes.push({
-          field: "serviceName",
-          oldValue: orig.serviceName,
-          newValue: formData.serviceName,
-        });
-        changeMessages.push(
-          `Edited Service Name: “${orig.serviceName}” → “${formData.serviceName}”`
-        );
-      }
-      if (orig.doctor !== formData.doctor) {
-        changes.push({
-          field: "doctor",
-          oldValue: orig.doctor,
-          newValue: formData.doctor,
-        });
-        const oldDocName = doctors.find((d) => d.id === orig.doctor)?.name || orig.doctor;
-        const newDocName = doctors.find((d) => d.id === formData.doctor)?.name || formData.doctor;
-        changeMessages.push(
-          `Edited Doctor: “${oldDocName}” → “${newDocName}”`
-        );
-      }
-      if (orig.paymentMethod !== formData.paymentMethod) {
-        changes.push({
-          field: "paymentMethod",
-          oldValue: orig.paymentMethod,
-          newValue: formData.paymentMethod,
-        });
-        changeMessages.push(
-          `Edited Payment Method: “${orig.paymentMethod}” → “${formData.paymentMethod}”`
-        );
-      }
-      if (orig.originalAmount !== formData.amount) {
-        changes.push({
-          field: "originalAmount",
-          oldValue: orig.originalAmount,
-          newValue: formData.amount,
-        });
-        changeMessages.push(
-          `Edited Original Amount: “₹${orig.originalAmount}” → “₹${formData.amount}”`
-        );
-      }
-      if (orig.discount !== formData.discount) {
-        changes.push({
-          field: "discount",
-          oldValue: orig.discount,
-          newValue: formData.discount,
-        });
-        changeMessages.push(
-          `Edited Discount: “₹${orig.discount}” → “₹${formData.discount}”`
-        );
-      }
-      const newFinal = formData.amount - formData.discount;
-      if (orig.amount !== newFinal) {
-        changes.push({
-          field: "amount",
-          oldValue: orig.amount,
-          newValue: newFinal,
-        });
-        changeMessages.push(
-          `Edited Final Amount: “₹${orig.amount}” → “₹${newFinal}”`
-        );
-      }
-      if ((orig.message || "") !== formData.message) {
-        changes.push({
-          field: "message",
-          oldValue: orig.message || "",
-          newValue: formData.message,
-        });
-        changeMessages.push(
-          `Edited Notes: “${orig.message || "None"}” → “${formData.message || "None"}”`
-        );
-      }
-      if ((orig.referredBy || "") !== formData.referredBy) {
-        changes.push({
-          field: "referredBy",
-          oldValue: orig.referredBy || "",
-          newValue: formData.referredBy,
-        });
-        changeMessages.push(
-          `Edited Referred By: “${
-            orig.referredBy || "None"
-          }” → “${formData.referredBy || "None"}”`
-        );
-      }
-
-      // 2) Write to `opdChanges` only if something changed:
-      if (changes.length > 0) {
-        const patientName = formData.name;
-        const changesRef = ref(db, "opdChanges");
-        const newChangeRef = push(changesRef);
-        await set(newChangeRef, {
-          type: "edit",
-          appointmentId: opdIdEditing,
-          patientId: uhidEditing,
-          patientName: patientName,
-          changes: changes,
-          changeMessages: changeMessages,
-          editedBy: currentUserEmail || "unknown",
-          editedAt: new Date().toISOString(),
-        });
-      }
-
-      // 3) Update patient info if name/phone/age/gender/address changed:
-      const patientChanges: any = {};
-      if (patientInfoEditing) {
-        if (patientInfoEditing.name !== formData.name) {
-          patientChanges.name = formData.name;
-        }
-        if (patientInfoEditing.phone !== formData.phone) {
-          patientChanges.phone = formData.phone;
-        }
-        if (String(patientInfoEditing.age) !== String(formData.age)) {
-          patientChanges.age = String(formData.age);
-        }
-        if (patientInfoEditing.gender !== formData.gender) {
-          patientChanges.gender = formData.gender;
-        }
-        if ((patientInfoEditing.address || "") !== formData.address) {
-          patientChanges.address = formData.address;
-        }
-      }
-      if (Object.keys(patientChanges).length > 0) {
-        await update(
-          ref(db, `patients/patientinfo/${uhidEditing}`),
-          patientChanges
-        );
-      }
-
-      // 4) Update the OPD node:
       const updatedData: any = {
+        name: formData.name,
+        phone: formData.phone,
+        age: String(formData.age),
+        gender: formData.gender,
+        address: formData.address,
         date: formData.date.toISOString(),
         time: formData.time,
         paymentMethod: formData.paymentMethod,
@@ -737,84 +477,89 @@ export default function ManageOPDPage() {
         referredBy: formData.referredBy,
         lastModifiedBy: currentUserEmail || "unknown",
         lastModifiedAt: new Date().toISOString(),
-      };
-      await update(
-        ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}`),
-        updatedData
-      );
+      }
 
-      toast.success("Appointment updated successfully!");
-      setEditDialogOpen(false);
-      setUhidEditing(null);
-      setOpdIdEditing(null);
-      setPatientInfoEditing(null);
+      await update(ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}`), updatedData)
+
+      // Log the change
+      const changesRef = ref(db, "opdChanges")
+      const newChangeRef = push(changesRef)
+      await set(newChangeRef, {
+        type: "edit",
+        appointmentId: opdIdEditing,
+        patientId: uhidEditing,
+        patientName: formData.name,
+        editedBy: currentUserEmail || "unknown",
+        editedAt: new Date().toISOString(),
+      })
+
+      toast.success("Appointment updated successfully!")
+      setEditDialogOpen(false)
+      setUhidEditing(null)
+      setOpdIdEditing(null)
+
+      // Refresh data
+      refreshData()
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to save changes.");
+      console.error(err)
+      toast.error("Failed to save changes.")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  //
-  // ————————————————————————————————
-  //   DELETE APPOINTMENT (WITH CHANGE LOGGING)
-  // ————————————————————————————————
+  // Delete appointment
   const handleDeleteAppointment = async () => {
-    if (!toDeleteSummary) return;
-    setLoading(true);
-    try {
-      // 1) Fetch full OPD data for logging:
-      const fullSnap = await get(
-        ref(db, `patients/opddetail/${toDeleteSummary.uhid}/${toDeleteSummary.id}`)
-      );
-      const fullData: any = fullSnap.val() || {};
-      // Build appointmentData object for change log:
-      const patientInfo = patientInfos[toDeleteSummary.uhid] || {
-        name: "Unknown",
-        phone: "",
-        age: "",
-        gender: "",
-        address: "",
-      };
-      const appointmentDataLog: Record<string, any> = {
-        patientName: patientInfo.name,
-        phone: patientInfo.phone,
-        date: fullData.date,
-        time: fullData.time,
-        serviceName: fullData.serviceName,
-        doctor: fullData.doctor,
-        amount: fullData.amount,
-        appointmentType: fullData.appointmentType,
-      };
+    if (!toDeleteSummary) return
+    setLoading(true)
 
-      // 2) Log the delete in `opdChanges`:
-      const changesRef = ref(db, "opdChanges");
-      const newChangeRef = push(changesRef);
+    try {
+      // Log the delete
+      const changesRef = ref(db, "opdChanges")
+      const newChangeRef = push(changesRef)
       await set(newChangeRef, {
         type: "delete",
         appointmentId: toDeleteSummary.id,
         patientId: toDeleteSummary.uhid,
-        patientName: patientInfo.name,
-        appointmentData: appointmentDataLog,
+        patientName: toDeleteSummary.name,
         deletedBy: currentUserEmail || "unknown",
         deletedAt: new Date().toISOString(),
-      });
+      })
 
-      // 3) Remove the OPD node:
-      await remove(
-        ref(db, `patients/opddetail/${toDeleteSummary.uhid}/${toDeleteSummary.id}`)
-      );
-      toast.success("Appointment deleted successfully!");
-      setDeleteDialogOpen(false);
-      setToDeleteSummary(null);
+      // Remove the appointment
+      await remove(ref(db, `patients/opddetail/${toDeleteSummary.uhid}/${toDeleteSummary.id}`))
+
+      toast.success("Appointment deleted successfully!")
+      setDeleteDialogOpen(false)
+      setToDeleteSummary(null)
+
+      // Refresh data
+      refreshData()
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to delete appointment.");
+      console.error(err)
+      toast.error("Failed to delete appointment.")
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
+
+  // Memoized filter summary
+  const filterSummary = useMemo(() => {
+    const total = filteredAppointments.length
+    const showing = displayedAppointments.length
+    return { total, showing }
+  }, [filteredAppointments.length, displayedAppointments.length])
+
+  if (initialLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4 text-emerald-600" />
+          <p className="text-lg text-gray-600">Loading appointments...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <>
@@ -826,14 +571,22 @@ export default function ManageOPDPage() {
             <CardHeader className="bg-gradient-to-r from-emerald-500 to-teal-600 text-white">
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="text-2xl md:text-3xl font-bold">
-                    Manage OPD Appointments
-                  </CardTitle>
+                  <CardTitle className="text-2xl md:text-3xl font-bold">Manage OPD Appointments</CardTitle>
                   <CardDescription className="text-emerald-100">
-                    Streamlined list (minimal data) & on‐demand details
+                    Optimized with pagination, search & filtering
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={refreshData}
+                    disabled={loading}
+                    className="bg-white/20 hover:bg-white/30 text-white border-white/30"
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -841,7 +594,7 @@ export default function ManageOPDPage() {
                     className="bg-white/20 hover:bg-white/30 text-white border-white/30"
                   >
                     <History className="mr-2 h-4 w-4" />
-                    View Changes
+                    Changes
                   </Button>
                   <Button
                     variant="outline"
@@ -850,149 +603,207 @@ export default function ManageOPDPage() {
                     className="bg-white/20 hover:bg-white/30 text-white border-white/30"
                   >
                     <ArrowLeft className="mr-2 h-4 w-4" />
-                    Back to Booking
+                    Back
                   </Button>
                 </div>
               </div>
             </CardHeader>
 
             <CardContent className="p-6">
-              {/* Search Bar */}
-              <div className="mb-6">
+              {/* Search and Filters */}
+              <div className="mb-6 space-y-4">
+                {/* Search Bar */}
                 <div className="flex flex-col sm:flex-row gap-4 items-center">
                   <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                     <Input
-                      placeholder="Search by UHID, service, doctor, patient name, or phone..."
+                      placeholder="Search: 4+ chars for name, 5+ digits for phone..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
                     />
                   </div>
-                  <div className="text-sm text-gray-600">
-                    Total: {filtered.length} appointments
+
+                  {/* Filters */}
+                  <div className="flex gap-2">
+                    {/* Date Filter */}
+                    <Select
+                      value={filters.dateFilter}
+                      onValueChange={(value) => handleFilterChange("dateFilter", value)}
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="today">Today</SelectItem>
+                        <SelectItem value="week">This Week</SelectItem>
+                        <SelectItem value="month">This Month</SelectItem>
+                        <SelectItem value="all">All Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Appointment Type Filter */}
+                    <Select
+                      value={filters.appointmentType}
+                      onValueChange={(value) => handleFilterChange("appointmentType", value)}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Types</SelectItem>
+                        <SelectItem value="visithospital">Hospital Visit</SelectItem>
+                        <SelectItem value="oncall">On Call</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Doctor Filter */}
+                    <Select value={filters.doctor} onValueChange={(value) => handleFilterChange("doctor", value)}>
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {doctors.map((doctor) => (
+                          <SelectItem key={doctor.id} value={doctor.id}>
+                            {doctor.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
+                </div>
+
+                {/* Results Summary */}
+                <div className="flex justify-between items-center text-sm text-gray-600">
+                  <div>
+                    Showing {filterSummary.showing} of {filterSummary.total} appointments
+                    {searchQuery && <span className="ml-2 text-emerald-600">(filtered by: {searchQuery})</span>}
+                  </div>
+                  {searchQuery && searchQuery.length > 0 && searchQuery.length < 4 && !/^\d{5,}$/.test(searchQuery) && (
+                    <div className="text-amber-600 text-xs">
+                      Enter 4+ characters for name search or 5+ digits for phone search
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Summaries List */}
-              {filtered.length === 0 ? (
+              {/* Appointments List */}
+              {displayedAppointments.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   {searchQuery
                     ? "No matching appointments found"
-                    : "No OPD appointments available"}
+                    : "No appointments available for the selected filters"}
                 </div>
               ) : (
-                <ScrollArea className="h-[600px]">
-                  <div className="space-y-4">
-                    {filtered.map((s) => {
-                      const pInfo = patientInfos[s.uhid] || {
-                        name: "Unknown",
-                        phone: "",
-                        age: "",
-                        gender: "",
-                        address: "",
-                      };
-                      return (
-                        <Card
-                          key={`${s.uhid}-${s.id}`}
-                          className="overflow-hidden hover:shadow-md transition-shadow"
-                        >
-                          <CardHeader className="bg-gray-50 dark:bg-gray-800 p-4">
-                            <div className="flex justify-between items-start">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-3 mb-2">
-                                  <CardTitle className="text-lg">{s.uhid}</CardTitle>
-                                  <Badge variant="outline">
-                                    {s.opdType.toUpperCase()}
-                                  </Badge>
-                                  <Badge
-                                    variant={
-                                      s.appointmentType === "visithospital"
-                                        ? "default"
-                                        : "secondary"
-                                    }
-                                  >
-                                    {s.appointmentType === "visithospital"
-                                      ? "Hospital Visit"
-                                      : "On-Call"}
-                                  </Badge>
-                                </div>
-
-                                {/* Patient Name and Phone */}
-                                <div className="text-sm text-gray-700 mb-2 flex items-center gap-2">
-                                  <UserIcon className="h-4 w-4" />
-                                  <span>{pInfo.name}</span>
-                                  {pInfo.phone && (
-                                    <>
-                                      <Phone className="h-4 w-4" />
-                                      <span>{pInfo.phone}</span>
-                                    </>
-                                  )}
-                                </div>
-
-                                <CardDescription className="flex items-center gap-4">
-                                  <span className="flex items-center gap-1">
-                                    <Calendar className="h-4 w-4" />
-                                    {new Date(s.date).toLocaleDateString()} at{" "}
-                                    {s.time}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <Stethoscope className="h-4 w-4" />
-                                    {s.serviceName}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <UserIcon className="h-4 w-4" />
-                                    {getDoctorName(s.doctor)}
-                                  </span>
-                                </CardDescription>
-                              </div>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openEditDialog(s)}
-                                  className="text-blue-600 hover:text-blue-700"
-                                >
-                                  <Edit className="h-4 w-4 mr-1" />
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setToDeleteSummary(s);
-                                    setDeleteDialogOpen(true);
-                                  }}
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-1" />
-                                  Delete
-                                </Button>
-                              </div>
+                <div className="space-y-4">
+                  {displayedAppointments.map((appointment) => (
+                    <Card
+                      key={`${appointment.uhid}-${appointment.id}`}
+                      className="overflow-hidden hover:shadow-md transition-shadow"
+                    >
+                      <CardHeader className="bg-gray-50 dark:bg-gray-800 p-4">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <CardTitle className="text-lg">{appointment.uhid}</CardTitle>
+                              <Badge variant="outline">{appointment.opdType.toUpperCase()}</Badge>
+                              <Badge
+                                variant={appointment.appointmentType === "visithospital" ? "default" : "secondary"}
+                              >
+                                {appointment.appointmentType === "visithospital" ? "Hospital Visit" : "On-Call"}
+                              </Badge>
                             </div>
-                          </CardHeader>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </ScrollArea>
+
+                            <div className="text-sm text-gray-700 mb-2 flex items-center gap-4">
+                              <span className="flex items-center gap-1">
+                                <UserIcon className="h-4 w-4" />
+                                {appointment.name}
+                              </span>
+                              {appointment.phone && (
+                                <span className="flex items-center gap-1">
+                                  <Phone className="h-4 w-4" />
+                                  {appointment.phone}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1">
+                                <DollarSign className="h-4 w-4" />₹{appointment.amount}
+                              </span>
+                            </div>
+
+                            <CardDescription className="flex items-center gap-4">
+                              <span className="flex items-center gap-1">
+                                <Calendar className="h-4 w-4" />
+                                {new Date(appointment.date).toLocaleDateString()} at {appointment.time}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Stethoscope className="h-4 w-4" />
+                                {appointment.serviceName}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <UserIcon className="h-4 w-4" />
+                                {getDoctorName(appointment.doctor)}
+                              </span>
+                            </CardDescription>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditDialog(appointment)}
+                              className="text-blue-600 hover:text-blue-700"
+                            >
+                              <Edit className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setToDeleteSummary(appointment)
+                                setDeleteDialogOpen(true)
+                              }}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  ))}
+
+                  {/* Load More Button */}
+                  {hasMore && (
+                    <div className="text-center pt-4">
+                      <Button onClick={loadMore} disabled={loading} variant="outline" className="w-full max-w-xs">
+                        {loading ? (
+                          <>
+                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                            Loading...
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="mr-2 h-4 w-4" />
+                            Load More ({filteredAppointments.length - displayedAppointments.length} remaining)
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* ————————————————
-          EDIT DIALOG
-         ———————————————— */}
+      {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Appointment</DialogTitle>
-            <DialogDescription>
-              Modify details for UHID {uhidEditing}
-            </DialogDescription>
+            <DialogDescription>Modify details for UHID {uhidEditing}</DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSubmit(handleSaveEdit)} className="space-y-6">
@@ -1007,9 +818,7 @@ export default function ManageOPDPage() {
                   {...register("name", { required: "Name is required" })}
                   placeholder="Enter patient name"
                 />
-                {errors.name && (
-                  <p className="text-sm text-red-500">{errors.name.message}</p>
-                )}
+                {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
               </div>
 
               {/* Phone Number */}
@@ -1028,9 +837,7 @@ export default function ManageOPDPage() {
                   })}
                   placeholder="Enter phone"
                 />
-                {errors.phone && (
-                  <p className="text-sm text-red-500">{errors.phone.message}</p>
-                )}
+                {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
               </div>
 
               {/* Age */}
@@ -1047,9 +854,7 @@ export default function ManageOPDPage() {
                   })}
                   placeholder="Enter age"
                 />
-                {errors.age && (
-                  <p className="text-sm text-red-500">{errors.age.message}</p>
-                )}
+                {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
               </div>
 
               {/* Gender */}
@@ -1076,9 +881,7 @@ export default function ManageOPDPage() {
                     </Select>
                   )}
                 />
-                {errors.gender && (
-                  <p className="text-sm text-red-500">{errors.gender.message}</p>
-                )}
+                {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
               </div>
 
               {/* Address */}
@@ -1111,9 +914,7 @@ export default function ManageOPDPage() {
                     />
                   )}
                 />
-                {errors.date && (
-                  <p className="text-sm text-red-500">{errors.date.message}</p>
-                )}
+                {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
               </div>
 
               {/* Time */}
@@ -1126,9 +927,7 @@ export default function ManageOPDPage() {
                   {...register("time", { required: "Time is required" })}
                   placeholder="e.g. 10:30 AM"
                 />
-                {errors.time && (
-                  <p className="text-sm text-red-500">{errors.time.message}</p>
-                )}
+                {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
               </div>
 
               {/* Service Name */}
@@ -1143,11 +942,7 @@ export default function ManageOPDPage() {
                   })}
                   placeholder="Enter service"
                 />
-                {errors.serviceName && (
-                  <p className="text-sm text-red-500">
-                    {errors.serviceName.message}
-                  </p>
-                )}
+                {errors.serviceName && <p className="text-sm text-red-500">{errors.serviceName.message}</p>}
               </div>
 
               {/* Doctor */}
@@ -1165,124 +960,89 @@ export default function ManageOPDPage() {
                         <SelectValue placeholder="Select doctor" />
                       </SelectTrigger>
                       <SelectContent>
-                        {doctors.map((doc) => (
-                          <SelectItem key={doc.id} value={doc.id}>
-                            {doc.name} {doc.specialty ? `(${doc.specialty})` : ""}
+                        {doctors
+                          .filter((doc) => doc.id !== "all")
+                          .map((doc) => (
+                            <SelectItem key={doc.id} value={doc.id}>
+                              {doc.name} {doc.specialty ? `(${doc.specialty})` : ""}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
+              </div>
+
+              {/* Payment Method */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-paymentMethod">
+                  Payment Method <span className="text-red-500">*</span>
+                </Label>
+                <Controller
+                  control={control}
+                  name="paymentMethod"
+                  rules={{ required: "Payment method is required" }}
+                  render={({ field }) => (
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select payment" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PaymentOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   )}
                 />
-                {errors.doctor && (
-                  <p className="text-sm text-red-500">{errors.doctor.message}</p>
-                )}
+                {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
               </div>
 
-              {/* Payment/Amount (only for hospital visits) */}
-              {(() => {
-                const summary = summaries.find(
-                  (x) => x.uhid === uhidEditing && x.id === opdIdEditing
-                );
-                if (summary?.appointmentType === "visithospital") {
-                  return (
-                    <>
-                      {/* Payment Method */}
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-paymentMethod">
-                          Payment Method <span className="text-red-500">*</span>
-                        </Label>
-                        <Controller
-                          control={control}
-                          name="paymentMethod"
-                          rules={{ required: "Payment method is required" }}
-                          render={({ field }) => (
-                            <Select
-                              onValueChange={field.onChange}
-                              value={field.value}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select payment" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PaymentOptions.map((opt) => (
-                                  <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        {errors.paymentMethod && (
-                          <p className="text-sm text-red-500">
-                            {errors.paymentMethod.message}
-                          </p>
-                        )}
-                      </div>
+              {/* Amount */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-amount">
+                  Amount (₹) <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="edit-amount"
+                  type="number"
+                  {...register("amount", {
+                    required: "Amount is required",
+                    min: { value: 0, message: "Amount must be ≥ 0" },
+                  })}
+                  placeholder="Enter amount"
+                />
+                {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
+              </div>
 
-                      {/* Amount */}
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-amount">
-                          Amount (₹) <span className="text-red-500">*</span>
-                        </Label>
-                        <Input
-                          id="edit-amount"
-                          type="number"
-                          {...register("amount", {
-                            required: "Amount is required",
-                            min: { value: 0, message: "Amount must be ≥ 0" },
-                          })}
-                          placeholder="Enter amount"
-                        />
-                        {errors.amount && (
-                          <p className="text-sm text-red-500">
-                            {errors.amount.message}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Discount */}
-                      <div className="space-y-2">
-                        <Label htmlFor="edit-discount">Discount (₹)</Label>
-                        <Input
-                          id="edit-discount"
-                          type="number"
-                          {...register("discount", {
-                            min: { value: 0, message: "Discount must be ≥ 0" },
-                            validate: (val) => {
-                              const amt = watch("amount");
-                              return val <= amt || "Discount cannot exceed amount";
-                            },
-                          })}
-                          placeholder="Enter discount"
-                        />
-                        {errors.discount && (
-                          <p className="text-sm text-red-500">
-                            {errors.discount.message}
-                          </p>
-                        )}
-                        {watch("discount") > 0 && (
-                          <p className="text-sm text-emerald-600">
-                            Final: ₹{watch("amount") - watch("discount")}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  );
-                } else {
-                  return null;
-                }
-              })()}
+              {/* Discount */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-discount">Discount (₹)</Label>
+                <Input
+                  id="edit-discount"
+                  type="number"
+                  {...register("discount", {
+                    min: { value: 0, message: "Discount must be ≥ 0" },
+                    validate: (val) => {
+                      const amt = watch("amount")
+                      return val <= amt || "Discount cannot exceed amount"
+                    },
+                  })}
+                  placeholder="Enter discount"
+                />
+                {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
+                {watch("discount") > 0 && (
+                  <p className="text-sm text-emerald-600">Final: ₹{watch("amount") - watch("discount")}</p>
+                )}
+              </div>
 
               {/* Referred By */}
               <div className="space-y-2">
                 <Label htmlFor="edit-referredBy">Referred By</Label>
-                <Input
-                  id="edit-referredBy"
-                  {...register("referredBy")}
-                  placeholder="Enter referrer name"
-                />
+                <Input id="edit-referredBy" {...register("referredBy")} placeholder="Enter referrer name" />
               </div>
 
               {/* Message */}
@@ -1298,18 +1058,10 @@ export default function ManageOPDPage() {
             </div>
 
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditDialogOpen(false)}
-              >
+              <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                disabled={loading}
-                className="bg-emerald-600 hover:bg-emerald-700"
-              >
+              <Button type="submit" disabled={loading} className="bg-emerald-600 hover:bg-emerald-700">
                 {loading ? "Saving..." : "Save Changes"}
               </Button>
             </DialogFooter>
@@ -1317,23 +1069,18 @@ export default function ManageOPDPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ————————————————
-          DELETE CONFIRMATION DIALOG
-         ———————————————— */}
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Appointment</AlertDialogTitle>
             <div className="text-sm text-gray-600 mt-1">
-              Are you sure you want to delete the appointment for UHID{" "}
-              {toDeleteSummary?.uhid}? This action is tracked and cannot be
-              undone.
+              Are you sure you want to delete the appointment for <strong>{toDeleteSummary?.name}</strong> (UHID:{" "}
+              {toDeleteSummary?.uhid})? This action cannot be undone.
             </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setToDeleteSummary(null)}>
-              Cancel
-            </AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setToDeleteSummary(null)}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteAppointment}
               className="bg-red-500 hover:bg-red-600"
@@ -1345,5 +1092,5 @@ export default function ManageOPDPage() {
         </AlertDialogContent>
       </AlertDialog>
     </>
-  );
+  )
 }

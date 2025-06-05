@@ -1,162 +1,167 @@
-// app/admin/mortality-dashboard/page.tsx
+"use client"
 
-"use client";
+import type React from "react"
+import { useState, useEffect } from "react"
+import Head from "next/head"
+import { ref, query, orderByChild, limitToLast, onValue } from "firebase/database"
+import { db } from "../../lib/firebase"
+import { format, parseISO, subDays, isAfter } from "date-fns"
+import { Bar } from "react-chartjs-2"
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from "chart.js"
+import { AiOutlineCalendar, AiOutlineSearch } from "react-icons/ai"
+import { ToastContainer, toast } from "react-toastify"
+import "react-toastify/dist/ReactToastify.css"
 
-import React, { useState, useEffect } from "react";
-import Head from "next/head";
-import { ref, onValue } from "firebase/database";
-import { db } from "../../lib/firebase";
-import { format, isSameDay, parseISO, startOfMonth, endOfMonth, getDaysInMonth } from "date-fns";
-import { Bar } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-} from "chart.js";
-import { AiOutlineCalendar } from "react-icons/ai";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
-// Register Chart.js components
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
-
-// TypeScript Interface for Mortality Reports
 interface IMortalityReport {
-  id: string; // Composite key: `${uhid}_mortality_${mortalityKey}`
-  name: string;
-  admissionDate: string; // ISO date string from mortality data
-  age: number;
-  dateOfDeath: string; // ISO date string from mortality data
-  medicalFindings: string;
-  timeSpanDays: number;
-  timestamp: number; // Unix timestamp from mortality data
+  id: string
+  patientId: string
+  patientName: string
+  admissionDate: string
+  dateOfDeath: string
+  medicalFindings: string
+  timeSpanDays: number
+  createdAt: string
+  enteredBy: string
+}
+
+interface IPatientInfo {
+  uhid: string
+  name: string
+  age: number
+  phone: string
+  address: string
+  gender: string
 }
 
 const MortalityDashboardPage: React.FC = () => {
-  const [reports, setReports] = useState<IMortalityReport[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [filterDate, setFilterDate] = useState<string>(""); // When empty, show all reports
-  const [totalDeathsToday, setTotalDeathsToday] = useState<number>(0);
-  const [monthlyData, setMonthlyData] = useState<{ [key: string]: number }>({});
-  const [searchQuery, setSearchQuery] = useState<string>(""); // For search functionality
+  const [reports, setReports] = useState<IMortalityReport[]>([])
+  const [patientInfo, setPatientInfo] = useState<{ [key: string]: IPatientInfo }>({})
+  const [loading, setLoading] = useState<boolean>(true)
+  const [filterDate, setFilterDate] = useState<string>("")
+  const [searchQuery, setSearchQuery] = useState<string>("")
+  const [showAllData, setShowAllData] = useState<boolean>(false)
 
-  // Fetch mortality reports by extracting them from each patient record in the "patients" node.
+  // Calculate 7 days ago for default filtering
+  const sevenDaysAgo = subDays(new Date(), 7)
+
+  // Fetch patient info (cached for performance)
   useEffect(() => {
-    const patientsRef = ref(db, "patients");
-    onValue(
-      patientsRef,
+    const patientsRef = ref(db, "patients/patientinfo")
+    const unsubscribe = onValue(patientsRef, (snapshot) => {
+      const data = snapshot.val()
+      if (data) {
+        setPatientInfo(data)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Fetch mortality reports with optimized query
+  useEffect(() => {
+    const mortalityRef = ref(db, "patients/mortalitydetail")
+    let mortalityQuery
+
+    if (showAllData) {
+      // Load all data when explicitly requested
+      mortalityQuery = query(mortalityRef, orderByChild("createdAt"))
+    } else {
+      // Load only recent data by default (last 50 records)
+      mortalityQuery = query(mortalityRef, orderByChild("createdAt"), limitToLast(50))
+    }
+
+    const unsubscribe = onValue(
+      mortalityQuery,
       (snapshot) => {
-        const data = snapshot.val();
-        const fetchedReports: IMortalityReport[] = [];
+        const data = snapshot.val()
+        const fetchedReports: IMortalityReport[] = []
+
         if (data) {
-          Object.entries(data).forEach(([uhid, patientData]: [string, any]) => {
-            // If a patient record has mortality data, extract it.
-            if (patientData.mortality) {
-              Object.entries(patientData.mortality).forEach(
-                ([mortalityKey, mortalityData]: [string, any]) => {
+          Object.entries(data).forEach(([patientId, mortalityRecords]: [string, any]) => {
+            if (mortalityRecords) {
+              Object.entries(mortalityRecords).forEach(([mortalityId, mortalityData]: [string, any]) => {
+                // Filter by last 7 days if not showing all data
+                const reportDate = parseISO(mortalityData.dateOfDeath)
+                if (showAllData || isAfter(reportDate, sevenDaysAgo)) {
                   fetchedReports.push({
-                    id: `${uhid}_mortality_${mortalityKey}`,
-                    name: patientData.name,
+                    id: `${patientId}_${mortalityId}`,
+                    patientId,
+                    patientName: mortalityData.patientName,
                     admissionDate: mortalityData.admissionDate,
-                    age: patientData.age,
                     dateOfDeath: mortalityData.dateOfDeath,
                     medicalFindings: mortalityData.medicalFindings,
                     timeSpanDays: mortalityData.timeSpanDays,
-                    timestamp: mortalityData.timestamp,
-                  });
+                    createdAt: mortalityData.createdAt,
+                    enteredBy: mortalityData.enteredBy,
+                  })
                 }
-              );
+              })
             }
-          });
+          })
         }
-        setReports(fetchedReports);
-        setLoading(false);
+
+        // Sort by date of death (most recent first)
+        fetchedReports.sort((a, b) => new Date(b.dateOfDeath).getTime() - new Date(a.dateOfDeath).getTime())
+
+        setReports(fetchedReports)
+        setLoading(false)
       },
       (error) => {
-        console.error("Error fetching mortality reports:", error);
+        console.error("Error fetching mortality reports:", error)
         toast.error("Failed to fetch mortality reports.", {
           position: "top-right",
           autoClose: 5000,
-        });
-        setLoading(false);
-      }
-    );
-  }, []);
+        })
+        setLoading(false)
+      },
+    )
 
-  // Calculate total deaths today (using dateOfDeath)
-  useEffect(() => {
-    const today = new Date();
-    const count = reports.filter((report) =>
-      isSameDay(parseISO(report.dateOfDeath), today)
-    ).length;
-    setTotalDeathsToday(count);
-  }, [reports]);
+    return () => unsubscribe()
+  }, [showAllData, sevenDaysAgo])
 
-  // Calculate monthly deaths for the current month for charting
-  useEffect(() => {
-    const currentMonthStart = startOfMonth(new Date());
-    const currentMonthEnd = endOfMonth(new Date());
-    const monthlyReports = reports.filter((report) => {
-      const deathDate = parseISO(report.dateOfDeath);
-      return deathDate >= currentMonthStart && deathDate <= currentMonthEnd;
-    });
+  // Calculate statistics
+  const totalDeathsToday = reports.filter(
+    (report) => format(parseISO(report.dateOfDeath), "yyyy-MM-dd") === format(new Date(), "yyyy-MM-dd"),
+  ).length
 
-    const daysInMonth = getDaysInMonth(new Date());
-    const data: { [key: string]: number } = {};
+  const totalDeathsLast7Days = reports.filter((report) => isAfter(parseISO(report.dateOfDeath), sevenDaysAgo)).length
 
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(currentMonthStart);
-      date.setDate(day);
-      const formattedDate = format(date, "yyyy-MM-dd");
-      const count = monthlyReports.filter(
-        (report) => report.dateOfDeath === formattedDate
-      ).length;
-      data[day.toString()] = count;
-    }
-
-    setMonthlyData(data);
-  }, [reports]);
-
-  // Chart Data for Monthly Deaths
+  // Prepare chart data for last 7 days
   const chartData = {
-    labels: Object.keys(monthlyData).map((day) => `Day ${day}`),
+    labels: Array.from({ length: 7 }, (_, i) => {
+      const date = subDays(new Date(), 6 - i)
+      return format(date, "MMM dd")
+    }),
     datasets: [
       {
-        label: "Total Deaths",
-        data: Object.values(monthlyData),
-        backgroundColor: "rgba(220, 38, 38, 0.7)", // red-600 with opacity
+        label: "Deaths per Day",
+        data: Array.from({ length: 7 }, (_, i) => {
+          const date = format(subDays(new Date(), 6 - i), "yyyy-MM-dd")
+          return reports.filter((report) => format(parseISO(report.dateOfDeath), "yyyy-MM-dd") === date).length
+        }),
+        backgroundColor: "rgba(220, 38, 38, 0.7)",
       },
     ],
-  };
+  }
 
-  // Chart Options
   const chartOptions = {
     responsive: true,
     plugins: {
       legend: { position: "top" as const },
-      title: { display: true, text: "Total Deaths This Month" },
+      title: { display: true, text: "Deaths in Last 7 Days" },
     },
-  };
+  }
 
-  // Filter reports based on filterDate and searchQuery.
-  // If filterDate is empty, all reports are shown.
-  const filteredReports = reports
-    .filter((report) => {
-      if (filterDate) {
-        return report.dateOfDeath === filterDate;
-      }
-      return true;
-    })
-    .filter((report) => {
-      if (searchQuery) {
-        return report.name.toLowerCase().includes(searchQuery.toLowerCase());
-      }
-      return true;
-    });
+  // Filter reports based on search and date
+  const filteredReports = reports.filter((report) => {
+    const matchesDate = filterDate ? report.dateOfDeath === filterDate : true
+    const matchesSearch = searchQuery
+      ? report.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        report.patientId.toLowerCase().includes(searchQuery.toLowerCase())
+      : true
+    return matchesDate && matchesSearch
+  })
 
   return (
     <>
@@ -170,23 +175,49 @@ const MortalityDashboardPage: React.FC = () => {
 
       <main className="min-h-screen bg-gray-100 p-6">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-4xl font-bold text-center text-gray-800 mb-8">
-            Mortality Dashboard
-          </h1>
+          <h1 className="text-4xl font-bold text-center text-gray-800 mb-8">Mortality Dashboard</h1>
 
-          {/* Total Deaths Today */}
-          <div className="bg-white shadow rounded-lg p-6 mb-8">
-            <h2 className="text-2xl font-semibold text-gray-700 mb-4">
-              Total Deaths Today
-            </h2>
-            <p className="text-5xl font-bold text-red-600">
-              {totalDeathsToday}
-            </p>
+          {/* Statistics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">Deaths Today</h2>
+              <p className="text-3xl font-bold text-red-600">{totalDeathsToday}</p>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">Deaths Last 7 Days</h2>
+              <p className="text-3xl font-bold text-orange-600">{totalDeathsLast7Days}</p>
+            </div>
+            <div className="bg-white shadow rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-gray-700 mb-2">Total Records Loaded</h2>
+              <p className="text-3xl font-bold text-blue-600">{reports.length}</p>
+            </div>
           </div>
 
-          {/* Monthly Deaths Graph */}
+          {/* Chart */}
           <div className="bg-white shadow rounded-lg p-6 mb-8">
             <Bar data={chartData} options={chartOptions} />
+          </div>
+
+          {/* Data Load Toggle */}
+          <div className="bg-white shadow rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-700">Data View</h3>
+                <p className="text-sm text-gray-500">
+                  {showAllData
+                    ? "Showing all mortality records (may increase data usage)"
+                    : "Showing last 7 days only (optimized for cost)"}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllData(!showAllData)}
+                className={`px-4 py-2 rounded-lg transition duration-200 ${
+                  showAllData ? "bg-red-600 text-white hover:bg-red-700" : "bg-green-600 text-white hover:bg-green-700"
+                }`}
+              >
+                {showAllData ? "Show Last 7 Days Only" : "Load All Data"}
+              </button>
+            </div>
           </div>
 
           {/* Filters */}
@@ -201,41 +232,36 @@ const MortalityDashboardPage: React.FC = () => {
                 className="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
               />
               {filterDate && (
-                <button
-                  onClick={() => setFilterDate("")}
-                  className="text-red-500 hover:underline"
-                >
+                <button onClick={() => setFilterDate("")} className="text-red-500 hover:underline">
                   Clear
                 </button>
               )}
             </div>
 
-            {/* Search by Patient Name */}
+            {/* Search */}
             <div className="flex items-center space-x-2">
-              <AiOutlineCalendar className="text-gray-500" />
+              <AiOutlineSearch className="text-gray-500" />
               <input
                 type="text"
-                placeholder="Search by patient name"
+                placeholder="Search by patient name or ID"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-500"
               />
               {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="text-red-500 hover:underline"
-                >
+                <button onClick={() => setSearchQuery("")} className="text-red-500 hover:underline">
                   Clear
                 </button>
               )}
             </div>
           </div>
 
-          {/* Reports List */}
+          {/* Reports Table */}
           <div className="bg-white shadow rounded-lg p-6">
             <h2 className="text-2xl font-semibold text-gray-700 mb-4">
-              Mortality Reports{" "}
-              {filterDate && `for ${format(parseISO(filterDate), "PPP")}`}
+              Mortality Reports
+              {filterDate && ` for ${format(parseISO(filterDate), "PPP")}`}
+              {!showAllData && !filterDate && " (Last 7 Days)"}
             </h2>
             {loading ? (
               <p className="text-center text-gray-500">Loading reports...</p>
@@ -247,19 +273,22 @@ const MortalityDashboardPage: React.FC = () => {
                   <thead className="bg-gray-50">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Patient Name
+                        Patient ID
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Admission Date
+                        Patient Name
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Age
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Admission Date
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Date of Death
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Time Span (Days)
+                        Days in Hospital
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Medical Findings
@@ -267,28 +296,28 @@ const MortalityDashboardPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredReports.map((report) => (
-                      <tr key={report.id}>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {report.name}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {format(parseISO(report.admissionDate), "PPP")}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {report.age}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {format(parseISO(report.dateOfDeath), "PPP")}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {report.timeSpanDays}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {report.medicalFindings}
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredReports.map((report) => {
+                      const patient = patientInfo[report.patientId]
+                      return (
+                        <tr key={report.id}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {report.patientId}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{report.patientName}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{patient?.age || "N/A"}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {format(parseISO(report.admissionDate), "MMM dd, yyyy")}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {format(parseISO(report.dateOfDeath), "MMM dd, yyyy")}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{report.timeSpanDays}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
+                            {report.medicalFindings}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -297,7 +326,7 @@ const MortalityDashboardPage: React.FC = () => {
         </div>
       </main>
     </>
-  );
-};
+  )
+}
 
-export default MortalityDashboardPage;
+export default MortalityDashboardPage

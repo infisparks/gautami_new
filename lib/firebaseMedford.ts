@@ -6,7 +6,7 @@ import { getAuth } from "firebase/auth";
 const medfordFirebaseConfig = {
   apiKey: "AIzaSyAq6iz-1HFHk6EKxHkdt8c_2suJ91jJ5N8",
   authDomain: "hospital-uid-medfordfamily.firebaseapp.com",
-  databaseURL: "https://hospital-uid-medfordfamily-default-rtdb.firebaseio.com",
+  databaseURL: "https://hospital-uid--rtdb.firebaseio.com",
   projectId: "hospital-uid-medfordfamily",
   storageBucket: "hospital-uid-medfordfamily.firebasestorage.app",
   messagingSenderId: "912435094498",

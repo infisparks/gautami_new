@@ -502,7 +502,8 @@ const IPDBookingPage: React.FC = () => {
 
       // 3) Prepare IPD data (NO patient details, NO billing info, NO labels)
       const ipdData = {
-        // Patient reference only
+        
+          phone: data.phone,
         uhid: patientId,
         name: data.name,
         // Relative information

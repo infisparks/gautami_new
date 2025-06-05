@@ -1,82 +1,66 @@
-"use client";
+"use client"
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useForm, SubmitHandler } from "react-hook-form";
-import { ref, push, set, onValue, update } from "firebase/database";
-import Head from "next/head";
+import type React from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
+import { useForm, type SubmitHandler } from "react-hook-form"
+import { ref, push, set, onValue, update } from "firebase/database"
+import Head from "next/head"
 import {
   AiOutlineUser,
   AiOutlinePhone,
   AiOutlineFieldBinary,
   AiOutlineCalendar,
   AiOutlineFileText,
-} from "react-icons/ai";
-import { FaCheckCircle, FaTimesCircle } from "react-icons/fa";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+} from "react-icons/ai"
+import { FaCheckCircle, FaTimesCircle } from "react-icons/fa"
+import { ToastContainer, toast } from "react-toastify"
+import "react-toastify/dist/ReactToastify.css"
 
-// Import the main (Gautami) Firebase database and the Medford Family DB
-import { db as dbGautami } from "../../lib/firebase";
-import { db as dbMedford } from "../../lib/firebaseMedford";
+// Import Firebase databases
+import { db as dbGautami } from "../../lib/firebase"
+import { db as dbMedford } from "../../lib/firebaseMedford"
 
-// Interfaces for form inputs and Firebase storage
 interface IMortalityReportInput {
-  // Personal Details
-  name: string;
-  phone: string;
-  age?: number;
-  address: string;
-  gender: string;
-  // Mortality-specific Details
-  admissionDate: string;
-  dateOfDeath: string;
-  medicalFindings: string;
+  name: string
+  phone: string
+  age?: number
+  address: string
+  gender: string
+  admissionDate: string
+  dateOfDeath: string
+  medicalFindings: string
 }
 
-interface IFirebaseMortalityReport {
-  admissionDate: string;
-  dateOfDeath: string;
-  medicalFindings: string;
-  timeSpanDays: number;
-  timestamp: number;
+interface IFirebaseMortalityDetail {
+  admissionDate: string
+  dateOfDeath: string
+  medicalFindings: string
+  timeSpanDays: number
+  createdAt: string
+  enteredBy: string
+  patientId: string
+  patientName: string
 }
 
-// Minimal patient record stored in Medford Family (only minimal details)
-interface MedfordPatient {
-  patientId: string;
-  name: string;
-  contact: string;
-  dob: string;
-  gender: string;
-  hospitalName: string;
-}
-
-// Combined patient type for auto-complete suggestions
 interface CombinedPatient {
-  id: string;
-  name: string;
-  phone?: string;
-  source: "gautami" | "medford";
-  data: any;
+  id: string
+  name: string
+  phone?: string
+  source: "gautami" | "medford"
+  data: any
 }
 
-// Helper function to generate a 10-character alphanumeric ID
 function generatePatientId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+  let result = ""
   for (let i = 0; i < 10; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
-  return result;
+  return result
 }
 
 const MortalityReportPage: React.FC = () => {
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setValue,
-  } = useForm<IMortalityReportInput>({
+  const { register, handleSubmit, reset, setValue } = useForm<IMortalityReportInput>({
     defaultValues: {
       name: "",
       phone: "",
@@ -87,34 +71,30 @@ const MortalityReportPage: React.FC = () => {
       dateOfDeath: new Date().toISOString().split("T")[0],
       medicalFindings: "",
     },
-  });
+  })
 
-  const [loading, setLoading] = useState(false);
-
-  // --- Auto-Complete for Patient Name and Phone ---
-  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([]);
-  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([]);
-  const [patientNameInput, setPatientNameInput] = useState("");
+  const [loading, setLoading] = useState(false)
+  const [gautamiPatients, setGautamiPatients] = useState<CombinedPatient[]>([])
+  const [medfordPatients, setMedfordPatients] = useState<CombinedPatient[]>([])
+  const [patientNameInput, setPatientNameInput] = useState("")
   const [patientSuggestions, setPatientSuggestions] = useState<
     { label: string; value: string; source: "gautami" | "medford" }[]
-  >([]);
-  const [patientPhoneInput, setPatientPhoneInput] = useState("");
+  >([])
+  const [patientPhoneInput, setPatientPhoneInput] = useState("")
   const [phoneSuggestions, setPhoneSuggestions] = useState<
     { label: string; value: string; source: "gautami" | "medford" }[]
-  >([]);
-  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(
-    null
-  );
+  >([])
+  const [selectedPatient, setSelectedPatient] = useState<CombinedPatient | null>(null)
 
-  const patientSuggestionBoxRef = useRef<HTMLUListElement>(null);
-  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null);
+  const patientSuggestionBoxRef = useRef<HTMLUListElement>(null)
+  const phoneSuggestionBoxRef = useRef<HTMLUListElement>(null)
 
-  // Fetch patients from Gautami DB (full details)
+  // Fetch patients from Gautami DB
   useEffect(() => {
-    const patientsRef = ref(dbGautami, "patients");
+    const patientsRef = ref(dbGautami, "patients/patientinfo")
     const unsubscribe = onValue(patientsRef, (snapshot) => {
-      const data = snapshot.val();
-      const loaded: CombinedPatient[] = [];
+      const data = snapshot.val()
+      const loaded: CombinedPatient[] = []
       if (data) {
         for (const key in data) {
           loaded.push({
@@ -123,63 +103,62 @@ const MortalityReportPage: React.FC = () => {
             phone: data[key].phone,
             source: "gautami",
             data: data[key],
-          });
+          })
         }
       }
-      setGautamiPatients(loaded);
-    });
-    return () => unsubscribe();
-  }, []);
+      setGautamiPatients(loaded)
+    })
+    return () => unsubscribe()
+  }, [])
 
-  // Fetch patients from Medford Family DB (minimal details)
+  // Fetch patients from Medford Family DB
   useEffect(() => {
-    const medfordPatientsRef = ref(dbMedford, "patients");
+    const medfordPatientsRef = ref(dbMedford, "patients")
     const unsubscribe = onValue(medfordPatientsRef, (snapshot) => {
-      const data = snapshot.val();
-      const loaded: CombinedPatient[] = [];
+      const data = snapshot.val()
+      const loaded: CombinedPatient[] = []
       if (data) {
         for (const key in data) {
-          const rec: MedfordPatient = data[key];
+          const rec = data[key]
           loaded.push({
             id: rec.patientId,
             name: rec.name,
             phone: rec.contact,
             source: "medford",
             data: rec,
-          });
+          })
         }
       }
-      setMedfordPatients(loaded);
-    });
-    return () => unsubscribe();
-  }, []);
+      setMedfordPatients(loaded)
+    })
+    return () => unsubscribe()
+  }, [])
 
-  // Combine patients for suggestions (memoized)
   const allCombinedPatients = useMemo(
     () => [...gautamiPatients, ...medfordPatients],
-    [gautamiPatients, medfordPatients]
-  );
+    [gautamiPatients, medfordPatients],
+  )
 
-  // --- Name Auto-Complete ---
+  // Name Auto-Complete
   useEffect(() => {
     if (selectedPatient && patientNameInput === selectedPatient.name) {
-      setPatientSuggestions([]);
+      setPatientSuggestions([])
     } else if (patientNameInput.length >= 2) {
-      const lower = patientNameInput.toLowerCase();
+      const lower = patientNameInput.toLowerCase()
       const suggestions = allCombinedPatients
         .filter((p) => p.name.toLowerCase().includes(lower))
         .map((p) => ({
           label: `${p.name} - ${p.phone}`,
           value: p.id,
           source: p.source,
-        }));
-      setPatientSuggestions(suggestions);
+        }))
+      setPatientSuggestions(suggestions)
     } else {
-      setPatientSuggestions([]);
+      setPatientSuggestions([])
     }
-  }, [patientNameInput, allCombinedPatients, selectedPatient]);
+  }, [patientNameInput, allCombinedPatients, selectedPatient])
 
-  // --- Phone Auto-Complete ---
+  // Phone Auto-Complete
   useEffect(() => {
     if (patientPhoneInput.length >= 2) {
       const suggestions = allCombinedPatients
@@ -188,86 +167,108 @@ const MortalityReportPage: React.FC = () => {
           label: `${p.name} - ${p.phone}`,
           value: p.id,
           source: p.source,
-        }));
-      setPhoneSuggestions(suggestions);
+        }))
+      setPhoneSuggestions(suggestions)
     } else {
-      setPhoneSuggestions([]);
+      setPhoneSuggestions([])
     }
-  }, [patientPhoneInput, allCombinedPatients]);
+  }, [patientPhoneInput, allCombinedPatients])
 
-  // Close suggestion dropdown when clicking outside (for both name and phone)
+  // Close suggestion dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        patientSuggestionBoxRef.current &&
-        !patientSuggestionBoxRef.current.contains(event.target as Node)
-      ) {
-        setPatientSuggestions([]);
+      if (patientSuggestionBoxRef.current && !patientSuggestionBoxRef.current.contains(event.target as Node)) {
+        setPatientSuggestions([])
       }
-      if (
-        phoneSuggestionBoxRef.current &&
-        !phoneSuggestionBoxRef.current.contains(event.target as Node)
-      ) {
-        setPhoneSuggestions([]);
+      if (phoneSuggestionBoxRef.current && !phoneSuggestionBoxRef.current.contains(event.target as Node)) {
+        setPhoneSuggestions([])
       }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
+    }
+    document.addEventListener("mousedown", handleClickOutside)
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [])
 
-  // When a patient suggestion is clicked (from name or phone), auto-fill details
   const handlePatientSuggestionClick = (uhid: string) => {
-    const found = allCombinedPatients.find((p) => p.id === uhid);
-    if (!found) return;
-    setSelectedPatient(found);
-    setValue("name", found.name);
-    setValue("phone", found.phone || "");
-    setValue("age", found.data.age);
-    setValue("address", found.data.address);
-    setValue("gender", found.data.gender);
-    setPatientNameInput(found.name);
-    setPatientPhoneInput(found.phone || "");
-    setPatientSuggestions([]);
-    setPhoneSuggestions([]);
-    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`);
-  };
+    const found = allCombinedPatients.find((p) => p.id === uhid)
+    if (!found) return
+    setSelectedPatient(found)
+    setValue("name", found.name)
+    setValue("phone", found.phone || "")
+    setValue("age", found.data.age)
+    setValue("address", found.data.address)
+    setValue("gender", found.data.gender)
+    setPatientNameInput(found.name)
+    setPatientPhoneInput(found.phone || "")
+    setPatientSuggestions([])
+    setPhoneSuggestions([])
+    toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`)
+  }
 
-  // --- onSubmit Handler ---
+  const saveMortalityData = async (uhid: string, data: IMortalityReportInput) => {
+    const admissionDateObj = new Date(data.admissionDate)
+    const dateOfDeathObj = new Date(data.dateOfDeath)
+    const timeSpanMs = dateOfDeathObj.getTime() - admissionDateObj.getTime()
+    const timeSpanDays = Math.floor(timeSpanMs / (1000 * 60 * 60 * 24))
+
+    // Create mortality detail record
+    const mortalityData: IFirebaseMortalityDetail = {
+      admissionDate: data.admissionDate,
+      dateOfDeath: data.dateOfDeath,
+      medicalFindings: data.medicalFindings,
+      timeSpanDays,
+      createdAt: new Date().toISOString(),
+      enteredBy: "admin@hospital.com", // Replace with actual user
+      patientId: uhid,
+      patientName: data.name,
+    }
+
+    // Create a new mortality record under the patient's ID
+    const mortalityRef = ref(dbGautami, `patients/mortalitydetail/${uhid}`)
+    const newMortalityRef = push(mortalityRef)
+    await set(newMortalityRef, mortalityData)
+  }
+
   const onSubmit: SubmitHandler<IMortalityReportInput> = async (data) => {
-    setLoading(true);
+    // Add form validation
+    if (
+      !data.name ||
+      !data.phone ||
+      !data.age ||
+      !data.address ||
+      !data.gender ||
+      !data.admissionDate ||
+      !data.dateOfDeath ||
+      !data.medicalFindings
+    ) {
+      toast.error("Please fill in all required fields.", {
+        position: "top-right",
+        autoClose: 5000,
+      })
+      return
+    }
+
+    setLoading(true)
     try {
-      // Parse the admission and death dates
-      const admissionDateObj = new Date(data.admissionDate);
-      const dateOfDeathObj = new Date(data.dateOfDeath);
-      const timeSpanMs = dateOfDeathObj.getTime() - admissionDateObj.getTime();
-      const timeSpanDays = Math.floor(timeSpanMs / (1000 * 60 * 60 * 24));
+      let uhid: string
 
-      const mortalityData: IFirebaseMortalityReport = {
-        admissionDate: data.admissionDate,
-        dateOfDeath: data.dateOfDeath,
-        medicalFindings: data.medicalFindings,
-        timeSpanDays,
-        timestamp: Date.now(),
-      };
-
-      let uhid: string;
       if (selectedPatient) {
-        // Update existing patient record in Gautami DB
-        uhid = selectedPatient.id;
-        const patientRef = ref(dbGautami, `patients/${uhid}`);
+        // Update existing patient record
+        uhid = selectedPatient.id
+        const patientRef = ref(dbGautami, `patients/patientinfo/${uhid}`)
         await update(patientRef, {
           name: data.name,
           phone: data.phone,
           age: data.age,
           address: data.address,
           gender: data.gender,
-        });
+          updatedAt: new Date().toISOString(),
+        })
       } else {
-        // New patient: create full record in Gautami DB and minimal record in Medford DB
-        uhid = generatePatientId();
-        await set(ref(dbGautami, `patients/${uhid}`), {
+        // Create new patient - ensure all required fields are present
+        uhid = generatePatientId()
+        const newPatientData = {
           name: data.name,
           phone: data.phone,
           age: data.age,
@@ -275,29 +276,34 @@ const MortalityReportPage: React.FC = () => {
           gender: data.gender,
           createdAt: new Date().toISOString(),
           uhid: uhid,
-          ipd: {},
-        });
+        }
+
+        // Create patient in Gautami DB
+        await set(ref(dbGautami, `patients/patientinfo/${uhid}`), newPatientData)
+
+        // Create minimal record in Medford DB
         await set(ref(dbMedford, `patients/${uhid}`), {
           name: data.name,
           contact: data.phone,
           gender: data.gender,
+          age: data.age,
+          address: data.address,
           dob: "",
           patientId: uhid,
           hospitalName: "MEDFORD",
-        });
+          createdAt: new Date().toISOString(),
+        })
       }
 
-      // Save mortality details under the patient's record in Gautami DB
-      const mortalityRef = ref(dbGautami, `patients/${uhid}/mortality`);
-      const newMortalityRef = push(mortalityRef);
-      await set(newMortalityRef, mortalityData);
+      // Save mortality data for both existing and new patients
+      await saveMortalityData(uhid, data)
 
       toast.success("Mortality report saved successfully!", {
         position: "top-right",
         autoClose: 5000,
-      });
+      })
 
-      // Reset the form; dateOfDeath resets to current date
+      // Reset form
       reset({
         name: "",
         phone: "",
@@ -307,22 +313,22 @@ const MortalityReportPage: React.FC = () => {
         admissionDate: "",
         dateOfDeath: new Date().toISOString().split("T")[0],
         medicalFindings: "",
-      });
-      setPatientNameInput("");
-      setPatientPhoneInput("");
-      setSelectedPatient(null);
-      setPatientSuggestions([]);
-      setPhoneSuggestions([]);
+      })
+      setPatientNameInput("")
+      setPatientPhoneInput("")
+      setSelectedPatient(null)
+      setPatientSuggestions([])
+      setPhoneSuggestions([])
     } catch (error) {
-      console.error("Error saving mortality report:", error);
+      console.error("Error saving mortality report:", error)
       toast.error("Failed to save report. Please try again.", {
         position: "top-right",
         autoClose: 5000,
-      });
+      })
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
     <>
@@ -336,12 +342,8 @@ const MortalityReportPage: React.FC = () => {
 
       <main className="min-h-screen bg-gradient-to-r from-red-100 to-red-200 flex items-center justify-center p-6">
         <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl p-10">
-          <h2 className="text-3xl font-bold text-center text-red-600 mb-8">
-            Mortality Report
-          </h2>
-          <div className="mb-6 text-center text-gray-600">
-            {new Date().toLocaleString()}
-          </div>
+          <h2 className="text-3xl font-bold text-center text-red-600 mb-8">Mortality Report</h2>
+          <div className="mb-6 text-center text-gray-600">{new Date().toLocaleString()}</div>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             {/* Patient Name with Auto-Complete */}
             <div className="relative">
@@ -354,12 +356,13 @@ const MortalityReportPage: React.FC = () => {
                 type="text"
                 value={patientNameInput}
                 onChange={(e) => {
-                  setPatientNameInput(e.target.value);
-                  setValue("name", e.target.value, { shouldValidate: true });
-                  setSelectedPatient(null);
+                  setPatientNameInput(e.target.value)
+                  setValue("name", e.target.value, { shouldValidate: true })
+                  setSelectedPatient(null)
                 }}
                 placeholder="Patient Name"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                required
               />
               {patientSuggestions.length > 0 && (
                 <ul
@@ -395,12 +398,13 @@ const MortalityReportPage: React.FC = () => {
                 type="text"
                 value={patientPhoneInput}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setPatientPhoneInput(val);
-                  setValue("phone", val, { shouldValidate: true });
+                  const val = e.target.value
+                  setPatientPhoneInput(val)
+                  setValue("phone", val, { shouldValidate: true })
                 }}
                 placeholder="Patient Phone Number"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                required
               />
               {phoneSuggestions.length > 0 && (
                 <ul
@@ -438,6 +442,7 @@ const MortalityReportPage: React.FC = () => {
                 placeholder="Age"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
                 min="0"
+                required
               />
             </div>
 
@@ -453,6 +458,7 @@ const MortalityReportPage: React.FC = () => {
                 {...register("address")}
                 placeholder="Address"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                required
               />
             </div>
 
@@ -466,11 +472,12 @@ const MortalityReportPage: React.FC = () => {
                 id="gender"
                 {...register("gender")}
                 className="w-full pl-10 pr-4 py-3 border rounded-lg appearance-none focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
+                required
               >
                 <option value="">Select Gender</option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
               </select>
             </div>
 
@@ -487,6 +494,7 @@ const MortalityReportPage: React.FC = () => {
                 placeholder="Admission Date"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
                 max={new Date().toISOString().split("T")[0]}
+                required
               />
             </div>
 
@@ -503,6 +511,7 @@ const MortalityReportPage: React.FC = () => {
                 placeholder="Date of Death"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 transition duration-200"
                 max={new Date().toISOString().split("T")[0]}
+                required
               />
             </div>
 
@@ -517,6 +526,7 @@ const MortalityReportPage: React.FC = () => {
                 {...register("medicalFindings")}
                 placeholder="Medical Findings"
                 className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 h-32 resize-none transition duration-200"
+                required
               ></textarea>
             </div>
 
@@ -534,7 +544,7 @@ const MortalityReportPage: React.FC = () => {
         </div>
       </main>
     </>
-  );
-};
+  )
+}
 
-export default MortalityReportPage;
+export default MortalityReportPage

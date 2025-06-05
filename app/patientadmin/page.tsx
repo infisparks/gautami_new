@@ -1,15 +1,26 @@
 "use client"
 
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import type React from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { db } from "../../lib/firebase"
-import { ref, get, query, orderByChild, limitToLast, endAt, startAt, onChildAdded, onChildRemoved, onChildChanged } from "firebase/database"
+import {
+  ref,
+  get,
+  query,
+  orderByChild,
+  limitToLast,
+  endAt,
+  onChildAdded,
+  onChildRemoved,
+  onChildChanged,
+} from "firebase/database"
 import { format } from "date-fns"
-import { Search, User, Users, Download, Plus, Filter, Calendar, Phone, MapPin } from 'lucide-react'
+import { Search, Users, Download, Plus, Filter, Calendar, Phone, MapPin } from "lucide-react"
 import { toast } from "sonner"
 import * as XLSX from "xlsx"
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -56,27 +67,71 @@ const PatientManagement: React.FC = () => {
   const PAGE_SIZE = 20
   const STORAGE_KEY = "cachedPatients"
 
-  // Load from sessionStorage
+  // Real-time listeners and data synchronization
   useEffect(() => {
-    const cached = sessionStorage.getItem(STORAGE_KEY)
-    if (cached) {
-      try {
-        const parsed: IPatientRecord[] = JSON.parse(cached)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setPatients(parsed)
-          setFilteredPatients(parsed)
-          const last = parsed[parsed.length - 1].createdAt
-          setLastCreatedAt(last as string)
-          setHasMore(parsed.length >= PAGE_SIZE)
-          patientMap.current = parsed.reduce((acc, p) => ({ ...acc, [p.uhid!]: true }), {} as Record<string, boolean>)
-          setLoading(false)
-          return
+    const patientsRef = ref(db, "patients/patientinfo")
+
+    // Set up real-time listeners
+    const addedListener = onChildAdded(patientsRef, (snapshot) => {
+      const val = snapshot.val() as IPatientInfo
+      if (val.uhid && val.createdAt && !patientMap.current[val.uhid]) {
+        const newPatient: IPatientRecord = {
+          uhid: val.uhid,
+          name: val.name || "Unknown",
+          phone: val.phone || "",
+          address: val.address,
+          age: val.age,
+          gender: val.gender,
+          createdAt: val.createdAt as string,
+          updatedAt: val.updatedAt,
         }
-      } catch {
-        // ignore parse errors
+
+        setPatients((prev) => {
+          const updated = [newPatient, ...prev].sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+          )
+          return updated
+        })
+
+        patientMap.current[val.uhid] = true
       }
-    }
+    })
+
+    const removedListener = onChildRemoved(patientsRef, (snapshot) => {
+      const val = snapshot.val() as IPatientInfo
+      if (val.uhid) {
+        setPatients((prev) => prev.filter((p) => p.uhid !== val.uhid))
+        delete patientMap.current[val.uhid]
+      }
+    })
+
+    const changedListener = onChildChanged(patientsRef, (snapshot) => {
+      const val = snapshot.val() as IPatientInfo
+      if (val.uhid && val.createdAt) {
+        const updatedPatient: IPatientRecord = {
+          uhid: val.uhid,
+          name: val.name || "Unknown",
+          phone: val.phone || "",
+          address: val.address,
+          age: val.age,
+          gender: val.gender,
+          createdAt: val.createdAt as string,
+          updatedAt: val.updatedAt,
+        }
+
+        setPatients((prev) => prev.map((p) => (p.uhid === val.uhid ? updatedPatient : p)))
+      }
+    })
+
+    // Initial load
     fetchInitialPatients()
+
+    // Cleanup listeners
+    return () => {
+      addedListener()
+      removedListener()
+      changedListener()
+    }
   }, [])
 
   // Fetch Initial Patients
@@ -87,7 +142,7 @@ const PatientManagement: React.FC = () => {
       const q = query(patientsRef, orderByChild("createdAt"), limitToLast(PAGE_SIZE))
       const snap = await get(q)
       const temp: IPatientRecord[] = []
-      
+
       snap.forEach((child) => {
         const val = child.val() as IPatientInfo
         if (val.uhid && val.createdAt) {
@@ -103,7 +158,7 @@ const PatientManagement: React.FC = () => {
           })
         }
       })
-      
+
       temp.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
       const map: Record<string, boolean> = {}
@@ -113,14 +168,12 @@ const PatientManagement: React.FC = () => {
       patientMap.current = map
 
       setPatients(temp)
-      setFilteredPatients(temp)
       if (temp.length < PAGE_SIZE) {
         setHasMore(false)
       }
       if (temp.length > 0) {
         setLastCreatedAt(temp[temp.length - 1].createdAt)
       }
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(temp))
     } catch (error) {
       console.error("Error fetching initial patients:", error)
       toast.error("Failed to load patients")
@@ -135,15 +188,10 @@ const PatientManagement: React.FC = () => {
     setLoading(true)
     try {
       const patientsRef = ref(db, "patients/patientinfo")
-      const q = query(
-        patientsRef,
-        orderByChild("createdAt"),
-        endAt(lastCreatedAt),
-        limitToLast(PAGE_SIZE + 1)
-      )
+      const q = query(patientsRef, orderByChild("createdAt"), endAt(lastCreatedAt), limitToLast(PAGE_SIZE + 1))
       const snap = await get(q)
       const temp: IPatientRecord[] = []
-      
+
       snap.forEach((child) => {
         const val = child.val() as IPatientInfo
         if (val.uhid && val.createdAt) {
@@ -159,7 +207,7 @@ const PatientManagement: React.FC = () => {
           })
         }
       })
-      
+
       temp.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
       const filtered: IPatientRecord[] = []
@@ -172,15 +220,12 @@ const PatientManagement: React.FC = () => {
       if (filtered.length === 0) {
         setHasMore(false)
       } else {
-        const newPatients = [...patients, ...filtered]
-        setPatients(newPatients)
-        applyFilters(newPatients, searchQuery, genderFilter)
+        setPatients((prev) => [...prev, ...filtered])
         filtered.forEach((p) => {
           patientMap.current[p.uhid!] = true
         })
         const last = filtered[filtered.length - 1].createdAt
         setLastCreatedAt(last)
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(newPatients))
         if (filtered.length < PAGE_SIZE) {
           setHasMore(false)
         }
@@ -203,7 +248,7 @@ const PatientManagement: React.FC = () => {
         (p) =>
           p.name.toLowerCase().includes(searchLower) ||
           p.phone.includes(search) ||
-          p.uhid.toLowerCase().includes(searchLower)
+          p.uhid.toLowerCase().includes(searchLower),
       )
     }
 
@@ -260,6 +305,11 @@ const PatientManagement: React.FC = () => {
     router.push(`/allusermanage/${p.uhid}`)
   }
 
+  // Apply filters when patients data changes
+  useEffect(() => {
+    applyFilters(patients, searchQuery, genderFilter)
+  }, [patients, searchQuery, genderFilter])
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
       <div className="container mx-auto px-4 py-8">
@@ -271,6 +321,22 @@ const PatientManagement: React.FC = () => {
               <p className="text-slate-600">Manage and view all patient records</p>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                onClick={() => {
+                  // Clear cache and reload
+                  patientMap.current = {}
+                  setPatients([])
+                  setFilteredPatients([])
+                  setLastCreatedAt(null)
+                  setHasMore(true)
+                  fetchInitialPatients()
+                }}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Calendar className="h-4 w-4" />
+                Refresh
+              </Button>
               <Button onClick={exportExcel} variant="outline" className="flex items-center gap-2">
                 <Download className="h-4 w-4" />
                 Export Excel
@@ -294,31 +360,37 @@ const PatientManagement: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">Active records</p>
             </CardContent>
           </Card>
-          
+
           <Card className="border-l-4 border-l-blue-500">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-slate-600">Male Patients</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-slate-900">
-                {patients.filter(p => p.gender === 'male').length}
+                {patients.filter((p) => p.gender === "male").length}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {patients.length > 0 ? Math.round((patients.filter(p => p.gender === 'male').length / patients.length) * 100) : 0}% of total
+                {patients.length > 0
+                  ? Math.round((patients.filter((p) => p.gender === "male").length / patients.length) * 100)
+                  : 0}
+                % of total
               </p>
             </CardContent>
           </Card>
-          
+
           <Card className="border-l-4 border-l-pink-500">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-medium text-slate-600">Female Patients</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-slate-900">
-                {patients.filter(p => p.gender === 'female').length}
+                {patients.filter((p) => p.gender === "female").length}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                {patients.length > 0 ? Math.round((patients.filter(p => p.gender === 'female').length / patients.length) * 100) : 0}% of total
+                {patients.length > 0
+                  ? Math.round((patients.filter((p) => p.gender === "female").length / patients.length) * 100)
+                  : 0}
+                % of total
               </p>
             </CardContent>
           </Card>
@@ -399,25 +471,23 @@ const PatientManagement: React.FC = () => {
                           {getInitials(patient.name)}
                         </AvatarFallback>
                       </Avatar>
-                      
+
                       <div className="space-y-1">
                         <div className="flex items-center gap-3">
                           <h3 className="text-lg font-semibold text-slate-900">{patient.name}</h3>
                           <Badge variant="outline" className="text-xs">
                             {patient.uhid}
                           </Badge>
-                          <Badge 
-                            variant="secondary" 
+                          <Badge
+                            variant="secondary"
                             className={`text-xs ${
-                              patient.gender === 'male' 
-                                ? 'bg-blue-100 text-blue-700' 
-                                : 'bg-pink-100 text-pink-700'
+                              patient.gender === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"
                             }`}
                           >
-                            {patient.gender === 'male' ? 'Male' : 'Female'}, {patient.age}
+                            {patient.gender === "male" ? "Male" : "Female"}, {patient.age}
                           </Badge>
                         </div>
-                        
+
                         <div className="flex items-center gap-4 text-sm text-slate-600">
                           <div className="flex items-center gap-1">
                             <Phone className="h-3 w-3" />
@@ -436,7 +506,7 @@ const PatientManagement: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    
+
                     <Button variant="outline" size="sm">
                       View Details
                     </Button>

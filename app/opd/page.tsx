@@ -756,6 +756,7 @@ Medford Hospital
           const newOpdRef = push(opdListRef);
           await set(newOpdRef, {
             name: data.name,
+            phone: data.phone,
             patientId: uhid,
             date: data.date.toISOString(),
             time: data.time,
@@ -792,6 +793,8 @@ Medford Hospital
           const opdListRef = ref(db, `patients/opddetail/${newUhid}`);
           const newOpdRef = push(opdListRef);
           await set(newOpdRef, {
+            name: data.name,
+            phone: data.phone,
             patientId: newUhid,
             date: data.date.toISOString(),
             time: data.time,
