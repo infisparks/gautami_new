@@ -1,10 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
-import { ref, query, orderByChild, startAt, endAt, get } from "firebase/database"
+import { ref, get } from "firebase/database"
 import { format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
 import { Line, Doughnut } from "react-chartjs-2"
 import {
@@ -21,17 +20,7 @@ import {
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import ProtectedRoute from "@/components/ProtectedRoute"
-import {
-  Search,
-  DollarSign,
-  Bed,
-  RefreshCw,
-  Filter,
-  CreditCard,
-  FileText,
-  Banknote,
-  CreditCardIcon,
-} from "lucide-react"
+import { Search, DollarSign, Bed, RefreshCw, Filter, FileText, Banknote } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -56,14 +45,14 @@ interface IPDService {
 interface IPDPayment {
   id: string
   amount: number
-  paymentType: "cash" | "online" | "card" | "upi"
+  paymentType: "cash" | "online"
   type: "deposit" | "advance"
   date: string
   createdAt: string
 }
 
 interface IPDPatient {
-  id: string // Composite key: `${uhid}_${ipdId}`
+  id: string
   uhid: string
   ipdId: string
   name: string
@@ -77,7 +66,7 @@ interface IPDPatient {
   doctorId: string
   roomType: string
   roomNumber?: string
-  status: "admitted" | "discharged"
+  status: "active" | "discharged"
   dischargeDate?: string
   dischargeTime?: string
   services: IPDService[]
@@ -101,7 +90,7 @@ interface FilterOptions {
   dateFilter: DateFilter
   startDate: string
   endDate: string
-  status: "all" | "admitted" | "discharged"
+  status: "all" | "active" | "discharged"
   searchQuery: string
 }
 
@@ -145,7 +134,7 @@ const IPDDashboardPage: React.FC = () => {
             end: endOfDay(now).toISOString(),
           }
         case "7days":
-          const sevenDaysAgo = startOfDay(subDays(now, 6)) // Last 7 days including today
+          const sevenDaysAgo = startOfDay(subDays(now, 6))
           return {
             start: sevenDaysAgo.toISOString(),
             end: endOfDay(now).toISOString(),
@@ -179,7 +168,7 @@ const IPDDashboardPage: React.FC = () => {
             doctorsMap[key] = {
               id: key,
               name: data[key].name,
-              specialty: data[key].specialty,
+              specialty: data[key].specialist,
             }
           })
         }
@@ -198,7 +187,7 @@ const IPDDashboardPage: React.FC = () => {
     setRefreshing(true)
 
     try {
-      const dateRange = getDateRange(filters.dateFilter)
+      console.log("Starting to fetch IPD patients...")
       const allPatients: IPDPatient[] = []
 
       // Get all patient UHIDs from userinfoipd
@@ -206,6 +195,7 @@ const IPDDashboardPage: React.FC = () => {
       const uhidsSnapshot = await get(ipdInfoRef)
 
       if (!uhidsSnapshot.exists()) {
+        console.log("No IPD data found")
         setIpdPatients([])
         setLoading(false)
         setRefreshing(false)
@@ -214,26 +204,31 @@ const IPDDashboardPage: React.FC = () => {
 
       const uhidsData = uhidsSnapshot.val()
       const uhids = Object.keys(uhidsData)
+      console.log("Found UHIDs:", uhids)
 
-      // Fetch IPD records for each UHID within date range
+      // Fetch IPD records for each UHID
       for (const uhid of uhids) {
-        const userIpdRef = ref(db, `patients/ipddetail/userinfoipd/${uhid}`)
-        const ipdQuery = query(
-          userIpdRef,
-          orderByChild("admissionDate"),
-          startAt(dateRange.start),
-          endAt(dateRange.end),
-        )
+        const userIpdData = uhidsData[uhid]
 
-        const snapshot = await get(ipdQuery)
-        if (snapshot.exists()) {
-          const ipdRecords = snapshot.val()
+        if (userIpdData && typeof userIpdData === "object") {
+          for (const ipdId of Object.keys(userIpdData)) {
+            const ipdData = userIpdData[ipdId]
 
-          for (const ipdId of Object.keys(ipdRecords)) {
-            const ipdData = ipdRecords[ipdId]
+            if (!ipdData || !ipdData.admissionDate) continue
+
+            // Check date filter
+            const admissionDate = new Date(ipdData.admissionDate)
+            const dateRange = getDateRange(filters.dateFilter)
+            const startDate = new Date(dateRange.start)
+            const endDate = new Date(dateRange.end)
+
+            if (admissionDate < startDate || admissionDate > endDate) {
+              continue
+            }
 
             // Apply status filter
-            if (filters.status !== "all" && ipdData.status !== filters.status) {
+            const patientStatus = ipdData.status || "active"
+            if (filters.status !== "all" && patientStatus !== filters.status) {
               continue
             }
 
@@ -248,16 +243,19 @@ const IPDDashboardPage: React.FC = () => {
 
             if (billingData?.payments) {
               Object.entries(billingData.payments).forEach(([paymentId, paymentData]: [string, any]) => {
-                const payment: IPDPayment = {
-                  id: paymentId,
-                  amount: Number(paymentData.amount) || 0,
-                  paymentType: paymentData.paymentType || "cash",
-                  type: paymentData.type || "deposit",
-                  date: paymentData.date,
-                  createdAt: paymentData.createdAt || paymentData.date,
+                // Only include cash and online payments
+                if (paymentData.paymentType === "cash" || paymentData.paymentType === "online") {
+                  const payment: IPDPayment = {
+                    id: paymentId,
+                    amount: Number(paymentData.amount) || 0,
+                    paymentType: paymentData.paymentType,
+                    type: paymentData.type || "deposit",
+                    date: paymentData.date,
+                    createdAt: paymentData.createdAt || paymentData.date,
+                  }
+                  payments.push(payment)
+                  totalDeposit += payment.amount
                 }
-                payments.push(payment)
-                totalDeposit += payment.amount
               })
             }
 
@@ -268,23 +266,28 @@ const IPDDashboardPage: React.FC = () => {
               0,
             )
 
+            // Get patient basic info
+            const patientInfoRef = ref(db, `patients/patientinfo/${uhid}`)
+            const patientInfoSnapshot = await get(patientInfoRef)
+            const patientInfo = patientInfoSnapshot.exists() ? patientInfoSnapshot.val() : {}
+
             // Create IPD patient object
             const ipdPatient: IPDPatient = {
               id: `${uhid}_${ipdId}`,
               uhid,
               ipdId,
-              name: ipdData.name || "Unknown",
-              phone: ipdData.phone || "",
-              age: ipdData.age || "",
-              gender: ipdData.gender || "",
-              address: ipdData.address,
+              name: ipdData.name || patientInfo.name || "Unknown",
+              phone: ipdData.phone || patientInfo.phone || "",
+              age: ipdData.age || patientInfo.age || "",
+              gender: ipdData.gender || patientInfo.gender || "",
+              address: ipdData.address || patientInfo.address,
               admissionDate: ipdData.admissionDate,
               admissionTime: ipdData.admissionTime || "",
               doctor: ipdData.doctor || "",
-              doctorId: ipdData.doctorId || ipdData.doctor || "",
+              doctorId: ipdData.doctor || "",
               roomType: ipdData.roomType || "",
               roomNumber: ipdData.roomNumber,
-              status: ipdData.status || "admitted",
+              status: patientStatus,
               dischargeDate: ipdData.dischargeDate,
               dischargeTime: ipdData.dischargeTime,
               services,
@@ -301,12 +304,18 @@ const IPDDashboardPage: React.FC = () => {
         }
       }
 
+      console.log("Fetched patients:", allPatients.length)
+
       // Sort by admission date (newest first)
       allPatients.sort((a, b) => new Date(b.admissionDate).getTime() - new Date(a.admissionDate).getTime())
       setIpdPatients(allPatients)
+
+      if (allPatients.length === 0) {
+        toast.info("No IPD patients found for the selected criteria")
+      }
     } catch (error) {
       console.error("Error fetching IPD patients:", error)
-      toast.error("Failed to load IPD patients")
+      toast.error("Failed to load IPD patients. Please check your database connection.")
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -335,24 +344,21 @@ const IPDDashboardPage: React.FC = () => {
 
   // Dashboard statistics
   const stats = useMemo(() => {
-    const admittedPatients = ipdPatients.filter((p) => p.status === "admitted")
+    const activePatients = ipdPatients.filter((p) => p.status === "active")
     const dischargedPatients = ipdPatients.filter((p) => p.status === "discharged")
 
     const totalRevenue = ipdPatients.reduce((sum, p) => sum + p.totalDeposit, 0)
-    const pendingAmount = ipdPatients.reduce((sum, p) => sum + p.remainingAmount, 0)
+    const pendingAmount = ipdPatients.reduce((sum, p) => sum + Math.max(0, p.remainingAmount), 0)
 
     const paymentsByMethod = {
       cash: 0,
       online: 0,
-      card: 0,
-      upi: 0,
     }
 
     ipdPatients.forEach((patient) => {
       patient.payments.forEach((payment) => {
-        const method = payment.paymentType.toLowerCase() as keyof typeof paymentsByMethod
-        if (method in paymentsByMethod) {
-          paymentsByMethod[method] += payment.amount
+        if (payment.paymentType === "cash" || payment.paymentType === "online") {
+          paymentsByMethod[payment.paymentType] += payment.amount
         }
       })
     })
@@ -368,7 +374,7 @@ const IPDDashboardPage: React.FC = () => {
 
     return {
       totalPatients: ipdPatients.length,
-      admittedCount: admittedPatients.length,
+      activeCount: activePatients.length,
       dischargedCount: dischargedPatients.length,
       totalRevenue,
       pendingAmount,
@@ -472,7 +478,7 @@ const IPDDashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Custom Date Range (if selected) */}
+          {/* Custom Date Range */}
           {filters.dateFilter === "custom" && (
             <div className="mb-6 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
               <div className="flex flex-col sm:flex-row gap-4 items-end">
@@ -518,7 +524,7 @@ const IPDDashboardPage: React.FC = () => {
                 <div className="text-2xl font-bold">{stats.totalPatients}</div>
                 <div className="flex gap-2 mt-2">
                   <Badge variant="outline" className="bg-green-50 text-green-700 hover:bg-green-100">
-                    {stats.admittedCount} Admitted
+                    {stats.activeCount} Active
                   </Badge>
                   <Badge variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100">
                     {stats.dischargedCount} Discharged
@@ -543,11 +549,11 @@ const IPDDashboardPage: React.FC = () => {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Pending Amount</CardTitle>
-                <CreditCardIcon className="h-4 w-4 text-muted-foreground" />
+                <Banknote className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-amber-600">{formatCurrency(stats.pendingAmount)}</div>
-                <p className="text-xs text-muted-foreground mt-2">Remaining balance from all patients</p>
+                <p className="text-xs text-muted-foreground mt-2">Outstanding balance</p>
               </CardContent>
             </Card>
 
@@ -606,116 +612,49 @@ const IPDDashboardPage: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Revenue Chart */}
+            {/* Payment Method Chart */}
             <Card>
               <CardHeader>
-                <CardTitle>Daily Revenue (Last 7 Days)</CardTitle>
+                <CardTitle>Payment Method Distribution</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Line
-                  data={{
-                    labels: stats.last7Days,
-                    datasets: [
-                      {
-                        label: "Revenue",
-                        data: stats.dailyRevenue,
-                        borderColor: "rgb(34, 197, 94)",
-                        backgroundColor: "rgba(34, 197, 94, 0.1)",
-                        tension: 0.4,
+              <CardContent className="flex flex-col items-center">
+                <div className="w-64 h-64">
+                  <Doughnut
+                    data={{
+                      labels: ["Cash", "Online"],
+                      datasets: [
+                        {
+                          data: [stats.paymentsByMethod.cash, stats.paymentsByMethod.online],
+                          backgroundColor: ["rgba(34, 197, 94, 0.8)", "rgba(59, 130, 246, 0.8)"],
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { position: "bottom" },
                       },
-                    ],
-                  }}
-                  options={{
-                    responsive: true,
-                    plugins: {
-                      legend: { display: false },
-                    },
-                    scales: {
-                      y: { beginAtZero: true },
-                    },
-                  }}
-                />
+                    }}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4 mt-4 w-full">
+                  <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+                    <div className="text-sm text-green-700">Cash</div>
+                    <div className="text-lg font-bold text-green-600">
+                      {formatCurrency(stats.paymentsByMethod.cash)}
+                    </div>
+                  </div>
+                  <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                    <div className="text-sm text-blue-700">Online</div>
+                    <div className="text-lg font-bold text-blue-600">
+                      {formatCurrency(stats.paymentsByMethod.online)}
+                    </div>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
-
-          {/* Payment Method Breakdown */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>Payment Method Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col md:flex-row items-center gap-8">
-              <div className="w-full md:w-1/3">
-                <Doughnut
-                  data={{
-                    labels: ["Cash", "Online", "Card", "UPI"],
-                    datasets: [
-                      {
-                        data: [
-                          stats.paymentsByMethod.cash,
-                          stats.paymentsByMethod.online,
-                          stats.paymentsByMethod.card,
-                          stats.paymentsByMethod.upi,
-                        ],
-                        backgroundColor: [
-                          "rgba(34, 197, 94, 0.8)",
-                          "rgba(59, 130, 246, 0.8)",
-                          "rgba(168, 85, 247, 0.8)",
-                          "rgba(249, 115, 22, 0.8)",
-                        ],
-                      },
-                    ],
-                  }}
-                  options={{
-                    responsive: true,
-                    plugins: {
-                      legend: { position: "bottom" },
-                    },
-                  }}
-                />
-              </div>
-              <div className="w-full md:w-2/3 grid grid-cols-2 gap-4">
-                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                  <div className="text-sm text-green-700">Cash Payments</div>
-                  <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.paymentsByMethod.cash)}</div>
-                  <div className="text-xs text-green-600 mt-1">
-                    {stats.totalRevenue > 0 ? Math.round((stats.paymentsByMethod.cash / stats.totalRevenue) * 100) : 0}%
-                    of total
-                  </div>
-                </div>
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <div className="text-sm text-blue-700">Online Payments</div>
-                  <div className="text-2xl font-bold text-blue-600">
-                    {formatCurrency(stats.paymentsByMethod.online)}
-                  </div>
-                  <div className="text-xs text-blue-600 mt-1">
-                    {stats.totalRevenue > 0
-                      ? Math.round((stats.paymentsByMethod.online / stats.totalRevenue) * 100)
-                      : 0}
-                    % of total
-                  </div>
-                </div>
-                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
-                  <div className="text-sm text-purple-700">Card Payments</div>
-                  <div className="text-2xl font-bold text-purple-600">
-                    {formatCurrency(stats.paymentsByMethod.card)}
-                  </div>
-                  <div className="text-xs text-purple-600 mt-1">
-                    {stats.totalRevenue > 0 ? Math.round((stats.paymentsByMethod.card / stats.totalRevenue) * 100) : 0}%
-                    of total
-                  </div>
-                </div>
-                <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                  <div className="text-sm text-orange-700">UPI Payments</div>
-                  <div className="text-2xl font-bold text-orange-600">{formatCurrency(stats.paymentsByMethod.upi)}</div>
-                  <div className="text-xs text-orange-600 mt-1">
-                    {stats.totalRevenue > 0 ? Math.round((stats.paymentsByMethod.upi / stats.totalRevenue) * 100) : 0}%
-                    of total
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
           {/* Search and Filters */}
           <div className="mb-6 flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -735,7 +674,7 @@ const IPDDashboardPage: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Patients</SelectItem>
-                  <SelectItem value="admitted">Admitted</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="discharged">Discharged</SelectItem>
                 </SelectContent>
               </Select>
@@ -760,7 +699,7 @@ const IPDDashboardPage: React.FC = () => {
                 <div className="text-center py-12 text-gray-500">
                   <Bed className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                   <p className="text-lg">No IPD patients found</p>
-                  <p className="text-sm">Try adjusting your filters</p>
+                  <p className="text-sm">Try adjusting your filters or check your database connection</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -804,8 +743,8 @@ const IPDDashboardPage: React.FC = () => {
                             <div className="font-medium">{getDoctorName(patient.doctorId)}</div>
                           </TableCell>
                           <TableCell>
-                            {patient.status === "admitted" ? (
-                              <Badge className="bg-green-100 text-green-800 hover:bg-green-200">Admitted</Badge>
+                            {patient.status === "active" ? (
+                              <Badge className="bg-green-100 text-green-800 hover:bg-green-200">Active</Badge>
                             ) : (
                               <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200">Discharged</Badge>
                             )}
@@ -906,12 +845,12 @@ const IPDDashboardPage: React.FC = () => {
                           <span className="text-gray-600">Status:</span>
                           <Badge
                             className={
-                              selectedPatient.status === "admitted"
+                              selectedPatient.status === "active"
                                 ? "bg-green-100 text-green-800"
                                 : "bg-blue-100 text-blue-800"
                             }
                           >
-                            {selectedPatient.status === "admitted" ? "Admitted" : "Discharged"}
+                            {selectedPatient.status === "active" ? "Active" : "Discharged"}
                           </Badge>
                         </div>
                       </div>
@@ -1031,7 +970,7 @@ const IPDDashboardPage: React.FC = () => {
               <TabsContent value="payments" className="mt-4">
                 {selectedPatient.payments.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
-                    <CreditCard className="h-12 w-12 mx-auto mb-4 text-gray-300" />
+                    <Banknote className="h-12 w-12 mx-auto mb-4 text-gray-300" />
                     <p>No payments recorded for this patient</p>
                   </div>
                 ) : (

@@ -152,6 +152,15 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
         { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
       ],
     },
+    {
+      title: "Casulity",
+      icon: <BedDouble size={20} />,
+      submenu: [
+        { title: "Casulity Form", icon: <ClipboardList size={20} />, href: "/casulity" },
+        { title: "Casulity Management", icon: <FileText size={20} />, href: "/casualitymanage" },
+        // { title: "Bed Management", icon: <BedDouble size={20} />, href: "/bed-management" },
+      ],
+    },
     // {
     //   title: "Pathology",
     //   icon: <Syringe size={20} />,
