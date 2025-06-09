@@ -524,7 +524,7 @@ export default function CasualtyDetailPage() {
         <div className="text-center">
           <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Record Not Found</h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">The casualty record you're looking for doesn't exist.</p>
+          <p className="text-gray-600 dark:text-gray-400 mb-4">The casualty record youre looking for doesnt exist.</p>
           <Button onClick={handleBackToList}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to List
@@ -1137,7 +1137,7 @@ export default function CasualtyDetailPage() {
                       <CardTitle className="flex items-center gap-2">
                         <span className="text-purple-600 dark:text-purple-300">💰 Discount Management</span>
                       </CardTitle>
-                      <CardDescription>Apply or update discount for this patient's bill</CardDescription>
+                      <CardDescription>Apply or update discount for this patients bill</CardDescription>
                     </CardHeader>
                     <CardContent className="pt-6">
                       <div className="grid gap-4">
