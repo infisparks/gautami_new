@@ -52,29 +52,55 @@ export default function ManagePatientPageTabs() {
   const [patientInfo, setPatientInfo] = useState<PatientInfo | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  /* ---------- fetch patient header data ---------- */
+  /* ---------- fetch patient header data (Updated Logic) ---------- */
   useEffect(() => {
     if (!patientId || !ipdId) return
 
-    setIsLoading(true)
-    const ipdRef = ref(db, `patients/${patientId}/ipd/${ipdId}`)
-    get(ipdRef)
-      .then((snap) => {
-        if (snap.exists()) {
-          const d = snap.val()
-          setPatientInfo({
-            name: d.name ?? "Patient",
-            phone: d.phone ?? "-",
-            ward: (d.roomType ?? "-").replace(/_/g, " "),
-            bed: d.bed ?? "-",
-          })
+    const fetchPatientData = async () => {
+      setIsLoading(true)
+      try {
+        // 1. Fetch main IPD record from the new path
+        const ipdInfoRef = ref(db, `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`)
+        const ipdSnap = await get(ipdInfoRef)
+
+        if (!ipdSnap.exists()) {
+          console.error("Patient IPD record not found.")
+          setIsLoading(false)
+          return
         }
-        setIsLoading(false)
-      })
-      .catch((err) => {
+
+        const ipdData = ipdSnap.val()
+        const name = ipdData.name ?? "Patient"
+        const phone = ipdData.phone ?? "-"
+        const ward = (ipdData.roomType ?? "N/A").replace(/_/g, " ")
+        const bedId = ipdData.bed
+        const roomType = ipdData.roomType
+
+        let bedNumber = "-"
+
+        // 2. If bed and roomType IDs exist, fetch the bed number
+        if (bedId && roomType) {
+          const bedRef = ref(db, `beds/${roomType}/${bedId}`)
+          const bedSnap = await get(bedRef)
+          if (bedSnap.exists()) {
+            bedNumber = bedSnap.val().bedNumber ?? "-"
+          }
+        }
+
+        setPatientInfo({
+          name,
+          phone,
+          ward,
+          bed: bedNumber,
+        })
+      } catch (err) {
         console.error("Error fetching patient data:", err)
+      } finally {
         setIsLoading(false)
-      })
+      }
+    }
+
+    fetchPatientData()
   }, [patientId, ipdId])
 
   /* ---------- tab metadata ---------- */
@@ -132,7 +158,7 @@ export default function ManagePatientPageTabs() {
                   <User className="h-8 w-8 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">
+                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white capitalize">
                     {patientInfo?.name || "Patient"}
                   </h1>
 
@@ -144,7 +170,7 @@ export default function ManagePatientPageTabs() {
                       </div>
                     )}
                     {patientInfo?.ward && (
-                      <div className="flex items-center text-white/90 text-sm">
+                      <div className="flex items-center text-white/90 text-sm capitalize">
                         <Building className="h-3 w-3 mr-1" />
                         {patientInfo.ward}
                       </div>

@@ -111,6 +111,7 @@ const AdmissionTypeOptions = [
 ]
 
 const AdmissionSourceOptions = [
+  { value: "ipd", label: "IPD" },
   { value: "opd", label: "OPD" },
   { value: "casualty", label: "Casualty" },
   { value: "referral", label: "Referral" },
