@@ -31,7 +31,7 @@ export default function RootLayout({
   // Logged-in Firebase user
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  // "admin" or "staff" (or null if not found)
+  // "admin", "staff", "opd", or "ipd" (or null if not found)
   const [userType, setUserType] = useState<string | null>(null);
 
   const router = useRouter();
@@ -46,7 +46,7 @@ export default function RootLayout({
     return () => unsubscribe();
   }, []);
 
-  // 2. Fetch user type from Realtime Database (adjust path as needed)
+  // 2. Fetch user type from Realtime Database
   useEffect(() => {
     if (user) {
       const db = getDatabase();
@@ -64,18 +64,17 @@ export default function RootLayout({
     }
   }, [user]);
 
-  // 3. Protect routes (redirect if not logged in, or if staff tries to access restricted routes)
+  // 3. Protect routes
   useEffect(() => {
     if (!loading) {
       // If user not logged in, allow only /login or /register
       if (!user) {
         const publicPaths = ["/login", "/register"];
-        const isPublicPath = publicPaths.includes(pathname);
-        if (!isPublicPath) {
+        if (!publicPaths.includes(pathname)) {
           router.push("/login");
         }
       } else {
-        // If user IS logged in and tries to go to /login or /register => push /dashboard
+        // If user IS logged in and tries to go to /login or /register => push to a default page
         if (pathname === "/login" || pathname === "/register") {
           router.push("/dashboard");
         }
@@ -96,15 +95,45 @@ export default function RootLayout({
             router.push("/opd");
           }
         }
+
+        // ** If user is "opd", only allow /opd, /opdlist, and /addDoctor **
+        if (userType === "opd") {
+          const allowedPaths = ["/opd", "/opdlist", "/addDoctor"];
+          // MODIFICATION: Check if pathname starts with any allowed path to handle potential sub-routes
+          const isAllowed = allowedPaths.some(path => pathname.startsWith(path));
+          if (!isAllowed) {
+            router.push("/opd");
+          }
+        }
+
+        // ** If user is "ipd", allow access to /ipd, /billing/*, and other specified pages **
+        if (userType === "ipd") {
+          // MODIFICATION: Changed to check if the pathname starts with an allowed base path.
+          // This correctly handles all nested routes like /billing/[patientId]/[ipdId] and /billing/edit/...
+          const allowedBasePaths = [
+            "/ipd", 
+            "/billing", 
+            "/bed-management", 
+            "/addDoctor",
+            "/manage",
+            "/discharge-summary",
+            "/drugchart",
+            "/ot"
+          ];
+          
+          const isAllowed = allowedBasePaths.some(basePath => pathname.startsWith(basePath));
+          
+          if (!isAllowed) {
+            router.push("/ipd");
+          }
+        }
       }
     }
   }, [user, userType, loading, pathname, router]);
 
   return (
     <html lang="en">
-      <head>
-        {/* Any global <head> elements */}
-      </head>
+      <head>{/* Any global <head> elements */}</head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased overflow-x-hidden`}
       >
@@ -117,7 +146,9 @@ export default function RootLayout({
           <div className="flex">
             {/* Pass userType to the Sidebar */}
             <Sidebar userType={userType} />
-            <main className="flex-1 ml-0 bg-gray-50 min-h-screen">{children}</main>
+            <main className="flex-1 ml-0 bg-gray-50 min-h-screen">
+              {children}
+            </main>
           </div>
         ) : (
           // Not logged in => show children (login/register)

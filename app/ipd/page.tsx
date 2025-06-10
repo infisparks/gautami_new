@@ -118,7 +118,7 @@ const AdmissionSourceOptions = [
 
 const RoomTypeOptions = [
   { value: "casualty", label: "Casualty" },
-  { value: "deluxe", label: "Deluxe" },
+  { value: "delux", label: "Delux" },
   { value: "female", label: "Female Ward" },
   { value: "icu", label: "ICU" },
   { value: "male", label: "Male Ward" },

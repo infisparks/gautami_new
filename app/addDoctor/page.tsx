@@ -539,7 +539,10 @@ const AdminDoctorsPage: React.FC = () => {
         {/* Edit Modal */}
         {isEditModalOpen && currentDoctor && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-lg relative">
+            {/* MODIFICATION HERE: 
+              Added `max-h-[90vh]` to constrain the height and `overflow-y-auto` to enable scrolling when content overflows.
+            */}
+            <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-lg relative max-h-[90vh] overflow-y-auto">
               <h2 className="text-2xl font-bold text-center text-blue-600 mb-6">Edit Doctor</h2>
               <form onSubmit={handleSubmitEdit(onEditSubmit)} className="space-y-6">
                 {/* Doctor Name */}
