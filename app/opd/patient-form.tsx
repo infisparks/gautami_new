@@ -97,7 +97,7 @@ export function PatientForm({
 
   const totalModalityCharges = useMemo(() => getTotalModalityCharges(), [getTotalModalityCharges])
 
-  // Payment logic
+  // Payment logic - only for hospital visits
   useEffect(() => {
     if (watchedAppointmentType === "visithospital" && !watchedPaymentMethod) {
       setValue("paymentMethod", "cash")
@@ -118,7 +118,7 @@ export function PatientForm({
     }
   }, [watchedModalities.length, watchedAppointmentType, totalModalityCharges, setValue])
 
-  // Fixed payment calculation logic
+  // Fixed payment calculation logic - only for hospital visits
   useEffect(() => {
     if (watchedAppointmentType !== "visithospital") return
 
@@ -487,52 +487,54 @@ export function PatientForm({
         </CardContent>
       </Card>
 
-      {/* Medical Services Section */}
-      <Card className="border-l-4 border-l-green-500">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Hospital className="h-5 w-5 text-green-600" />
-            Medical Services
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Controller
-            control={control}
-            name="modalities"
-            rules={{
-              required: "At least one service is required",
-              validate: (modalities) => {
-                if (!modalities || modalities.length === 0) {
-                  return "At least one service is required"
-                }
+      {/* Medical Services Section - Only for hospital visits */}
+      {watchedAppointmentType === "visithospital" && (
+        <Card className="border-l-4 border-l-green-500">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Hospital className="h-5 w-5 text-green-600" />
+              Medical Services
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Controller
+              control={control}
+              name="modalities"
+              rules={{
+                required: watchedAppointmentType === "visithospital" ? "At least one service is required" : false,
+                validate: (modalities) => {
+                  if (!modalities || modalities.length === 0) {
+                    return "At least one service is required"
+                  }
 
-                for (const modality of modalities) {
-                  if (modality.type === "consultation") {
-                    if (!modality.specialist) return "Specialist is required for consultation"
-                    if (!modality.doctor) return "Doctor is required for consultation"
-                    if (!modality.visitType) return "Visit type is required for consultation"
+                  for (const modality of modalities) {
+                    if (modality.type === "consultation") {
+                      if (!modality.specialist) return "Specialist is required for consultation"
+                      if (!modality.doctor) return "Doctor is required for consultation"
+                      if (!modality.visitType) return "Visit type is required for consultation"
+                    }
+                    if (
+                      (modality.type === "casualty" ||
+                        modality.type === "xray" ||
+                        modality.type === "pathology" ||
+                        modality.type === "ipd" ||
+                        modality.type === "radiology") &&
+                      !modality.service
+                    ) {
+                      return `Service is required for ${modality.type}`
+                    }
                   }
-                  if (
-                    (modality.type === "casualty" ||
-                      modality.type === "xray" ||
-                      modality.type === "pathology" ||
-                      modality.type === "ipd" ||
-                      modality.type === "radiology") &&
-                    !modality.service
-                  ) {
-                    return `Service is required for ${modality.type}`
-                  }
-                }
-                return true
-              },
-            }}
-            render={({ field }) => (
-              <ModalitySelector modalities={field.value || []} doctors={doctors} onChange={field.onChange} />
-            )}
-          />
-          {errors.modalities && <p className="text-sm text-red-500 mt-2">{errors.modalities.message}</p>}
-        </CardContent>
-      </Card>
+                  return true
+                },
+              }}
+              render={({ field }) => (
+                <ModalitySelector modalities={field.value || []} doctors={doctors} onChange={field.onChange} />
+              )}
+            />
+            {errors.modalities && <p className="text-sm text-red-500 mt-2">{errors.modalities.message}</p>}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Payment Section - Only for hospital visits */}
       {watchedAppointmentType === "visithospital" && (
@@ -553,7 +555,9 @@ export function PatientForm({
                 <Controller
                   control={control}
                   name="paymentMethod"
-                  rules={{ required: "Payment method is required" }}
+                  rules={{
+                    required: watchedAppointmentType === "visithospital" ? "Payment method is required" : false,
+                  }}
                   render={({ field }) => (
                     <Select onValueChange={field.onChange} value={field.value || "cash"}>
                       <SelectTrigger className={errors.paymentMethod ? "border-red-500" : ""}>
@@ -600,7 +604,7 @@ export function PatientForm({
                         placeholder="Cash amount"
                         className={`pl-10 ${errors.cashAmount ? "border-red-500" : ""}`}
                         {...register("cashAmount", {
-                          required: "Cash amount is required",
+                          required: watchedAppointmentType === "visithospital" ? "Cash amount is required" : false,
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
@@ -621,7 +625,7 @@ export function PatientForm({
                         placeholder="Online amount"
                         className={`pl-10 ${errors.onlineAmount ? "border-red-500" : ""}`}
                         {...register("onlineAmount", {
-                          required: "Online amount is required",
+                          required: watchedAppointmentType === "visithospital" ? "Online amount is required" : false,
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
@@ -643,7 +647,7 @@ export function PatientForm({
                       placeholder="Online amount"
                       className={`pl-10 ${errors.onlineAmount ? "border-red-500" : ""}`}
                       {...register("onlineAmount", {
-                        required: "Online amount is required",
+                        required: watchedAppointmentType === "visithospital" ? "Online amount is required" : false,
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
@@ -664,7 +668,7 @@ export function PatientForm({
                       placeholder="Cash amount"
                       className={`pl-10 ${errors.cashAmount ? "border-red-500" : ""}`}
                       {...register("cashAmount", {
-                        required: "Amount is required",
+                        required: watchedAppointmentType === "visithospital" ? "Amount is required" : false,
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}

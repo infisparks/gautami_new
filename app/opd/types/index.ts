@@ -62,6 +62,7 @@ export interface Doctor {
 }
 
 export interface OnCallAppointment {
+  message: string
   modality: string
   serviceName: string
   id: string

@@ -4,35 +4,31 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
-import { ref, push, update, onValue, set } from "firebase/database"
+import { ref, push, update, onValue, set, remove } from "firebase/database"
 import Head from "next/head"
 import { onAuthStateChanged } from "firebase/auth"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
-import { User, Clock, CheckCircle } from "lucide-react"
+import { User, Clock, CheckCircle, Hospital, PhoneCall } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 import { PatientForm } from "./patient-form"
-import type { IFormInput, PatientRecord, Doctor, ModalitySelection } from "./types"
+import { OnCallAppointments } from "./oncall-appointments"
+import type { IFormInput, PatientRecord, Doctor, ModalitySelection, OnCallAppointment } from "./types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 function formatAMPM(date: Date): string {
   const rawHours = date.getHours()
   const rawMinutes = date.getMinutes()
   const ampm = rawHours >= 12 ? "PM" : "AM"
 
- 
   const hours = rawHours % 12 || 12
-
-  
-  const minutesStr = rawMinutes < 10
-    ? `0${rawMinutes}`
-    : rawMinutes.toString()
+  const minutesStr = rawMinutes < 10 ? `0${rawMinutes}` : rawMinutes.toString()
 
   return `${hours}:${minutesStr} ${ampm}`
 }
-
 
 function generatePatientId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -46,6 +42,7 @@ export default function Page() {
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [gautamiPatients, setGautamiPatients] = useState<PatientRecord[]>([])
+  const [onCallAppointments, setOnCallAppointments] = useState<OnCallAppointment[]>([])
   const [patientSuggestions, setPatientSuggestions] = useState<PatientRecord[]>([])
   const [phoneSuggestions, setPhoneSuggestions] = useState<PatientRecord[]>([])
   const [showNameSuggestions, setShowNameSuggestions] = useState(false)
@@ -53,6 +50,7 @@ export default function Page() {
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [activeTab, setActiveTab] = useState("booking")
 
   const form = useForm<IFormInput>({
     defaultValues: {
@@ -104,6 +102,16 @@ export default function Page() {
     return onValue(patientsRef, (snap) => {
       const data = snap.val() || {}
       setGautamiPatients(Object.keys(data).map((key) => ({ id: key, ...data[key] })))
+    })
+  }, [])
+
+  // Fetch on-call appointments
+  useEffect(() => {
+    const onCallRef = ref(db, "oncall-appointments")
+    return onValue(onCallRef, (snap) => {
+      const data = snap.val() || {}
+      const appointments = Object.keys(data).map((key) => ({ id: key, ...data[key] }))
+      setOnCallAppointments(appointments)
     })
   }, [])
 
@@ -165,16 +173,18 @@ export default function Page() {
   }
 
   const validateAndSubmit = async (data: IFormInput) => {
-    const required: Array<keyof IFormInput> = ["name", "phone", "age", "gender", "date", "time", "modalities"]
+    const required: Array<keyof IFormInput> = ["name", "phone", "age", "gender", "date", "time"]
 
-    // Validate modalities
-    if (data.modalities.length === 0) {
-      toast.error("Please select at least one service")
-      return
-    }
-
-    // Validate payment for hospital visits
+    // For hospital visits, validate modalities and payment
     if (data.appointmentType === "visithospital") {
+      required.push("modalities")
+
+      // Validate modalities
+      if (!data.modalities || data.modalities.length === 0) {
+        toast.error("Please select at least one service")
+        return
+      }
+
       required.push("paymentMethod")
       if (data.paymentMethod === "mixed") {
         required.push("cashAmount", "onlineAmount")
@@ -196,18 +206,9 @@ export default function Page() {
   const onSubmit = async (data: IFormInput) => {
     setIsSubmitting(true)
     try {
-      const cash = data.appointmentType === "visithospital" ? Number(data.cashAmount) || 0 : 0
-      const online = data.appointmentType === "visithospital" ? Number(data.onlineAmount) || 0 : 0
-      const discount = data.appointmentType === "visithospital" ? Number(data.discount) || 0 : 0
-
-      // Calculate total charges from all modalities (before discount)
-      const totalCharges = getTotalModalityCharges()
-
-      // Total amount paid
-      const totalPaid = cash + online
-
       // Determine UHID
       const uhid = selectedPatient?.id || generatePatientId()
+
       if (!selectedPatient) {
         // new patient
         await set(ref(db, `patients/patientinfo/${uhid}`), {
@@ -231,60 +232,92 @@ export default function Page() {
         })
       }
 
-      // push OPD record
-      const opdRef = push(ref(db, `patients/opddetail/${uhid}`))
-
-      // Store all modalities as a separate array in the database
-      const modalitiesData = data.modalities.map((modality: ModalitySelection) => {
-        // Find doctor name from ID
-        const doctorName = modality.doctor
-          ? doctors.find((d) => d.id === modality.doctor)?.name || modality.doctor
-          : null
-
-        return {
-          type: modality.type,
-          doctor: doctorName, // Save doctor name instead of ID
-          specialist: modality.specialist || null,
-          visitType: modality.visitType || null,
-          service: modality.service || null,
-          study: modality.study || null,
-          charges: modality.charges,
-        }
-      })
-
-      await set(opdRef, {
-        name: data.name,
-        phone: data.phone,
-        patientId: uhid,
-        date: data.date.toISOString(),
-        time: data.time,
-        doctor: data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null, // Save doctor name instead of ID
-        modalities: modalitiesData,
-        visitType: data.visitType,
-        study: data.study,
-        message: data.message,
-        referredBy: data.referredBy,
-        appointmentType: data.appointmentType,
-        opdType: data.opdType,
-        enteredBy: currentUserEmail || "unknown",
-        createdAt: new Date().toISOString(),
-      })
-
-      // payment - store total charges without discount
-      const opdId = opdRef.key
-      if (opdId) {
-        await set(ref(db, `patients/opddetail/${uhid}/${opdId}/payment`), {
-          cashAmount: cash,
-          onlineAmount: online,
-          paymentMethod: data.paymentMethod,
-          discount,
-          totalCharges: totalCharges, // Total charges before discount
-          totalPaid: totalPaid, // Total amount paid (cash + online)
+      if (data.appointmentType === "oncall") {
+        // Save as on-call appointment
+        const onCallRef = push(ref(db, "oncall-appointments"))
+        await set(onCallRef, {
+          name: data.name,
+          phone: data.phone,
+          age: data.age,
+          gender: data.gender,
+          patientId: uhid,
+          date: data.date.toISOString(),
+          time: data.time,
+          message: data.message,
+          referredBy: data.referredBy,
+          enteredBy: currentUserEmail || "unknown",
           createdAt: new Date().toISOString(),
         })
+
+        toast.success("On-call appointment registered successfully!")
+      } else {
+        // Hospital visit - existing logic
+        const cash = Number(data.cashAmount) || 0
+        const online = Number(data.onlineAmount) || 0
+        const discount = Number(data.discount) || 0
+
+        // Calculate total charges from all modalities (before discount)
+        const totalCharges = getTotalModalityCharges()
+
+        // Total amount paid
+        const totalPaid = cash + online
+
+        // push OPD record
+        const opdRef = push(ref(db, `patients/opddetail/${uhid}`))
+
+        // Store all modalities as a separate array in the database
+        const modalitiesData = data.modalities.map((modality: ModalitySelection) => {
+          // Find doctor name from ID
+          const doctorName = modality.doctor
+            ? doctors.find((d) => d.id === modality.doctor)?.name || modality.doctor
+            : null
+
+          return {
+            type: modality.type,
+            doctor: doctorName, // Save doctor name instead of ID
+            specialist: modality.specialist || null,
+            visitType: modality.visitType || null,
+            service: modality.service || null,
+            study: modality.study || null,
+            charges: modality.charges,
+          }
+        })
+
+        await set(opdRef, {
+          name: data.name,
+          phone: data.phone,
+          patientId: uhid,
+          date: data.date.toISOString(),
+          time: data.time,
+          doctor: data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null, // Save doctor name instead of ID
+          modalities: modalitiesData,
+          visitType: data.visitType,
+          study: data.study,
+          message: data.message,
+          referredBy: data.referredBy,
+          appointmentType: data.appointmentType,
+          opdType: data.opdType,
+          enteredBy: currentUserEmail || "unknown",
+          createdAt: new Date().toISOString(),
+        })
+
+        // payment - store total charges without discount
+        const opdId = opdRef.key
+        if (opdId) {
+          await set(ref(db, `patients/opddetail/${uhid}/${opdId}/payment`), {
+            cashAmount: cash,
+            onlineAmount: online,
+            paymentMethod: data.paymentMethod,
+            discount,
+            totalCharges: totalCharges, // Total charges before discount
+            totalPaid: totalPaid, // Total amount paid (cash + online)
+            createdAt: new Date().toISOString(),
+          })
+        }
+
+        toast.success("Hospital appointment booked successfully!")
       }
 
-      toast.success("Appointment booked successfully!")
       setIsSubmitted(true)
       setTimeout(() => {
         setIsSubmitted(false)
@@ -320,6 +353,62 @@ export default function Page() {
     }
   }
 
+  const handleDeleteOnCallAppointment = async (id: string) => {
+    try {
+      await remove(ref(db, `oncall-appointments/${id}`))
+      toast.success("On-call appointment deleted successfully!")
+    } catch (error) {
+      console.error("Error deleting appointment:", error)
+      toast.error("Failed to delete appointment")
+    }
+  }
+
+  const handleBookOPDVisit = (appointment: OnCallAppointment) => {
+    // Pre-fill the form with on-call appointment data
+    setValue("name", appointment.name)
+    setValue("phone", appointment.phone)
+    setValue("age", appointment.age)
+    setValue("gender", appointment.gender)
+    setValue("appointmentType", "visithospital")
+    setValue("date", new Date(appointment.date))
+    setValue("time", appointment.time)
+    setValue("message", appointment.message || "")
+    setValue("referredBy", appointment.referredBy || "")
+
+    // Switch to booking tab
+    setActiveTab("booking")
+
+    toast.info("Patient information pre-filled. Please select services and payment details.")
+  }
+
+  const handleBookOnCall = () => {
+    // Reset form and set to on-call
+    reset({
+      name: "",
+      phone: "",
+      age: undefined,
+      gender: "",
+      address: "",
+      date: new Date(),
+      time: formatAMPM(new Date()),
+      message: "",
+      paymentMethod: "cash",
+      cashAmount: undefined,
+      onlineAmount: undefined,
+      discount: undefined,
+      modalities: [],
+      appointmentType: "oncall",
+      opdType: "",
+      doctor: "",
+      specialist: "",
+      visitType: "first",
+      study: "",
+      referredBy: "",
+    })
+    setSelectedPatient(null)
+    setActiveTab("booking")
+  }
+
   if (isSubmitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-4">
@@ -327,8 +416,8 @@ export default function Page() {
           <CardContent className="pt-6">
             <div className="text-center space-y-4">
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
-              <h2 className="text-2xl font-bold text-green-700">Appointment Booked!</h2>
-              <p className="text-gray-600">Your appointment has been successfully scheduled.</p>
+              <h2 className="text-2xl font-bold text-green-700">Appointment Registered!</h2>
+              <p className="text-gray-600">Your appointment has been successfully registered.</p>
               <p className="text-sm text-gray-500">Resetting form shortly...</p>
             </div>
           </CardContent>
@@ -363,46 +452,73 @@ export default function Page() {
         </div>
       </div>
 
-      {/* Main Form */}
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         <Card className="shadow-lg border-0">
           <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-            <CardTitle className="text-xl">New Appointment Registration</CardTitle>
+            <CardTitle className="text-xl">Patient Management System</CardTitle>
           </CardHeader>
-          <CardContent className="p-6">
-            <form onSubmit={handleSubmit(validateAndSubmit)} className="space-y-6">
-              <PatientForm
-                form={form}
-                doctors={doctors}
-                patientSuggestions={patientSuggestions}
-                phoneSuggestions={phoneSuggestions}
-                showNameSuggestions={showNameSuggestions}
-                showPhoneSuggestions={showPhoneSuggestions}
-                selectedPatient={selectedPatient}
-                onPatientSelect={handlePatientSelect}
-                onNameChange={handleNameChange}
-                onPhoneChange={handlePhoneChange}
-                setShowNameSuggestions={setShowNameSuggestions}
-                setShowPhoneSuggestions={setShowPhoneSuggestions}
-              />
+          <CardContent className="p-0">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 rounded-none border-b">
+                <TabsTrigger value="booking" className="flex items-center gap-2">
+                  <Hospital className="h-4 w-4" />
+                  Book Appointment
+                </TabsTrigger>
+                <TabsTrigger value="oncall" className="flex items-center gap-2">
+                  <PhoneCall className="h-4 w-4" />
+                  On-Call List ({onCallAppointments.length})
+                </TabsTrigger>
+              </TabsList>
 
-              <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
-                <Button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-lg transition min-w-[150px]"
-                >
-                  {isSubmitting ? (
-                    <div className="flex items-center gap-2">
-                      <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      Processing...
-                    </div>
-                  ) : (
-                    "Book Appointment"
-                  )}
-                </Button>
-              </div>
-            </form>
+              <TabsContent value="booking" className="p-6 mt-0">
+                <form onSubmit={handleSubmit(validateAndSubmit)} className="space-y-6">
+                  <PatientForm
+                    form={form}
+                    doctors={doctors}
+                    patientSuggestions={patientSuggestions}
+                    phoneSuggestions={phoneSuggestions}
+                    showNameSuggestions={showNameSuggestions}
+                    showPhoneSuggestions={showPhoneSuggestions}
+                    selectedPatient={selectedPatient}
+                    onPatientSelect={handlePatientSelect}
+                    onNameChange={handleNameChange}
+                    onPhoneChange={handlePhoneChange}
+                    setShowNameSuggestions={setShowNameSuggestions}
+                    setShowPhoneSuggestions={setShowPhoneSuggestions}
+                  />
+
+                  <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">
+                    <Button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-lg transition min-w-[150px]"
+                    >
+                      {isSubmitting ? (
+                        <div className="flex items-center gap-2">
+                          <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Processing...
+                        </div>
+                      ) : watch("appointmentType") === "oncall" ? (
+                        "Register On-Call"
+                      ) : (
+                        "Book Appointment"
+                      )}
+                    </Button>
+                  </div>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="oncall" className="p-6 mt-0">
+                <OnCallAppointments
+                  appointments={onCallAppointments}
+                  doctors={doctors}
+                  onDeleteAppointment={handleDeleteOnCallAppointment}
+                  onBookOPDVisit={handleBookOPDVisit}
+                  onBookOnCall={handleBookOnCall}
+                />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>
