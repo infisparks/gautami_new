@@ -47,8 +47,7 @@ export function OnCallAppointments({
       const filtered = appointments.filter(
         (appointment) =>
           appointment.name.toLowerCase().includes(query) ||
-          appointment.phone.includes(query) ||
-          (appointment.serviceName && appointment.serviceName.toLowerCase().includes(query))
+          appointment.phone.includes(query)
       )
       setFilteredAppointments(filtered)
     }

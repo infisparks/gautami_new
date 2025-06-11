@@ -1,50 +1,25 @@
 "use client"
 
-import type React from "react"
 import { useEffect, useRef, useCallback, useMemo } from "react"
 import { type UseFormReturn, Controller } from "react-hook-form"
-import { type IFormInput, type PatientRecord, GenderOptions, PaymentOptions } from "./types"
-import {
-  Phone,
-  Cake,
-  MapPin,
-  Clock,
-  MessageSquare,
-  IndianRupeeIcon,
-  PersonStandingIcon as PersonIcon,
-  CalendarIcon,
-  User,
-  CreditCard,
-  FileText,
-  Hospital,
-  PhoneCall,
-} from "lucide-react"
+import { type IFormInput, GenderOptions, PaymentOptions } from "../opd/types"
+import { Phone, Cake, MapPin, Clock, MessageSquare, IndianRupeeIcon, PersonStandingIcon as PersonIcon, CalendarIcon, User, CreditCard, FileText, Hospital, PhoneCall } from 'lucide-react'
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { ModalitySelector } from "./modality-selector"
-import type { Doctor } from "./types"
+import { ModalitySelector } from "../opd/modality-selector"
+import { BillGenerator } from "./bill-generator"
+import type { Doctor } from "../opd/types"
 
-interface PatientFormProps {
+interface EditAppointmentFormProps {
   form: UseFormReturn<IFormInput>
   doctors: Doctor[]
-  patientSuggestions: PatientRecord[]
-  phoneSuggestions: PatientRecord[]
-  showNameSuggestions: boolean
-  showPhoneSuggestions: boolean
-  selectedPatient: PatientRecord | null
-  onPatientSelect: (patient: PatientRecord) => void
-  onNameChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  onPhoneChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  setShowNameSuggestions: (show: boolean) => void
-  setShowPhoneSuggestions: (show: boolean) => void
+  appointmentId?: string
+  patientId?: string
 }
 
 function formatAMPM(date: Date): string {
@@ -57,20 +32,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`
 }
 
-export function PatientForm({
-  form,
-  doctors,
-  patientSuggestions,
-  phoneSuggestions,
-  showNameSuggestions,
-  showPhoneSuggestions,
-  selectedPatient,
-  onPatientSelect,
-  onNameChange,
-  onPhoneChange,
-  setShowNameSuggestions,
-  setShowPhoneSuggestions,
-}: PatientFormProps) {
+export function EditAppointmentForm({ form, doctors, appointmentId, patientId }: EditAppointmentFormProps) {
   const {
     register,
     control,
@@ -79,16 +41,14 @@ export function PatientForm({
     setValue,
   } = form
 
-  const nameInputRef = useRef<HTMLInputElement | null>(null)
-  const phoneInputRef = useRef<HTMLInputElement | null>(null)
-  const nameSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
-  const phoneSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
-
   const watchedModalities = watch("modalities") || []
   const watchedPaymentMethod = watch("paymentMethod")
   const watchedAppointmentType = watch("appointmentType")
   const watchedCashAmount = watch("cashAmount")
   const watchedOnlineAmount = watch("onlineAmount")
+
+  // Get all form data for bill generation
+  const formData = watch()
 
   // Calculate total charges
   const getTotalModalityCharges = useCallback(() => {
@@ -148,39 +108,6 @@ export function PatientForm({
     watch,
   ])
 
-  // Hide suggestions on outside click
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        showNameSuggestions &&
-        nameSuggestionBoxRef.current &&
-        !nameSuggestionBoxRef.current.contains(event.target as Node) &&
-        nameInputRef.current &&
-        !nameInputRef.current.contains(event.target as Node)
-      ) {
-        setShowNameSuggestions(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [showNameSuggestions, setShowNameSuggestions])
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        showPhoneSuggestions &&
-        phoneSuggestionBoxRef.current &&
-        !phoneSuggestionBoxRef.current.contains(event.target as Node) &&
-        phoneInputRef.current &&
-        !phoneInputRef.current.contains(event.target as Node)
-      ) {
-        setShowPhoneSuggestions(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [showPhoneSuggestions, setShowPhoneSuggestions])
-
   // Fixed calculation: Final amount = Cash + Online (total amount paid)
   const calculateTotalAmount = () => {
     const cashAmount = Number(watch("cashAmount")) || 0
@@ -211,45 +138,10 @@ export function PatientForm({
                   id="name"
                   type="text"
                   {...register("name", { required: "Name is required" })}
-                  onChange={onNameChange}
                   placeholder="Enter patient name"
                   className={`pl-10 ${errors.name ? "border-red-500" : ""}`}
                   autoComplete="off"
-                  ref={(e) => {
-                    register("name", { required: "Name is required" }).ref(e)
-                    nameInputRef.current = e
-                  }}
                 />
-                {showNameSuggestions && patientSuggestions.length > 0 && (
-                  <div
-                    ref={nameSuggestionBoxRef}
-                    className="absolute z-10 bg-white border border-gray-200 rounded-md w-full mt-1 max-h-48 shadow-lg"
-                  >
-                    <ScrollArea className="max-h-48">
-                      <div className="p-1">
-                        {patientSuggestions.map((suggestion) => (
-                          <div
-                            key={suggestion.id}
-                            className="flex items-center justify-between px-3 py-2 hover:bg-blue-50 rounded-md cursor-pointer"
-                            onClick={() => onPatientSelect(suggestion)}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Avatar className="h-6 w-6">
-                                <AvatarFallback className="text-xs bg-blue-100 text-blue-700">
-                                  {suggestion.name.substring(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <span className="font-medium">{suggestion.name}</span>
-                            </div>
-                            <Badge variant="default" className="text-xs">
-                              Existing
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                  </div>
-                )}
               </div>
               {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
             </div>
@@ -271,47 +163,10 @@ export function PatientForm({
                       message: "Please enter a valid 10-digit phone number",
                     },
                   })}
-                  onChange={onPhoneChange}
                   placeholder="Enter 10-digit number"
                   className={`pl-10 ${errors.phone ? "border-red-500" : ""}`}
                   autoComplete="off"
-                  ref={(e) => {
-                    register("phone", {
-                      required: "Phone number is required",
-                      pattern: {
-                        value: /^[0-9]{10}$/,
-                        message: "Please enter a valid 10-digit phone number",
-                      },
-                    }).ref(e)
-                    phoneInputRef.current = e
-                  }}
                 />
-                {showPhoneSuggestions && phoneSuggestions.length > 0 && (
-                  <div
-                    ref={phoneSuggestionBoxRef}
-                    className="absolute z-10 bg-white border border-gray-200 rounded-md w-full mt-1 max-h-48 overflow-auto shadow-lg"
-                  >
-                    {phoneSuggestions.map((suggestion) => (
-                      <div
-                        key={suggestion.id}
-                        onClick={() => onPatientSelect(suggestion)}
-                        className="flex items-center justify-between px-3 py-2 hover:bg-blue-50 cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarFallback className="text-xs bg-blue-100 text-blue-700">
-                              {suggestion.name.substring(0, 2).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="font-medium">{suggestion.name}</span>
-                        </div>
-                        <Badge variant="default" className="text-xs">
-                          Existing
-                        </Badge>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
               {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
             </div>
@@ -452,7 +307,6 @@ export function PatientForm({
                     {...register("time", { required: "Time is required" })}
                     placeholder="10:30 AM"
                     className={`pl-10 ${errors.time ? "border-red-500" : ""}`}
-                    defaultValue={formatAMPM(new Date())}
                   />
                 </div>
                 {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
@@ -701,27 +555,40 @@ export function PatientForm({
             {totalModalityCharges > 0 && (
               <Card className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200">
                 <CardContent className="p-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div className="flex justify-between">
-                      <span>Total Charges:</span>
-                      <span className="font-semibold">₹{totalModalityCharges}</span>
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm flex-1">
+                      <div className="flex justify-between">
+                        <span>Total Charges:</span>
+                        <span className="font-semibold">₹{totalModalityCharges}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Discount:</span>
+                        <span className="text-red-600">-₹{Number(watch("discount")) || 0}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Amount to Pay:</span>
+                        <span className="font-semibold">₹{totalModalityCharges - (Number(watch("discount")) || 0)}</span>
+                      </div>
+                      <div className="flex justify-between text-lg font-bold text-green-700">
+                        <span>Amount Paid:</span>
+                        <span>₹{calculateTotalAmount()}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Discount:</span>
-                      <span className="text-red-600">-₹{Number(watch("discount")) || 0}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Amount to Pay:</span>
-                      <span className="font-semibold">₹{totalModalityCharges - (Number(watch("discount")) || 0)}</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-bold text-green-700">
-                      <span>Amount Paid:</span>
-                      <span>₹{calculateTotalAmount()}</span>
+                    
+                    {/* Bill Download Button */}
+                    <div className="ml-4">
+                    <BillGenerator
+  appointmentData={formData}
+  appointmentId={appointmentId}
+  patientId={patientId}
+  doctors={doctors}         
+  className="bg-blue-600 hover:bg-blue-700 text-white"
+/>
                     </div>
                   </div>
 
                   {/* Payment Breakdown */}
-                  <div className="mt-3 pt-3 border-t border-green-200">
+                  <div className="pt-3 border-t border-green-200">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-gray-600">
                       {watchedPaymentMethod === "mixed" && (
                         <>

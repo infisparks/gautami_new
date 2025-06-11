@@ -38,6 +38,26 @@ interface Doctor {
   specialist?: string
 }
 
+// Updated OPD interfaces for new structure
+interface IModality {
+  charges: number
+  doctor?: string
+  specialist?: string
+  type: "consultation" | "casualty" | "xray"
+  visitType?: string
+  service?: string
+}
+
+interface IPayment {
+  cashAmount: number
+  createdAt: string
+  discount: number
+  onlineAmount: number
+  paymentMethod: string
+  totalCharges: number
+  totalPaid: number
+}
+
 interface OPDAppointment {
   id: string
   patientId: string
@@ -45,17 +65,16 @@ interface OPDAppointment {
   phone: string
   date: string
   time: string
-  doctor: string
-  doctorId: string
-  amount: number
-  serviceName?: string
-  paymentMethod?: string
-  appointmentType: "visithospital" | "oncall"
+  appointmentType: string
   createdAt: string
-  discount?: string
-  originalAmount?: number
-  message?: string
-  referredBy?: string
+  enteredBy: string
+  message: string
+  modalities: IModality[]
+  opdType: string
+  payment: IPayment
+  referredBy: string
+  study: string
+  visitType: string
 }
 
 interface IPDService {
@@ -238,7 +257,7 @@ const DashboardPage: React.FC = () => {
     [patientCache],
   )
 
-  // Fetch OPD appointments
+  // Updated OPD appointments fetch for new structure
   useEffect(() => {
     const { start: startDate, end: endDate } = currentDateRange
     if (!startDate || !endDate) return
@@ -288,17 +307,24 @@ const DashboardPage: React.FC = () => {
                   phone: patientInfo.phone,
                   date: dateStr,
                   time: appointmentData.time || "",
-                  doctor: doctors[appointmentData.doctor]?.name || "Unknown",
-                  doctorId: appointmentData.doctor,
-                  amount: Number(appointmentData.amount) || 0,
-                  serviceName: appointmentData.serviceName,
-                  paymentMethod: appointmentData.paymentMethod || "cash",
                   appointmentType: appointmentData.appointmentType || "visithospital",
                   createdAt: appointmentData.createdAt,
-                  discount: appointmentData.discount,
-                  originalAmount: appointmentData.originalAmount,
-                  message: appointmentData.message,
-                  referredBy: appointmentData.referredBy,
+                  enteredBy: appointmentData.enteredBy || "",
+                  message: appointmentData.message || "",
+                  modalities: appointmentData.modalities || [],
+                  opdType: appointmentData.opdType || "",
+                  payment: appointmentData.payment || {
+                    cashAmount: 0,
+                    createdAt: "",
+                    discount: 0,
+                    onlineAmount: 0,
+                    paymentMethod: "cash",
+                    totalCharges: 0,
+                    totalPaid: 0,
+                  },
+                  referredBy: appointmentData.referredBy || "",
+                  study: appointmentData.study || "",
+                  visitType: appointmentData.visitType || "",
                 }
 
                 setOpdAppointments((prev) => {
@@ -335,7 +361,7 @@ const DashboardPage: React.FC = () => {
     }
   }, [currentDateRange, doctors, fetchPatientInfo])
 
-  // Fetch IPD appointments
+  // Fetch IPD appointments (unchanged)
   useEffect(() => {
     const { start: startDate, end: endDate } = currentDateRange
     if (!startDate || !endDate) return
@@ -428,7 +454,7 @@ const DashboardPage: React.FC = () => {
     }
   }, [currentDateRange, doctors, fetchPatientInfo])
 
-  // Fetch OT appointments
+  // Fetch OT appointments (unchanged)
   useEffect(() => {
     const { start: startDate, end: endDate } = currentDateRange
     if (!startDate || !endDate) return
@@ -482,17 +508,17 @@ const DashboardPage: React.FC = () => {
     }
   }, [currentDateRange, fetchPatientInfo])
 
-  // Calculate statistics
+  // Updated statistics calculation for new OPD structure
   const statistics = useMemo(() => {
-    const totalOpdAmount = opdAppointments.reduce((sum, app) => sum + (Number(app.amount) || 0), 0)
+    const totalOpdAmount = opdAppointments.reduce((sum, app) => sum + (app.payment.totalPaid || 0), 0)
     const totalIpdAmount = ipdAppointments.reduce((sum, app) => sum + app.totalDeposit, 0)
 
     const opdCash = opdAppointments.reduce((sum, app) => {
-      return app.paymentMethod?.toLowerCase() === "cash" ? sum + (Number(app.amount) || 0) : sum
+      return sum + (app.payment.cashAmount || 0)
     }, 0)
 
     const opdOnline = opdAppointments.reduce((sum, app) => {
-      return app.paymentMethod?.toLowerCase() === "online" ? sum + (Number(app.amount) || 0) : sum
+      return sum + (app.payment.onlineAmount || 0)
     }, 0)
 
     const ipdCash = ipdAppointments.reduce((sum, app) => {
@@ -520,9 +546,9 @@ const DashboardPage: React.FC = () => {
   // Filter appointments based on search
   const filteredAppointments = useMemo(() => {
     const allAppointments = [
-      ...opdAppointments.map((app) => ({ ...app, type: "OPD" as const })), 
-      ...ipdAppointments.map((app) => ({ ...app, type: "IPD" as const, date: app.admissionDate })), 
-      ...otAppointments.map((app) => ({ ...app, type: "OT" as const })), 
+      ...opdAppointments.map((app) => ({ ...app, type: "OPD" as const })),
+      ...ipdAppointments.map((app) => ({ ...app, type: "IPD" as const, date: app.admissionDate })),
+      ...otAppointments.map((app) => ({ ...app, type: "OT" as const })),
     ]
 
     if (!filters.searchQuery) return allAppointments
@@ -569,6 +595,20 @@ const DashboardPage: React.FC = () => {
       ],
     }
   }, [opdAppointments, ipdAppointments])
+
+  // Helper function to get modalities summary
+  const getModalitiesSummary = (modalities: IModality[]) => {
+    const consultations = modalities.filter((m) => m.type === "consultation").length
+    const casualty = modalities.filter((m) => m.type === "casualty").length
+    const xrays = modalities.filter((m) => m.type === "xray").length
+
+    const parts = []
+    if (consultations > 0) parts.push(`${consultations} Consultation${consultations > 1 ? "s" : ""}`)
+    if (casualty > 0) parts.push(`${casualty} Casualty`)
+    if (xrays > 0) parts.push(`${xrays} X-ray${xrays > 1 ? "s" : ""}`)
+
+    return parts.join(", ") || "No services"
+  }
 
   // Filter handlers
   const handleFilterChange = (newFilters: Partial<FilterState>) => {
@@ -991,7 +1031,7 @@ const DashboardPage: React.FC = () => {
                           Type
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Amount
+                          Services/Amount
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Action
@@ -1051,18 +1091,29 @@ const DashboardPage: React.FC = () => {
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm font-medium text-gray-900">
-                                {appointment.type === "IPD"
-                                  ? formatCurrency(appointment.totalDeposit)
-                                  : appointment.type === "OPD"
-                                  ? formatCurrency(appointment.amount)
-                                  : "-"}
-                              </div>
-                              {appointment.type === "IPD" && appointment.remainingAmount !== undefined && appointment.remainingAmount > 0 && (
-                                <div className="text-xs text-red-500">
-                                  Pending: {formatCurrency(appointment.remainingAmount)}
+                              {appointment.type === "OPD" && (
+                                <div>
+                                  <div className="text-sm text-gray-600 mb-1">
+                                    {getModalitiesSummary(appointment.modalities)}
+                                  </div>
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {formatCurrency(appointment.payment.totalPaid)}
+                                  </div>
                                 </div>
                               )}
+                              {appointment.type === "IPD" && (
+                                <div>
+                                  <div className="text-sm font-medium text-gray-900">
+                                    {formatCurrency(appointment.totalDeposit)}
+                                  </div>
+                                  {appointment.remainingAmount !== undefined && appointment.remainingAmount > 0 && (
+                                    <div className="text-xs text-red-500">
+                                      Pending: {formatCurrency(appointment.remainingAmount)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              {appointment.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                               <button
@@ -1119,8 +1170,8 @@ const DashboardPage: React.FC = () => {
                           selectedAppointment.type === "OPD"
                             ? "bg-gradient-to-r from-sky-100 to-blue-100"
                             : selectedAppointment.type === "IPD"
-                            ? "bg-gradient-to-r from-orange-100 to-red-100"
-                            : "bg-gradient-to-r from-purple-100 to-pink-100"
+                              ? "bg-gradient-to-r from-orange-100 to-red-100"
+                              : "bg-gradient-to-r from-purple-100 to-pink-100"
                         }`}
                       >
                         {selectedAppointment.type === "OPD" && <Activity className="text-sky-600 h-6 w-6" />}
@@ -1153,8 +1204,8 @@ const DashboardPage: React.FC = () => {
                         </div>
                         <div className="space-y-3">
                           <div>
-                            <p className="text-sm text-gray-500">Doctor</p>
-                            <p className="font-medium">{selectedAppointment.doctor}</p>
+                            <p className="text-sm text-gray-500">Patient ID</p>
+                            <p className="font-medium">{selectedAppointment.patientId}</p>
                           </div>
                           {selectedAppointment.type === "IPD" && (
                             <>
@@ -1172,58 +1223,146 @@ const DashboardPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* OPD Specific Details */}
+                    {/* Updated OPD Specific Details */}
                     {selectedAppointment.type === "OPD" && (
-                      <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-6 mb-6">
-                        <h3 className="text-lg font-semibold text-sky-800 mb-4">OPD Details</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-sm text-gray-500">Time</p>
-                              <p className="font-medium">{selectedAppointment.time || "-"}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500">Service</p>
-                              <p className="font-medium">{selectedAppointment.serviceName || "-"}</p>
-                            </div>
-                            <div>
-                              <p className="text-sm text-gray-500">Payment Method</p>
-                              <p className="font-medium capitalize">{selectedAppointment.paymentMethod}</p>
-                            </div>
-                          </div>
-                          <div className="space-y-3">
-                            <div>
-                              <p className="text-sm text-gray-500">Amount</p>
-                              <p className="font-bold text-xl text-sky-600">
-                                {formatCurrency(selectedAppointment.amount)}
-                              </p>
-                            </div>
-                            {selectedAppointment.discount && (
+                      <>
+                        <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-6 mb-6">
+                          <h3 className="text-lg font-semibold text-sky-800 mb-4">OPD Details</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-3">
                               <div>
-                                <p className="text-sm text-gray-500">Discount</p>
-                                <p className="font-medium text-green-600">{selectedAppointment.discount}%</p>
+                                <p className="text-sm text-gray-500">Time</p>
+                                <p className="font-medium">{selectedAppointment.time || "-"}</p>
                               </div>
-                            )}
-                            {selectedAppointment.originalAmount && (
                               <div>
-                                <p className="text-sm text-gray-500">Original Amount</p>
-                                <p className="font-medium text-gray-500 line-through">
-                                  {formatCurrency(selectedAppointment.originalAmount)}
+                                <p className="text-sm text-gray-500">Appointment Type</p>
+                                <p className="font-medium capitalize">{selectedAppointment.appointmentType}</p>
+                              </div>
+                              <div>
+                                <p className="text-sm text-gray-500">Visit Type</p>
+                                <p className="font-medium capitalize">{selectedAppointment.visitType || "-"}</p>
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              <div>
+                                <p className="text-sm text-gray-500">Payment Method</p>
+                                <p className="font-medium capitalize">{selectedAppointment.payment.paymentMethod}</p>
+                              </div>
+                              <div>
+                                <p className="text-sm text-gray-500">Total Amount</p>
+                                <p className="font-bold text-xl text-sky-600">
+                                  {formatCurrency(selectedAppointment.payment.totalPaid)}
                                 </p>
                               </div>
-                            )}
+                              {selectedAppointment.payment.discount > 0 && (
+                                <div>
+                                  <p className="text-sm text-gray-500">Discount</p>
+                                  <p className="font-medium text-green-600">₹{selectedAppointment.payment.discount}</p>
+                                </div>
+                              )}
+                            </div>
                           </div>
+                          {selectedAppointment.message && (
+                            <div className="mt-4 p-3 bg-white rounded-lg border border-sky-200">
+                              <p className="text-sm text-gray-500">Notes</p>
+                              <p className="font-medium">{selectedAppointment.message}</p>
+                            </div>
+                          )}
                         </div>
-                        {selectedAppointment.message && (
-                          <div className="mt-4 p-3 bg-white rounded-lg border border-sky-200">
-                            <p className="text-sm text-gray-500">Notes</p>
-                            <p className="font-medium">{selectedAppointment.message}</p>
+
+                        {/* Services & Modalities */}
+                        {selectedAppointment.modalities && selectedAppointment.modalities.length > 0 && (
+                          <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 mb-6">
+                            <h3 className="text-lg font-semibold text-purple-800 mb-4 flex items-center">
+                              <FileText className="mr-2 h-5 w-5" />
+                              Services & Modalities
+                            </h3>
+                            <div className="space-y-3">
+                              {selectedAppointment.modalities.map((modality: IModality, index: number) => (
+                                <div key={index} className="border border-purple-200 rounded p-3 bg-white">
+                                  <div className="flex justify-between items-start mb-2">
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium capitalize">
+                                      {modality.type}
+                                    </span>
+                                    <span className="font-semibold text-purple-700">₹{modality.charges}</span>
+                                  </div>
+                                  {modality.doctor && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Doctor:</strong> {modality.doctor}
+                                    </div>
+                                  )}
+                                  {modality.specialist && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Specialist:</strong> {modality.specialist}
+                                    </div>
+                                  )}
+                                  {modality.service && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Service:</strong> {modality.service}
+                                    </div>
+                                  )}
+                                  {modality.visitType && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Visit Type:</strong> {modality.visitType}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                            <div className="mt-4 p-4 bg-white rounded-lg border border-purple-200">
+                              <div className="flex justify-between items-center text-lg font-semibold">
+                                <span className="text-purple-700">Total Charges:</span>
+                                <span className="text-purple-600">₹{selectedAppointment.payment.totalCharges}</span>
+                              </div>
+                            </div>
                           </div>
                         )}
-                      </div>
+
+                        {/* Payment Details */}
+                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6">
+                          <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center">
+                            <CreditCard className="mr-2 h-5 w-5" />
+                            Payment Details
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Cash Amount:</span>
+                                <span className="font-semibold text-green-700">
+                                  ₹{selectedAppointment.payment.cashAmount}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Online Amount:</span>
+                                <span className="font-semibold text-blue-700">
+                                  ₹{selectedAppointment.payment.onlineAmount}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Total Charges:</span>
+                                <span className="font-semibold">₹{selectedAppointment.payment.totalCharges}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-gray-600">Discount:</span>
+                                <span className="font-semibold text-red-600">
+                                  ₹{selectedAppointment.payment.discount}
+                                </span>
+                              </div>
+                              <div className="flex justify-between border-t pt-2">
+                                <span className="text-green-700 font-bold">Total Paid:</span>
+                                <span className="font-bold text-green-600">
+                                  ₹{selectedAppointment.payment.totalPaid}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </>
                     )}
 
-                    {/* IPD Specific Details */}
+                    {/* IPD Specific Details (unchanged) */}
                     {selectedAppointment.type === "IPD" && (
                       <>
                         {/* Services */}
@@ -1311,14 +1450,15 @@ const DashboardPage: React.FC = () => {
                                     {formatCurrency(selectedAppointment.totalDeposit)}
                                   </span>
                                 </div>
-                                {selectedAppointment.remainingAmount !== undefined && selectedAppointment.remainingAmount > 0 && (
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-red-700">Remaining:</span>
-                                    <span className="font-bold text-red-600">
-                                      {formatCurrency(selectedAppointment.remainingAmount)}
-                                    </span>
-                                  </div>
-                                )}
+                                {selectedAppointment.remainingAmount !== undefined &&
+                                  selectedAppointment.remainingAmount > 0 && (
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-red-700">Remaining:</span>
+                                      <span className="font-bold text-red-600">
+                                        {formatCurrency(selectedAppointment.remainingAmount)}
+                                      </span>
+                                    </div>
+                                  )}
                               </div>
                             </div>
                           </div>
