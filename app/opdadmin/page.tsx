@@ -18,7 +18,19 @@ import {
   Legend,
   ArcElement,
 } from "chart.js"
-import { Search, Trash2, Eye, DollarSign, Users, CreditCard, Banknote, RefreshCw, Filter } from "lucide-react"
+import {
+  Search,
+  Trash2,
+  Eye,
+  Users,
+  CreditCard,
+  Banknote,
+  RefreshCw,
+  Filter,
+  IndianRupeeIcon,
+  TrendingUp,
+  Calculator,
+} from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,9 +58,10 @@ interface IOPDEntry {
   uhid: string // patientId
   name: string
   phone: string
-  serviceName: string
   amount: number
   originalAmount: number
+  cashAmount: number
+  onlineAmount: number
   discount: number
   createdAt: string
   date: string // ISO string
@@ -59,21 +72,25 @@ interface IOPDEntry {
   appointmentType: string
   opdType: string
   enteredBy: string
+  modality: string
+  visitType?: string
+  study?: string
 }
 
 interface IDoctor {
   id: string
   name: string
-  opdCharge?: number
-  specialty?: string
+  specialist?: string
+  firstVisitCharge?: number
+  followUpCharge?: number
 }
 
 interface PaymentSummary {
-  cash: number
-  online: number
-  card: number
-  upi: number
-  total: number
+  totalCash: number
+  totalOnline: number
+  totalAmount: number
+  totalDiscount: number
+  netRevenue: number
 }
 
 interface DashboardStats {
@@ -81,8 +98,10 @@ interface DashboardStats {
   totalRevenue: number
   paymentBreakdown: PaymentSummary
   averageAmount: number
-  topServices: Array<{ service: string; count: number; revenue: number }>
   topDoctors: Array<{ doctor: string; count: number; revenue: number }>
+  modalityBreakdown: Array<{ modality: string; count: number; revenue: number }>
+  visitTypeBreakdown: Array<{ visitType: string; count: number; revenue: number }>
+  paymentMethodBreakdown: Array<{ method: string; count: number; amount: number }>
 }
 
 type DateFilter = "today" | "7days"
@@ -113,8 +132,9 @@ const AdminDashboardPage: React.FC = () => {
             doctorsList.push({
               id: key,
               name: entry.name,
-              opdCharge: entry.opdCharge,
-              specialty: entry.specialty,
+              specialist: entry.specialist,
+              firstVisitCharge: entry.firstVisitCharge,
+              followUpCharge: entry.followUpCharge,
             })
           })
         }
@@ -195,9 +215,10 @@ const AdminDashboardPage: React.FC = () => {
                 uhid,
                 name: appointment.name || "Unknown",
                 phone: appointment.phone || "",
-                serviceName: appointment.serviceName || "",
                 amount: Number(appointment.amount) || 0,
                 originalAmount: Number(appointment.originalAmount) || Number(appointment.amount) || 0,
+                cashAmount: Number(appointment.cashAmount) || 0,
+                onlineAmount: Number(appointment.onlineAmount) || 0,
                 discount: Number(appointment.discount) || 0,
                 createdAt: appointment.createdAt,
                 date: appointment.date,
@@ -208,6 +229,9 @@ const AdminDashboardPage: React.FC = () => {
                 appointmentType: appointment.appointmentType || "visithospital",
                 opdType: appointment.opdType || "opd",
                 enteredBy: appointment.enteredBy || "",
+                modality: appointment.modality || "",
+                visitType: appointment.visitType || "",
+                study: appointment.study || "",
               })
             })
           }
@@ -241,32 +265,34 @@ const AdminDashboardPage: React.FC = () => {
     return map
   }, [doctors])
 
-  // Calculate dashboard statistics
+  // Enhanced dashboard statistics calculation
   const dashboardStats = useMemo((): DashboardStats => {
     const paymentBreakdown: PaymentSummary = {
-      cash: 0,
-      online: 0,
-      card: 0,
-      upi: 0,
-      total: 0,
+      totalCash: 0,
+      totalOnline: 0,
+      totalAmount: 0,
+      totalDiscount: 0,
+      netRevenue: 0,
     }
 
-    const serviceMap = new Map<string, { count: number; revenue: number }>()
     const doctorStatsMap = new Map<string, { count: number; revenue: number }>()
+    const modalityMap = new Map<string, { count: number; revenue: number }>()
+    const visitTypeMap = new Map<string, { count: number; revenue: number }>()
+    const paymentMethodMap = new Map<string, { count: number; amount: number }>()
 
     opdAppointments.forEach((appt) => {
-      // Payment breakdown
-      const method = appt.paymentMethod.toLowerCase()
-      if (method in paymentBreakdown) {
-        paymentBreakdown[method as keyof PaymentSummary] += appt.amount
-      }
-      paymentBreakdown.total += appt.amount
+      // Enhanced payment calculations
+      paymentBreakdown.totalCash += appt.cashAmount
+      paymentBreakdown.totalOnline += appt.onlineAmount
+      paymentBreakdown.totalAmount += appt.amount
+      paymentBreakdown.totalDiscount += appt.discount
+      paymentBreakdown.netRevenue += appt.amount
 
-      // Service statistics
-      const existing = serviceMap.get(appt.serviceName) || { count: 0, revenue: 0 }
-      serviceMap.set(appt.serviceName, {
-        count: existing.count + 1,
-        revenue: existing.revenue + appt.amount,
+      // Payment method breakdown
+      const methodExisting = paymentMethodMap.get(appt.paymentMethod) || { count: 0, amount: 0 }
+      paymentMethodMap.set(appt.paymentMethod, {
+        count: methodExisting.count + 1,
+        amount: methodExisting.amount + appt.amount,
       })
 
       // Doctor statistics
@@ -276,25 +302,52 @@ const AdminDashboardPage: React.FC = () => {
         count: doctorExisting.count + 1,
         revenue: doctorExisting.revenue + appt.amount,
       })
-    })
 
-    const topServices = Array.from(serviceMap.entries())
-      .map(([service, stats]) => ({ service, ...stats }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5)
+      // Modality statistics
+      if (appt.modality) {
+        const modalityExisting = modalityMap.get(appt.modality) || { count: 0, revenue: 0 }
+        modalityMap.set(appt.modality, {
+          count: modalityExisting.count + 1,
+          revenue: modalityExisting.revenue + appt.amount,
+        })
+      }
+
+      // Visit type statistics
+      if (appt.visitType) {
+        const visitTypeExisting = visitTypeMap.get(appt.visitType) || { count: 0, revenue: 0 }
+        visitTypeMap.set(appt.visitType, {
+          count: visitTypeExisting.count + 1,
+          revenue: visitTypeExisting.revenue + appt.amount,
+        })
+      }
+    })
 
     const topDoctors = Array.from(doctorStatsMap.entries())
       .map(([doctor, stats]) => ({ doctor, ...stats }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5)
 
+    const modalityBreakdown = Array.from(modalityMap.entries())
+      .map(([modality, stats]) => ({ modality, ...stats }))
+      .sort((a, b) => b.count - a.count)
+
+    const visitTypeBreakdown = Array.from(visitTypeMap.entries())
+      .map(([visitType, stats]) => ({ visitType, ...stats }))
+      .sort((a, b) => b.count - a.count)
+
+    const paymentMethodBreakdown = Array.from(paymentMethodMap.entries())
+      .map(([method, stats]) => ({ method, ...stats }))
+      .sort((a, b) => b.amount - a.amount)
+
     return {
       totalAppointments: opdAppointments.length,
-      totalRevenue: paymentBreakdown.total,
+      totalRevenue: paymentBreakdown.netRevenue,
       paymentBreakdown,
-      averageAmount: opdAppointments.length > 0 ? paymentBreakdown.total / opdAppointments.length : 0,
-      topServices,
+      averageAmount: opdAppointments.length > 0 ? paymentBreakdown.netRevenue / opdAppointments.length : 0,
       topDoctors,
+      modalityBreakdown,
+      visitTypeBreakdown,
+      paymentMethodBreakdown,
     }
   }, [opdAppointments, doctorMap])
 
@@ -310,24 +363,66 @@ const AdminDashboardPage: React.FC = () => {
       opdAppointments.filter((appt) => isSameDay(new Date(appt.date), day)).reduce((acc, appt) => acc + appt.amount, 0),
     )
 
+    const cashCounts = days.map((day) =>
+      opdAppointments
+        .filter((appt) => isSameDay(new Date(appt.date), day))
+        .reduce((acc, appt) => acc + appt.cashAmount, 0),
+    )
+
+    const onlineCounts = days.map((day) =>
+      opdAppointments
+        .filter((appt) => isSameDay(new Date(appt.date), day))
+        .reduce((acc, appt) => acc + appt.onlineAmount, 0),
+    )
+
     return {
       labels: days.map((day) => format(day, dateFilter === "today" ? "HH:mm" : "MMM dd")),
       appointmentCounts,
       revenueCounts,
+      cashCounts,
+      onlineCounts,
     }
   }, [opdAppointments, dateFilter])
 
-  // Payment method chart data
+  // Enhanced payment method chart data
   const paymentChartData = useMemo(() => {
     const { paymentBreakdown } = dashboardStats
     return {
-      labels: ["Cash", "Online", "Card", "UPI"],
-      data: [paymentBreakdown.cash, paymentBreakdown.online, paymentBreakdown.card, paymentBreakdown.upi],
+      labels: ["Cash Collected", "Online Collected"],
+      data: [paymentBreakdown.totalCash, paymentBreakdown.totalOnline],
+      backgroundColor: ["rgba(34, 197, 94, 0.8)", "rgba(59, 130, 246, 0.8)"],
+    }
+  }, [dashboardStats])
+
+  // Payment method breakdown chart
+  const paymentMethodChartData = useMemo(() => {
+    const { paymentMethodBreakdown } = dashboardStats
+    const colors = [
+      "rgba(34, 197, 94, 0.8)", // Green for cash
+      "rgba(59, 130, 246, 0.8)", // Blue for online
+      "rgba(168, 85, 247, 0.8)", // Purple for mixed
+      "rgba(245, 158, 11, 0.8)", // Orange for card
+      "rgba(239, 68, 68, 0.8)", // Red for UPI
+    ]
+
+    return {
+      labels: paymentMethodBreakdown.map((p) => p.method.charAt(0).toUpperCase() + p.method.slice(1)),
+      data: paymentMethodBreakdown.map((p) => p.amount),
+      backgroundColor: colors.slice(0, paymentMethodBreakdown.length),
+    }
+  }, [dashboardStats])
+
+  // Modality chart data
+  const modalityChartData = useMemo(() => {
+    const { modalityBreakdown } = dashboardStats
+    return {
+      labels: modalityBreakdown.map((m) => m.modality.charAt(0).toUpperCase() + m.modality.slice(1)),
+      data: modalityBreakdown.map((m) => m.count),
       backgroundColor: [
-        "rgba(34, 197, 94, 0.8)",
-        "rgba(59, 130, 246, 0.8)",
-        "rgba(168, 85, 247, 0.8)",
-        "rgba(249, 115, 22, 0.8)",
+        "rgba(239, 68, 68, 0.8)",
+        "rgba(245, 158, 11, 0.8)",
+        "rgba(16, 185, 129, 0.8)",
+        "rgba(99, 102, 241, 0.8)",
       ],
     }
   }, [dashboardStats])
@@ -341,10 +436,18 @@ const AdminDashboardPage: React.FC = () => {
       (appt) =>
         appt.name.toLowerCase().includes(query) ||
         appt.phone.includes(query) ||
-        appt.serviceName.toLowerCase().includes(query) ||
-        appt.uhid.toLowerCase().includes(query),
+        appt.uhid.toLowerCase().includes(query) ||
+        appt.modality.toLowerCase().includes(query),
     )
   }, [opdAppointments, searchQuery])
+
+  // Format payment display for table
+  const formatPaymentDisplay = (appointment: IOPDEntry) => {
+    if (appointment.paymentMethod === "mixed") {
+      return `₹${appointment.amount} (C:${appointment.cashAmount} + O:${appointment.onlineAmount})`
+    }
+    return `₹${appointment.amount}`
+  }
 
   // Delete appointment
   const handleDeleteAppointment = async () => {
@@ -394,7 +497,7 @@ const AdminDashboardPage: React.FC = () => {
               <div>
                 <h1 className="text-4xl font-bold text-gray-900 mb-2">OPD Admin Dashboard</h1>
                 <p className="text-gray-600">
-                  {dateFilter === "today" ? "Today's" : "Last 7 days"} appointments and revenue analytics
+                  {dateFilter === "today" ? "Today's" : "Last 7 days"} comprehensive payment & appointment analytics
                 </p>
               </div>
               <div className="flex gap-3">
@@ -416,8 +519,53 @@ const AdminDashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Enhanced Payment Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+            <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-green-100">Total Cash Collected</CardTitle>
+                <Banknote className="h-5 w-5 text-green-200" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">₹{dashboardStats.paymentBreakdown.totalCash.toLocaleString()}</div>
+                <p className="text-xs text-green-100 mt-1">
+                  {dashboardStats.totalRevenue > 0
+                    ? Math.round((dashboardStats.paymentBreakdown.totalCash / dashboardStats.totalRevenue) * 100)
+                    : 0}
+                  % of total revenue
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-blue-100">Total Online Collected</CardTitle>
+                <CreditCard className="h-5 w-5 text-blue-200" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">
+                  ₹{dashboardStats.paymentBreakdown.totalOnline.toLocaleString()}
+                </div>
+                <p className="text-xs text-blue-100 mt-1">
+                  {dashboardStats.totalRevenue > 0
+                    ? Math.round((dashboardStats.paymentBreakdown.totalOnline / dashboardStats.totalRevenue) * 100)
+                    : 0}
+                  % of total revenue
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium text-purple-100">Total Amount</CardTitle>
+                <IndianRupeeIcon className="h-5 w-5 text-purple-200" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold">₹{dashboardStats.totalRevenue.toLocaleString()}</div>
+                <p className="text-xs text-purple-100 mt-1">Net revenue after discounts</p>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Appointments</CardTitle>
@@ -425,57 +573,102 @@ const AdminDashboardPage: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{dashboardStats.totalAppointments}</div>
-                <p className="text-xs text-muted-foreground">
-                  {dateFilter === "today" ? "appointments today" : "in last 7 days"}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{dashboardStats.totalRevenue.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">Avg: ₹{Math.round(dashboardStats.averageAmount)}</p>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Cash Payments</CardTitle>
-                <Banknote className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">Total Discount</CardTitle>
+                <Calculator className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">₹{dashboardStats.paymentBreakdown.cash.toLocaleString()}</div>
+                <div className="text-2xl font-bold text-red-600">
+                  ₹{dashboardStats.paymentBreakdown.totalDiscount.toLocaleString()}
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  {dashboardStats.totalRevenue > 0
-                    ? Math.round((dashboardStats.paymentBreakdown.cash / dashboardStats.totalRevenue) * 100)
+                  {dashboardStats.paymentBreakdown.totalAmount > 0
+                    ? Math.round(
+                        (dashboardStats.paymentBreakdown.totalDiscount / dashboardStats.paymentBreakdown.totalAmount) *
+                          100,
+                      )
                     : 0}
-                  % of total
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Online Payments</CardTitle>
-                <CreditCard className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{dashboardStats.paymentBreakdown.online.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">
-                  {dashboardStats.totalRevenue > 0
-                    ? Math.round((dashboardStats.paymentBreakdown.online / dashboardStats.totalRevenue) * 100)
-                    : 0}
-                  % of total
+                  % discount given
                 </p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Charts */}
+          {/* Enhanced Payment Collection Summary */}
+          <Card className="mb-8 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-emerald-800">
+                <TrendingUp className="h-5 w-5" />
+                Payment Collection Summary
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-emerald-100">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <Banknote className="h-6 w-6 text-green-600" />
+                    <span className="font-semibold text-gray-700">Cash Collection</span>
+                  </div>
+                  <div className="text-3xl font-bold text-green-700 mb-1">
+                    ₹{dashboardStats.paymentBreakdown.totalCash.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {dashboardStats.paymentMethodBreakdown.find((p) => p.method === "cash")?.count || 0} transactions
+                  </div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-blue-100">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <CreditCard className="h-6 w-6 text-blue-600" />
+                    <span className="font-semibold text-gray-700">Online Collection</span>
+                  </div>
+                  <div className="text-3xl font-bold text-blue-700 mb-1">
+                    ₹{dashboardStats.paymentBreakdown.totalOnline.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {dashboardStats.paymentMethodBreakdown
+                      .filter((p) => p.method !== "cash")
+                      .reduce((acc, p) => acc + p.count, 0)}{" "}
+                    transactions
+                  </div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-purple-100">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <IndianRupeeIcon className="h-6 w-6 text-purple-600" />
+                    <span className="font-semibold text-gray-700">Total Revenue</span>
+                  </div>
+                  <div className="text-3xl font-bold text-purple-700 mb-1">
+                    ₹{dashboardStats.totalRevenue.toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    After ₹{dashboardStats.paymentBreakdown.totalDiscount.toLocaleString()} discount
+                  </div>
+                </div>
+
+                <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-orange-100">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <Calculator className="h-6 w-6 text-orange-600" />
+                    <span className="font-semibold text-gray-700">Collection Rate</span>
+                  </div>
+                  <div className="text-3xl font-bold text-orange-700 mb-1">
+                    {dashboardStats.paymentBreakdown.totalAmount > 0
+                      ? Math.round((dashboardStats.totalRevenue / dashboardStats.paymentBreakdown.totalAmount) * 100)
+                      : 100}
+                    %
+                  </div>
+                  <div className="text-sm text-gray-600">Efficiency rate</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Enhanced Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
             {/* Appointments Chart */}
             <Card className="lg:col-span-2">
@@ -509,10 +702,10 @@ const AdminDashboardPage: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Payment Methods Chart */}
+            {/* Payment Collection Chart */}
             <Card>
               <CardHeader>
-                <CardTitle>Payment Methods</CardTitle>
+                <CardTitle>Payment Collection</CardTitle>
               </CardHeader>
               <CardContent>
                 <Doughnut
@@ -536,65 +729,85 @@ const AdminDashboardPage: React.FC = () => {
             </Card>
           </div>
 
-          {/* Revenue Chart */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>{dateFilter === "today" ? "Today's Revenue" : "Revenue (Last 7 Days)"}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Bar
-                data={{
-                  labels: appointmentChartData.labels,
-                  datasets: [
-                    {
-                      label: "Revenue (₹)",
-                      data: appointmentChartData.revenueCounts,
-                      backgroundColor: "rgba(34, 197, 94, 0.8)",
-                      borderColor: "rgba(34, 197, 94, 1)",
-                      borderWidth: 1,
-                    },
-                  ],
-                }}
-                options={{
-                  responsive: true,
-                  plugins: {
-                    legend: { display: false },
-                  },
-                  scales: {
-                    y: { beginAtZero: true },
-                  },
-                }}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Top Services and Doctors */}
+          {/* Revenue and Payment Method Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            {/* Revenue Chart */}
             <Card>
               <CardHeader>
-                <CardTitle>Top Services</CardTitle>
+                <CardTitle>Daily Revenue Breakdown</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-3">
-                  {dashboardStats.topServices.map((service, index) => (
-                    <div key={service.service} className="flex justify-between items-center">
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{index + 1}</Badge>
-                        <span className="font-medium">{service.service}</span>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-semibold">₹{service.revenue.toLocaleString()}</div>
-                        <div className="text-sm text-gray-500">{service.count} appointments</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Bar
+                  data={{
+                    labels: appointmentChartData.labels,
+                    datasets: [
+                      {
+                        label: "Cash (₹)",
+                        data: appointmentChartData.cashCounts,
+                        backgroundColor: "rgba(34, 197, 94, 0.8)",
+                        borderColor: "rgba(34, 197, 94, 1)",
+                        borderWidth: 1,
+                      },
+                      {
+                        label: "Online (₹)",
+                        data: appointmentChartData.onlineCounts,
+                        backgroundColor: "rgba(59, 130, 246, 0.8)",
+                        borderColor: "rgba(59, 130, 246, 1)",
+                        borderWidth: 1,
+                      },
+                    ],
+                  }}
+                  options={{
+                    responsive: true,
+                    plugins: {
+                      legend: { position: "top" },
+                    },
+                    scales: {
+                      x: { stacked: true },
+                      y: { stacked: true, beginAtZero: true },
+                    },
+                  }}
+                />
               </CardContent>
             </Card>
 
+            {/* Payment Method Breakdown */}
             <Card>
               <CardHeader>
-                <CardTitle>Top Doctors</CardTitle>
+                <CardTitle>Payment Method Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {dashboardStats.paymentMethodBreakdown.length > 0 ? (
+                  <Doughnut
+                    data={{
+                      labels: paymentMethodChartData.labels,
+                      datasets: [
+                        {
+                          data: paymentMethodChartData.data,
+                          backgroundColor: paymentMethodChartData.backgroundColor,
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      plugins: {
+                        legend: { position: "bottom" },
+                      },
+                    }}
+                  />
+                ) : (
+                  <div className="text-center text-gray-500 py-8">No payment method data available</div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Enhanced Analytics */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* Top Doctors */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Top Doctors by Revenue</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
@@ -602,20 +815,79 @@ const AdminDashboardPage: React.FC = () => {
                     <div key={doctor.doctor} className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline">{index + 1}</Badge>
-                        <span className="font-medium">{doctor.doctor}</span>
+                        <span className="font-medium text-sm">{doctor.doctor}</span>
                       </div>
                       <div className="text-right">
-                        <div className="font-semibold">₹{doctor.revenue.toLocaleString()}</div>
-                        <div className="text-sm text-gray-500">{doctor.count} appointments</div>
+                        <div className="font-semibold text-sm">₹{doctor.revenue.toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">{doctor.count} appointments</div>
                       </div>
                     </div>
                   ))}
+                  {dashboardStats.topDoctors.length === 0 && (
+                    <div className="text-center text-gray-500 py-4">No doctor data available</div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Modality Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Modality Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {dashboardStats.modalityBreakdown.length > 0 ? (
+                  <Doughnut
+                    data={{
+                      labels: modalityChartData.labels,
+                      datasets: [
+                        {
+                          data: modalityChartData.data,
+                          backgroundColor: modalityChartData.backgroundColor,
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      plugins: {
+                        legend: { position: "bottom" },
+                      },
+                    }}
+                  />
+                ) : (
+                  <div className="text-center text-gray-500 py-8">No modality data available</div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Payment Method Stats */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Payment Method Stats</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {dashboardStats.paymentMethodBreakdown.map((method, index) => (
+                    <div key={method.method} className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{index + 1}</Badge>
+                        <span className="font-medium capitalize text-sm">{method.method}</span>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-semibold text-sm">₹{method.amount.toLocaleString()}</div>
+                        <div className="text-xs text-gray-500">{method.count} transactions</div>
+                      </div>
+                    </div>
+                  ))}
+                  {dashboardStats.paymentMethodBreakdown.length === 0 && (
+                    <div className="text-center text-gray-500 py-4">No payment method data available</div>
+                  )}
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* Search and Appointments Table */}
+          {/* Enhanced Appointments Table */}
           <Card>
             <CardHeader>
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -642,9 +914,8 @@ const AdminDashboardPage: React.FC = () => {
                     <thead>
                       <tr className="border-b">
                         <th className="text-left py-3 px-4 font-medium">Patient</th>
-                        <th className="text-left py-3 px-4 font-medium">Service</th>
                         <th className="text-left py-3 px-4 font-medium">Doctor</th>
-                        <th className="text-left py-3 px-4 font-medium">Amount</th>
+                        <th className="text-left py-3 px-4 font-medium">Modality</th>
                         <th className="text-left py-3 px-4 font-medium">Payment</th>
                         <th className="text-left py-3 px-4 font-medium">Date</th>
                         <th className="text-left py-3 px-4 font-medium">Actions</th>
@@ -659,18 +930,25 @@ const AdminDashboardPage: React.FC = () => {
                               <div className="text-sm text-gray-500">{appt.phone}</div>
                             </div>
                           </td>
-                          <td className="py-3 px-4">{appt.serviceName}</td>
                           <td className="py-3 px-4">{doctorMap[appt.doctor] || "Unknown"}</td>
                           <td className="py-3 px-4">
-                            <div className="font-semibold">₹{appt.amount}</div>
-                            {appt.discount > 0 && (
-                              <div className="text-sm text-gray-500">
-                                (₹{appt.originalAmount} - ₹{appt.discount})
-                              </div>
+                            <Badge variant="outline" className="capitalize">
+                              {appt.modality}
+                            </Badge>
+                            {appt.visitType && (
+                              <Badge variant="secondary" className="ml-1 capitalize text-xs">
+                                {appt.visitType}
+                              </Badge>
                             )}
                           </td>
                           <td className="py-3 px-4">
-                            <Badge variant="outline">{appt.paymentMethod}</Badge>
+                            <div className="font-semibold">{formatPaymentDisplay(appt)}</div>
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              <Badge variant="outline" className="text-xs">
+                                {appt.paymentMethod}
+                              </Badge>
+                              {appt.discount > 0 && <span className="text-green-600">(-₹{appt.discount})</span>}
+                            </div>
                           </td>
                           <td className="py-3 px-4">
                             <div>{format(new Date(appt.date), "MMM dd, yyyy")}</div>
@@ -710,79 +988,129 @@ const AdminDashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Appointment Details Dialog */}
+      {/* Enhanced Appointment Details Dialog */}
       <Dialog open={!!selectedAppointment} onOpenChange={() => setSelectedAppointment(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Appointment Details</DialogTitle>
             <DialogDescription>UHID: {selectedAppointment?.uhid}</DialogDescription>
           </DialogHeader>
           {selectedAppointment && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-6">
               <div>
-                <h4 className="font-semibold mb-2">Patient Information</h4>
-                <div className="space-y-2 text-sm">
-                  <div>
-                    <span className="font-medium">Name:</span> {selectedAppointment.name}
+                <h4 className="font-semibold mb-3 text-gray-800">Patient Information</h4>
+                <div className="space-y-2 text-sm bg-gray-50 p-4 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Name:</span>
+                    <span className="font-semibold">{selectedAppointment.name}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">Phone:</span> {selectedAppointment.phone}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Phone:</span>
+                    <span>{selectedAppointment.phone}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">UHID:</span> {selectedAppointment.uhid}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">UHID:</span>
+                    <span className="font-mono text-xs">{selectedAppointment.uhid}</span>
                   </div>
                 </div>
               </div>
+
               <div>
-                <h4 className="font-semibold mb-2">Appointment Details</h4>
-                <div className="space-y-2 text-sm">
-                  <div>
-                    <span className="font-medium">Service:</span> {selectedAppointment.serviceName}
+                <h4 className="font-semibold mb-3 text-gray-800">Appointment Details</h4>
+                <div className="space-y-2 text-sm bg-blue-50 p-4 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Doctor:</span>
+                    <span className="font-semibold">{doctorMap[selectedAppointment.doctor] || "Unknown"}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">Doctor:</span> {doctorMap[selectedAppointment.doctor] || "Unknown"}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Type:</span>
+                    <Badge variant="outline">{selectedAppointment.appointmentType}</Badge>
                   </div>
-                  <div>
-                    <span className="font-medium">Type:</span> {selectedAppointment.appointmentType}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Modality:</span>
+                    <Badge variant="secondary" className="capitalize">
+                      {selectedAppointment.modality}
+                    </Badge>
+                  </div>
+                  {selectedAppointment.visitType && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Visit Type:</span>
+                      <Badge variant="outline" className="capitalize">
+                        {selectedAppointment.visitType}
+                      </Badge>
+                    </div>
+                  )}
+                  {selectedAppointment.study && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Study:</span>
+                      <span className="text-xs">{selectedAppointment.study}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-semibold mb-3 text-gray-800">Payment Information</h4>
+                <div className="space-y-2 text-sm bg-green-50 p-4 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Method:</span>
+                    <Badge variant="default" className="capitalize">
+                      {selectedAppointment.paymentMethod}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Cash Amount:</span>
+                    <span className="font-semibold text-green-700">₹{selectedAppointment.cashAmount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Online Amount:</span>
+                    <span className="font-semibold text-blue-700">₹{selectedAppointment.onlineAmount}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2">
+                    <span className="font-medium text-gray-600">Total Amount:</span>
+                    <span className="font-bold text-lg">₹{selectedAppointment.amount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Original Amount:</span>
+                    <span>₹{selectedAppointment.originalAmount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Discount:</span>
+                    <span className="text-red-600 font-semibold">₹{selectedAppointment.discount}</span>
                   </div>
                 </div>
               </div>
+
               <div>
-                <h4 className="font-semibold mb-2">Payment Information</h4>
-                <div className="space-y-2 text-sm">
-                  <div>
-                    <span className="font-medium">Amount:</span> ₹{selectedAppointment.amount}
+                <h4 className="font-semibold mb-3 text-gray-800">Schedule</h4>
+                <div className="space-y-2 text-sm bg-purple-50 p-4 rounded-lg">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Date:</span>
+                    <span className="font-semibold">{format(new Date(selectedAppointment.date), "PPP")}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">Original:</span> ₹{selectedAppointment.originalAmount}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Time:</span>
+                    <span className="font-semibold">{selectedAppointment.time}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">Discount:</span> ₹{selectedAppointment.discount}
+                  <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Created:</span>
+                    <span className="text-xs">{format(new Date(selectedAppointment.createdAt), "PPp")}</span>
                   </div>
-                  <div>
-                    <span className="font-medium">Method:</span> {selectedAppointment.paymentMethod}
-                  </div>
+                  {selectedAppointment.enteredBy && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Entered By:</span>
+                      <span className="text-xs">{selectedAppointment.enteredBy}</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div>
-                <h4 className="font-semibold mb-2">Schedule</h4>
-                <div className="space-y-2 text-sm">
-                  <div>
-                    <span className="font-medium">Date:</span> {format(new Date(selectedAppointment.date), "PPP")}
-                  </div>
-                  <div>
-                    <span className="font-medium">Time:</span> {selectedAppointment.time}
-                  </div>
-                  <div>
-                    <span className="font-medium">Created:</span>{" "}
-                    {format(new Date(selectedAppointment.createdAt), "PPp")}
-                  </div>
-                </div>
-              </div>
+
               {selectedAppointment.message && (
                 <div className="col-span-2">
-                  <h4 className="font-semibold mb-2">Notes</h4>
-                  <p className="text-sm bg-gray-50 p-3 rounded">{selectedAppointment.message}</p>
+                  <h4 className="font-semibold mb-3 text-gray-800">Additional Notes</h4>
+                  <div className="text-sm bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+                    <p className="text-gray-700">{selectedAppointment.message}</p>
+                  </div>
                 </div>
               )}
             </div>

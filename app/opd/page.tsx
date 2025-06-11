@@ -1,34 +1,20 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
-import { useForm, Controller } from "react-hook-form"
-import { db, auth } from "../../lib/firebase" // Gautami DB only
+import type React from "react"
+
+import { useState, useEffect } from "react"
+import { useForm } from "react-hook-form"
+import { db, auth } from "@/lib/firebase"
 import { ref, push, update, get, onValue, set, remove } from "firebase/database"
 import Head from "next/head"
-import {
-  Phone,
-  Cake,
-  MapPin,
-  Clock,
-  MessageSquare,
-  DollarSign,
-  IndianRupeeIcon,
-  Info,
-  CheckCircle,
-  HelpCircle,
-  Trash2,
-} from "lucide-react"
+import { CheckCircle, HelpCircle } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
-import DatePicker from "react-datepicker"
-import "react-datepicker/dist/react-datepicker.css"
 import Joyride, { type CallBackProps, STATUS } from "react-joyride"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Dialog,
   DialogContent,
@@ -37,107 +23,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { useRouter } from "next/navigation"
-import type React from "react"
-import { PersonIcon, CalendarIcon, MagnifyingGlassIcon, Cross2Icon } from "@radix-ui/react-icons"
 import { onAuthStateChanged } from "firebase/auth"
+import {
+  type IFormInput,
+  type PatientRecord,
+  type Doctor,
+  type OnCallAppointment,
+  PaymentOptions,
+  GenderOptions,
+  ModalityOptions,
+} from "./types"
+import { PatientForm } from "./patient-form"
+import { OnCallAppointments } from "./oncall-appointments"
 
-/** ---------------------------
- *   TYPE & CONSTANT DEFINITIONS
- *  --------------------------- */
-interface IFormInput {
-  name: string
-  phone: string
-  age: number
-  gender: string
-  address?: string
-  date: Date
-  time: string
-  message?: string
-  paymentMethod: string
-  amount: number
-  discount: number
-  serviceName: string
-  doctor: string
-  referredBy?: string
-  appointmentType: "oncall" | "visithospital"
-  opdType: "opd"
-}
-
-interface PatientRecord {
-  id: string
-  name: string
-  phone: string
-  age?: number
-  gender?: string
-  address?: string
-  createdAt?: string
-  uhid?: string
-}
-
-interface Doctor {
-  id: string
-  name: string
-  opdCharge: number
-  specialty?: string
-}
-
-interface OnCallAppointment {
-  id: string
-  name: string
-  phone: string
-  age: number
-  gender: string
-  date: string
-  time: string
-  doctor?: string
-  serviceName?: string
-  appointmentType: "oncall"
-  createdAt: string
-  opdType: "opd"
-}
-
-const PaymentOptions = [
-  { value: "cash", label: "Cash" },
-  { value: "online", label: "Online" },
-  { value: "card", label: "Card" },
-  { value: "upi", label: "UPI" },
-]
-
-const GenderOptions = [
-  { value: "male", label: "Male" },
-  { value: "female", label: "Female" },
-  { value: "other", label: "Other" },
-]
-
-/**
- * Utility function: Format a Date to 12-hour time with AM/PM
- */
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
   let minutes: string | number = date.getMinutes()
   const ampm = hours >= 12 ? "PM" : "AM"
   hours = hours % 12
-  hours = hours ? hours : 12 // the hour '0' should be '12'
+  hours = hours ? hours : 12
   minutes = minutes < 10 ? "0" + minutes : minutes
   return `${hours}:${minutes} ${ampm}`
 }
 
-/** Helper function to generate a 10-character alphanumeric UHID */
 function generatePatientId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   let result = ""
@@ -147,9 +56,6 @@ function generatePatientId(): string {
   return result
 }
 
-/** ---------------
- *    MAIN COMPONENT
- *  --------------- */
 const OPDBookingPage: React.FC = () => {
   const router = useRouter()
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
@@ -166,47 +72,41 @@ const OPDBookingPage: React.FC = () => {
   }, [])
 
   // Form state using React Hook Form
-  const {
-    register,
-    handleSubmit,
-    control,
-    formState: { errors },
-    reset,
-    watch,
-    setValue,
-    trigger,
-    getValues,
-  } = useForm<IFormInput>({
+  const form = useForm<IFormInput>({
     defaultValues: {
       name: "",
       phone: "",
-      age: 0,
+      age: undefined,
       gender: "",
       address: "",
       date: new Date(),
       time: formatAMPM(new Date()),
       message: "",
-      paymentMethod: "",
-      amount: 0,
-      discount: 0,
-      serviceName: "",
+      paymentMethod: "cash",
+      cashAmount: undefined,
+      onlineAmount: undefined,
+      discount: undefined,
+      // serviceName: "",
       doctor: "",
       referredBy: "",
       appointmentType: "visithospital",
       opdType: "opd",
+      modality: "consultation",
+      visitType: "first",
+      study: "",
     },
     mode: "onChange",
   })
+
+  const { handleSubmit, reset, watch, setValue, trigger, getValues } = form
 
   // UI states
   const [loading, setLoading] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [activeTab, setActiveTab] = useState("form")
   const [doctors, setDoctors] = useState<Doctor[]>([])
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [appointmentToDelete, setAppointmentToDelete] = useState<string | null>(null)
 
-  // Patient management - simplified to only Gautami patients
+  // Patient management
   const [patientSuggestions, setPatientSuggestions] = useState<PatientRecord[]>([])
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null)
   const [phoneSuggestions, setPhoneSuggestions] = useState<PatientRecord[]>([])
@@ -216,15 +116,6 @@ const OPDBookingPage: React.FC = () => {
 
   // On-call appointments
   const [oncallAppointments, setOncallAppointments] = useState<OnCallAppointment[]>([])
-  const [filteredOncallAppointments, setFilteredOncallAppointments] = useState<OnCallAppointment[]>([])
-  const [searchQuery, setSearchQuery] = useState("")
-
-  // Refs
-  const phoneSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
-  const nameInputRef = useRef<HTMLInputElement | null>(null)
-  const phoneInputRef = useRef<HTMLInputElement | null>(null)
-  const ageInputRef = useRef<HTMLInputElement | null>(null)
-  const nameSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
 
   // Joyride (guided tour)
   const [runTour, setRunTour] = useState(false)
@@ -247,8 +138,8 @@ const OPDBookingPage: React.FC = () => {
       content: "Select the patient's gender.",
     },
     {
-      target: '[data-tour="address"]',
-      content: "Fill in the address (optional).",
+      target: '[data-tour="modality"]',
+      content: "Select the modality - Consultation, Casualty, or X-Ray.",
     },
     {
       target: '[data-tour="date"]',
@@ -258,30 +149,10 @@ const OPDBookingPage: React.FC = () => {
       target: '[data-tour="time"]',
       content: "Enter the appointment time.",
     },
-    {
-      target: '[data-tour="message"]',
-      content: "Add any additional message or note here (optional).",
-    },
-    {
-      target: '[data-tour="paymentMethod"]',
-      content: "Select the payment method.",
-    },
-    {
-      target: '[data-tour="serviceName"]',
-      content: "Enter the service name for the appointment.",
-    },
-    {
-      target: '[data-tour="doctor"]',
-      content: 'Select the doctor or choose "No Doctor".',
-    },
-    {
-      target: '[data-tour="amount"]',
-      content: "The amount will be auto-filled based on the doctor charge. Adjust if needed.",
-    },
-    {
-      target: '[data-tour="discount"]',
-      content: "Enter any discount amount to be applied to the total charge.",
-    },
+    // {
+    //   target: '[data-tour="serviceName"]',
+    //   content: "Enter the service name for the appointment.",
+    // },
   ]
 
   const handleJoyrideCallback = (data: CallBackProps) => {
@@ -295,9 +166,7 @@ const OPDBookingPage: React.FC = () => {
   const watchedName = watch("name")
   const watchedPhone = watch("phone")
 
-  /** ----------------
-   *   FETCH DOCTORS
-   *  ---------------- */
+  // Fetch doctors
   useEffect(() => {
     const doctorsRef = ref(db, "doctors")
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
@@ -305,33 +174,17 @@ const OPDBookingPage: React.FC = () => {
       if (data) {
         const doctorsList: Doctor[] = Object.keys(data).map((key) => ({
           id: key,
-          name: data[key].name,
-          opdCharge: data[key].opdCharge || 0,
-          specialty: data[key].specialty || "",
+          ...data[key],
         }))
-        // Add "No Doctor" at the front
-        doctorsList.unshift({
-          id: "no_doctor",
-          name: "No Doctor",
-          opdCharge: 0,
-        })
         setDoctors(doctorsList)
       } else {
-        setDoctors([
-          {
-            id: "no_doctor",
-            name: "No Doctor",
-            opdCharge: 0,
-          },
-        ])
+        setDoctors([])
       }
     })
     return () => unsubscribe()
   }, [])
 
-  /** -------------------------------
-   *  FETCH PATIENTS FROM GAUTAMI DB ONLY
-   *  ------------------------------- */
+  // Fetch patients from Gautami DB only
   useEffect(() => {
     const patientsRef = ref(db, "patients/patientinfo")
     const unsubscribe = onValue(patientsRef, (snapshot) => {
@@ -360,33 +213,14 @@ const OPDBookingPage: React.FC = () => {
           id: key,
           ...data[key],
         }))
-        // Sort descending by createdAt
         appointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         setOncallAppointments(appointments)
-        setFilteredOncallAppointments(appointments)
       } else {
         setOncallAppointments([])
-        setFilteredOncallAppointments([])
       }
     })
     return () => unsubscribe()
   }, [])
-
-  // Filter oncall when searchQuery changes
-  useEffect(() => {
-    if (searchQuery.trim() === "") {
-      setFilteredOncallAppointments(oncallAppointments)
-    } else {
-      const query = searchQuery.toLowerCase()
-      const filtered = oncallAppointments.filter(
-        (appointment) =>
-          appointment.name.toLowerCase().includes(query) ||
-          appointment.phone.includes(query) ||
-          (appointment.serviceName && appointment.serviceName.toLowerCase().includes(query)),
-      )
-      setFilteredOncallAppointments(filtered)
-    }
-  }, [searchQuery, oncallAppointments])
 
   // Name suggestions when watchedName changes
   useEffect(() => {
@@ -423,68 +257,22 @@ const OPDBookingPage: React.FC = () => {
     }
   }, [watchedPhone, gautamiPatients, selectedPatient])
 
-  /** -------------------------------------------
-   *  SELECT PATIENT FROM DROPDOWN, AUTO‐FILL FORM
-   *  ------------------------------------------- */
+  // Select patient from dropdown, auto-fill form
   const handlePatientSuggestionClick = (patient: PatientRecord) => {
     setSelectedPatient(patient)
 
-    // Fill in the form fields
     setValue("name", patient.name, { shouldValidate: true })
     setValue("phone", patient.phone || "", { shouldValidate: true })
     setValue("address", patient.address || "", { shouldValidate: true })
-    setValue("age", patient.age || 0, { shouldValidate: true })
+    setValue("age", patient.age || 0, { shouldValidate: true }) // Changed undefined to 0 to fix the error
     setValue("gender", patient.gender || "", { shouldValidate: true })
 
-    // Hide suggestions
     setPatientSuggestions([])
     setPhoneSuggestions([])
     setShowNameSuggestions(false)
     setShowPhoneSuggestions(false)
 
     toast.info(`Patient ${patient.name} selected!`)
-  }
-
-  /** -----------------------------------------
-   *  FETCH DOCTOR AMOUNT WHEN DOCTOR CHANGES
-   *  ----------------------------------------- */
-  const selectedDoctorId = watch("doctor")
-  const fetchDoctorAmount = useCallback(
-    async (doctorId: string) => {
-      try {
-        const doctorRef = ref(db, `doctors/${doctorId}`)
-        const snapshot = await get(doctorRef)
-        if (snapshot.exists()) {
-          const data = snapshot.val()
-          setValue("amount", data.opdCharge || 0)
-        } else {
-          setValue("amount", 0)
-        }
-      } catch (error) {
-        console.error("Error fetching doctor amount:", error)
-        setValue("amount", 0)
-      }
-    },
-    [setValue],
-  )
-
-  useEffect(() => {
-    if (selectedDoctorId) {
-      if (selectedDoctorId === "no_doctor") {
-        setValue("amount", 0)
-      } else {
-        fetchDoctorAmount(selectedDoctorId)
-      }
-    } else {
-      setValue("amount", 0)
-    }
-  }, [selectedDoctorId, setValue, fetchDoctorAmount])
-
-  // Calculate total
-  const calculateTotalAmount = () => {
-    const baseAmount = watch("amount") || 0
-    const discount = watch("discount") || 0
-    return baseAmount - discount
   }
 
   // Handlers for manual name/phone typing
@@ -500,82 +288,55 @@ const OPDBookingPage: React.FC = () => {
     setSelectedPatient(null)
   }
 
-  /**
-   * ----------------------------------------------------------------------
-   *  VALIDATION & SUBMISSION LOGIC
-   *
-   *  Before calling `onSubmit`, we manually check the fields most likely to fail
-   * ----------------------------------------------------------------------
-   */
+  // Calculate total amount
+  const calculateTotalAmount = () => {
+    const cashAmount = Number(watch("cashAmount")) || 0
+    const onlineAmount = Number(watch("onlineAmount")) || 0
+    const discount = Number(watch("discount")) || 0
+    return cashAmount + onlineAmount - discount
+  }
+
+  // Validation & submission logic
   const validateAndSubmit = async (data: IFormInput) => {
-    // Required fields that always apply
-    const requiredFields = ["name", "phone", "age", "gender", "date", "time"]
-    // AppointmentType-specific required
-    if (data.appointmentType === "visithospital") {
-      requiredFields.push("paymentMethod", "serviceName", "doctor", "amount")
-    } else {
-      requiredFields.push("serviceName", "doctor")
+    const requiredFields = ["name", "phone", "age", "gender", "date", "time", "modality"]
+
+    if (data.modality === "consultation") {
+      requiredFields.push("doctor", "visitType")
     }
-    // Validate
+
+    if (data.modality === "casualty" || data.modality === "xray") {
+      requiredFields.push("study")
+    }
+
+    if (data.appointmentType === "visithospital") {
+      requiredFields.push("paymentMethod")
+      if (data.paymentMethod === "mixed") {
+        requiredFields.push("cashAmount", "onlineAmount")
+      } else {
+        requiredFields.push("cashAmount")
+      }
+    }
+
     const isValid = await trigger(requiredFields as any)
     if (!isValid) {
-      // Focus the first error field and show toast
-      if (errors.name) {
-        nameInputRef.current?.focus()
-        toast.error("Please enter patient name")
-        return
-      }
-      if (errors.phone) {
-        phoneInputRef.current?.focus()
-        toast.error("Please enter a valid phone number")
-        return
-      }
-      if (errors.age) {
-        ageInputRef.current?.focus()
-        toast.error("Please enter patient age")
-        return
-      }
-      if (errors.gender) {
-        toast.error("Please select patient gender")
-        return
-      }
-      if (errors.serviceName) {
-        toast.error("Please enter service name")
-        return
-      }
-      if (errors.doctor) {
-        toast.error("Please select a doctor")
-        return
-      }
-      if (errors.amount) {
-        toast.error("Please enter a valid amount")
-        return
-      }
       toast.error("Please fill all required fields")
       return
     }
 
-    // All good → call actual onSubmit
     onSubmit(data)
   }
 
-  /**
-   * -------------------------------------------------------------------
-   *  onSubmit: SAVES TO FIREBASE - GAUTAMI DB ONLY
-   *
-   *  - ONCALL → "oncall" node (unchanged)
-   *  - VISIT HOSPITAL → under "patients/opddetail/{uhid}/{opdId}"
-   * -------------------------------------------------------------------
-   */
+  // onSubmit: saves to Firebase
   const onSubmit = async (data: IFormInput) => {
-    const baseAmount = data.appointmentType === "visithospital" ? data.amount || 0 : 0
-    const discount = data.appointmentType === "visithospital" ? data.discount || 0 : 0
-    const finalAmount = baseAmount - discount
+    const cashAmount = data.appointmentType === "visithospital" ? Number(data.cashAmount) || 0 : 0
+    const onlineAmount = data.appointmentType === "visithospital" ? Number(data.onlineAmount) || 0 : 0
+    const discount = data.appointmentType === "visithospital" ? Number(data.discount) || 0 : 0
+    const finalAmount = cashAmount + onlineAmount - discount
 
     setLoading(true)
     try {
       if (data.appointmentType === "oncall") {
-        // 1) Save under "oncall"
+        // Save under "oncall"
         const oncallRef = ref(db, "oncall")
         const newOncallRef = push(oncallRef)
         await set(newOncallRef, {
@@ -585,19 +346,22 @@ const OPDBookingPage: React.FC = () => {
           gender: data.gender,
           date: data.date.toISOString(),
           time: data.time,
-          doctor: data.doctor || "no_doctor",
-          serviceName: data.serviceName,
+          doctor: data.doctor || "",
+          // serviceName: data.serviceName,
           appointmentType: "oncall",
           opdType: data.opdType,
+          modality: data.modality,
+          visitType: data.visitType || "",
+          study: data.study || "",
           enteredBy: currentUserEmail || "unknown",
-          originalAmount: baseAmount,
+          originalAmount: cashAmount + onlineAmount,
           amount: finalAmount,
           discount: discount,
           referredBy: data.referredBy || "",
           createdAt: new Date().toISOString(),
         })
 
-        // 2) WhatsApp notification
+        // WhatsApp notification
         try {
           const selectedDocName = doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
           const formattedDate = data.date.toLocaleDateString("en-IN")
@@ -609,7 +373,8 @@ Appointment Details:
 • Date: ${formattedDate}
 • Time: ${data.time}
 • Doctor: ${selectedDocName}
-• Service: ${data.serviceName}
+// • Service: ${data.serviceName}
+• Modality: ${data.modality}
 
 Our doctor will call you at the scheduled time. Please keep your phone available.
 
@@ -635,11 +400,9 @@ Gautami Hospital
           autoClose: 5000,
         })
       } else {
-        // VISIT HOSPITAL → Save patient info (if new) and OPD under `patients/opddetail/{uhid}/{opdId}`
-
+        // VISIT HOSPITAL
         let uhid = ""
         if (selectedPatient) {
-          // Existing patient
           uhid = selectedPatient.id
 
           // Update patientinfo under "patients/patientinfo/{uhid}"
@@ -662,11 +425,16 @@ Gautami Hospital
             date: data.date.toISOString(),
             time: data.time,
             paymentMethod: data.paymentMethod,
-            originalAmount: baseAmount,
+            cashAmount: cashAmount,
+            onlineAmount: onlineAmount,
+            originalAmount: cashAmount + onlineAmount,
             amount: finalAmount,
             discount: discount,
-            serviceName: data.serviceName,
-            doctor: data.doctor || "no_doctor",
+            // serviceName: data.serviceName,
+            doctor: data.doctor || "",
+            modality: data.modality,
+            visitType: data.visitType || "",
+            study: data.study || "",
             message: data.message || "",
             referredBy: data.referredBy || "",
             appointmentType: data.appointmentType,
@@ -674,6 +442,26 @@ Gautami Hospital
             enteredBy: currentUserEmail || "unknown",
             createdAt: new Date().toISOString(),
           })
+
+          // Save payment information in user id/ipdid/payment structure
+          if (data.appointmentType === "visithospital") {
+            const paymentData = {
+              cashAmount: cashAmount,
+              onlineAmount: onlineAmount,
+              discount: discount,
+              totalAmount: finalAmount,
+              paymentMethod: data.paymentMethod,
+              createdAt: new Date().toISOString(),
+            }
+
+            // Get the opdId (ipdid) from the newly created OPD record
+            const opdId = newOpdRef.key
+
+            // Save payment data under user id/ipdid/payment
+            if (opdId) {
+              await set(ref(db, `patients/opddetail/${uhid}/${opdId}/payment`), paymentData)
+            }
+          }
         } else {
           // New patient → generate new UHID, store patient info, then push OPD
           const newUhid = generatePatientId()
@@ -700,11 +488,16 @@ Gautami Hospital
             date: data.date.toISOString(),
             time: data.time,
             paymentMethod: data.paymentMethod,
-            originalAmount: baseAmount,
+            cashAmount: cashAmount,
+            onlineAmount: onlineAmount,
+            originalAmount: cashAmount + onlineAmount,
             amount: finalAmount,
             discount: discount,
-            serviceName: data.serviceName,
-            doctor: data.doctor || "no_doctor",
+            // serviceName: data.serviceName,
+            doctor: data.doctor || "",
+            modality: data.modality,
+            visitType: data.visitType || "",
+            study: data.study || "",
             message: data.message || "",
             referredBy: data.referredBy || "",
             appointmentType: data.appointmentType,
@@ -712,12 +505,37 @@ Gautami Hospital
             enteredBy: currentUserEmail || "unknown",
             createdAt: new Date().toISOString(),
           })
+
+          // Save payment information in user id/ipdid/payment structure
+          if (data.appointmentType === "visithospital") {
+            const paymentData = {
+              cashAmount: cashAmount,
+              onlineAmount: onlineAmount,
+              discount: discount,
+              totalAmount: finalAmount,
+              paymentMethod: data.paymentMethod,
+              createdAt: new Date().toISOString(),
+            }
+
+            // Get the opdId (ipdid) from the newly created OPD record
+            const opdId = newOpdRef.key
+
+            // Save payment data under user id/ipdid/payment
+            if (opdId) {
+              await set(ref(db, `patients/${uhid}/${opdId}/payment`), paymentData)
+            }
+          }
         }
 
         // WhatsApp notification
         try {
           const selectedDocName = doctors.find((doc) => doc.id === data.doctor)?.name || "No Doctor"
           const formattedDate = data.date.toLocaleDateString("en-IN")
+          const paymentDetails =
+            data.paymentMethod === "mixed"
+              ? `Cash: ₹${cashAmount}, Online: ₹${onlineAmount}`
+              : `${data.paymentMethod.toUpperCase()}: ₹${cashAmount + onlineAmount}`
+
           const professionalMessage = `Hello ${data.name}, 
 Your OPD appointment at Gautami Hospital has been successfully booked.
 
@@ -726,10 +544,9 @@ Appointment Details:
 • Date: ${formattedDate}
 • Time: ${data.time}
 • Doctor: ${selectedDocName}
-• Service: ${data.serviceName}
-• Payment: ${data.paymentMethod.toUpperCase()} (₹${baseAmount}${
-            discount > 0 ? ` - Discount: ₹${discount} = Final: ₹${finalAmount}` : ""
-          })
+// • Service: ${data.serviceName}
+• Modality: ${data.modality}
+• Payment: ${paymentDetails}${discount > 0 ? ` - Discount: ₹${discount} = Final: ₹${finalAmount}` : ""}
 
 We look forward to serving you!
 Thank you,
@@ -759,20 +576,24 @@ Gautami Hospital
       reset({
         name: "",
         phone: "",
-        age: 0,
+        age: undefined,
         gender: "",
         address: "",
         date: new Date(),
         time: formatAMPM(new Date()),
         message: "",
-        paymentMethod: "",
-        amount: 0,
-        discount: 0,
-        serviceName: "",
+        paymentMethod: "cash",
+        cashAmount: undefined,
+        onlineAmount: undefined,
+        discount: undefined,
+        // serviceName: "",
         doctor: "",
         referredBy: "",
         appointmentType: "visithospital",
         opdType: "opd",
+        modality: "consultation",
+        visitType: "first",
+        study: "",
       })
       setPreviewOpen(false)
       setSelectedPatient(null)
@@ -789,14 +610,10 @@ Gautami Hospital
     }
   }
 
-  /**
-   * Delete an on-call appointment
-   */
-  const handleDeleteAppointment = async () => {
-    if (!appointmentToDelete) return
-
+  // Delete an on-call appointment
+  const handleDeleteAppointment = async (id: string) => {
     try {
-      const appointmentRef = ref(db, `oncall/${appointmentToDelete}`)
+      const appointmentRef = ref(db, `oncall/${id}`)
       const snapshot = await get(appointmentRef)
 
       if (snapshot.exists()) {
@@ -811,7 +628,7 @@ Gautami Hospital
           originalData: appointmentData,
           deletedBy: currentUserEmail || "unknown",
           deletedAt: new Date().toISOString(),
-          appointmentId: appointmentToDelete,
+          appointmentId: id,
         })
 
         // Actually remove it
@@ -819,62 +636,32 @@ Gautami Hospital
 
         toast.success("Appointment deleted successfully")
       }
-
-      setAppointmentToDelete(null)
-      setDeleteDialogOpen(false)
     } catch (error) {
       console.error("Error deleting appointment:", error)
       toast.error("Failed to delete appointment")
     }
   }
 
-  /** -------------
-   *   START TOUR
-   *  ------------- */
+  // Book OPD visit from on-call appointment
+  const handleBookOPDVisit = (appointment: OnCallAppointment) => {
+    setActiveTab("form")
+    setValue("name", appointment.name)
+    setValue("phone", appointment.phone)
+    setValue("age", appointment.age)
+    setValue("gender", appointment.gender)
+    setValue("appointmentType", "visithospital")
+    setValue("modality", appointment.modality || "consultation")
+    setValue("visitType", appointment.visitType as "first" | "followup" | undefined)
+    setValue("study", appointment.study || "")
+    // setValue("serviceName", appointment.serviceName || "")
+    setValue("doctor", appointment.doctor || "")
+    toast.info("On-call patient details loaded to form")
+  }
+
+  // Start tour
   const startTour = () => {
     setRunTour(true)
   }
-
-  /** -----------
-   *   RENDER UI
-   *  ----------- */
-  // Hide name suggestions on outside click
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        showNameSuggestions &&
-        nameSuggestionBoxRef.current &&
-        !nameSuggestionBoxRef.current.contains(event.target as Node) &&
-        nameInputRef.current &&
-        !nameInputRef.current.contains(event.target as Node)
-      ) {
-        setShowNameSuggestions(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-    }
-  }, [showNameSuggestions])
-
-  // Hide phone suggestions on outside click
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (
-        showPhoneSuggestions &&
-        phoneSuggestionBoxRef.current &&
-        !phoneSuggestionBoxRef.current.contains(event.target as Node) &&
-        phoneInputRef.current &&
-        !phoneInputRef.current.contains(event.target as Node)
-      ) {
-        setShowPhoneSuggestions(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside)
-    }
-  }, [showPhoneSuggestions])
 
   return (
     <>
@@ -954,498 +741,20 @@ Gautami Hospital
                     }}
                     className="space-y-6"
                   >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {/* Patient Name Field with Auto-Suggest */}
-                      <div className="space-y-2" data-tour="patient-name">
-                        <Label htmlFor="name" className="text-sm font-medium">
-                          Patient Name <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <PersonIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="name"
-                            type="text"
-                            {...register("name", { required: "Name is required" })}
-                            onChange={handleNameInputChange}
-                            placeholder="Enter patient name"
-                            className={`pl-10 ${errors.name ? "border-red-500" : ""}`}
-                            autoComplete="off"
-                            ref={(e) => {
-                              register("name", { required: "Name is required" }).ref(e)
-                              nameInputRef.current = e
-                            }}
-                          />
-                          {showNameSuggestions && patientSuggestions.length > 0 && (
-                            <div
-                              ref={nameSuggestionBoxRef}
-                              className="absolute z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md w-full mt-1 max-h-48 shadow-lg"
-                            >
-                              <ScrollArea className="max-h-48">
-                                <div className="p-1">
-                                  {patientSuggestions.map((suggestion) => (
-                                    <div
-                                      key={suggestion.id}
-                                      className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 rounded-md cursor-pointer"
-                                      onClick={() => handlePatientSuggestionClick(suggestion)}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <Avatar className="h-6 w-6">
-                                          <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                            {suggestion.name.substring(0, 2).toUpperCase()}
-                                          </AvatarFallback>
-                                        </Avatar>
-                                        <span className="font-medium">{suggestion.name}</span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
-                                        <Badge variant="default" className="text-xs">
-                                          Gautami
-                                        </Badge>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </ScrollArea>
-                            </div>
-                          )}
-                        </div>
-                        {errors.name && (
-                          <p className="text-sm text-red-500">{errors.name.message || "Name is required"}</p>
-                        )}
-                      </div>
-
-                      {/* Phone Field with Auto-Suggest */}
-                      <div className="space-y-2" data-tour="phone">
-                        <Label htmlFor="phone" className="text-sm font-medium">
-                          Phone Number <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="phone"
-                            type="tel"
-                            {...register("phone", {
-                              required: "Phone number is required",
-                              pattern: {
-                                value: /^[0-9]{10}$/,
-                                message: "Please enter a valid 10-digit phone number",
-                              },
-                            })}
-                            onChange={handlePhoneInputChange}
-                            placeholder="Enter 10-digit number"
-                            className={`pl-10 ${errors.phone ? "border-red-500" : ""}`}
-                            autoComplete="off"
-                            ref={(e) => {
-                              register("phone", {
-                                required: "Phone number is required",
-                                pattern: {
-                                  value: /^[0-9]{10}$/,
-                                  message: "Please enter a valid 10-digit phone number",
-                                },
-                              }).ref(e)
-                              phoneInputRef.current = e
-                            }}
-                          />
-                          {showPhoneSuggestions && phoneSuggestions.length > 0 && (
-                            <div
-                              ref={phoneSuggestionBoxRef}
-                              className="absolute z-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md w-full mt-1 max-h-48 overflow-auto shadow-lg"
-                            >
-                              {phoneSuggestions.map((suggestion) => (
-                                <div
-                                  key={suggestion.id}
-                                  onClick={() => handlePatientSuggestionClick(suggestion)}
-                                  className="flex items-center justify-between px-3 py-2 hover:bg-emerald-50 dark:hover:bg-gray-700 cursor-pointer"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Avatar className="h-6 w-6">
-                                      <AvatarFallback className="text-xs bg-emerald-100 text-emerald-700">
-                                        {suggestion.name.substring(0, 2).toUpperCase()}
-                                      </AvatarFallback>
-                                    </Avatar>
-                                    <span className="font-medium">{suggestion.name}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm text-gray-500">{suggestion.phone || "No phone"}</span>
-                                    <Badge variant="default" className="text-xs">
-                                      Gautami
-                                    </Badge>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        {errors.phone && (
-                          <p className="text-sm text-red-500">{errors.phone.message || "Phone number is required"}</p>
-                        )}
-                      </div>
-
-                      {/* Age Field */}
-                      <div className="space-y-2" data-tour="age">
-                        <Label htmlFor="age" className="text-sm font-medium">
-                          Age <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <Cake className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="age"
-                            type="number"
-                            {...register("age", {
-                              required: "Age is required",
-                              min: { value: 1, message: "Age must be positive" },
-                            })}
-                            placeholder="Enter age"
-                            className={`pl-10 ${errors.age ? "border-red-500" : ""}`}
-                            ref={(e) => {
-                              register("age", {
-                                required: "Age is required",
-                                min: { value: 1, message: "Age must be positive" },
-                              }).ref(e)
-                              ageInputRef.current = e
-                            }}
-                          />
-                        </div>
-                        {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
-                      </div>
-
-                      {/* Gender Field */}
-                      <div className="space-y-2" data-tour="gender">
-                        <Label htmlFor="gender" className="text-sm font-medium">
-                          Gender <span className="text-red-500">*</span>
-                        </Label>
-                        <Controller
-                          control={control}
-                          name="gender"
-                          rules={{ required: "Gender is required" }}
-                          render={({ field }) => (
-                            <Select onValueChange={field.onChange} value={field.value}>
-                              <SelectTrigger className={errors.gender ? "border-red-500" : ""}>
-                                <SelectValue placeholder="Select gender" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {GenderOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
-                      </div>
-
-                      {/* Appointment Type Selection */}
-                      <div className="space-y-2 col-span-2">
-                        <Label htmlFor="appointmentType" className="text-sm font-medium">
-                          Appointment Type <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div
-                            className={`border rounded-md p-3 cursor-pointer transition-colors ${
-                              watch("appointmentType") === "visithospital"
-                                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
-                                : "border-gray-200 dark:border-gray-700"
-                            }`}
-                            onClick={() => setValue("appointmentType", "visithospital")}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div
-                                className={`h-4 w-4 rounded-full border ${
-                                  watch("appointmentType") === "visithospital"
-                                    ? "border-emerald-500 bg-emerald-500"
-                                    : "border-gray-300"
-                                }`}
-                              ></div>
-                              <span className="font-medium">Visit Hospital</span>
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1 ml-6">Patient will visit the hospital in person</p>
-                          </div>
-                          <div
-                            className={`border rounded-md p-3 cursor-pointer transition-colors ${
-                              watch("appointmentType") === "oncall"
-                                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20"
-                                : "border-gray-200 dark:border-gray-700"
-                            }`}
-                            onClick={() => setValue("appointmentType", "oncall")}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div
-                                className={`h-4 w-4 rounded-full border ${
-                                  watch("appointmentType") === "oncall"
-                                    ? "border-emerald-500 bg-emerald-500"
-                                    : "border-gray-300"
-                                }`}
-                              ></div>
-                              <span className="font-medium">On-Call</span>
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1 ml-6">Remote consultation via phone</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* OPD Type Selection */}
-                      <div className="space-y-2 col-span-2">
-                        <Label htmlFor="opdType" className="text-sm font-medium">
-                          OPD Type <span className="text-red-500">*</span>
-                        </Label>
-                        <Controller
-                          control={control}
-                          name="opdType"
-                          defaultValue="opd"
-                          rules={{ required: "OPD Type is required" }}
-                          render={({ field }) => (
-                            <Select onValueChange={field.onChange} value={field.value}>
-                              <SelectTrigger className={errors.opdType ? "border-red-500" : ""}>
-                                <SelectValue placeholder="Select OPD Type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="opd">OPD</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        {errors.opdType && <p className="text-sm text-red-500">{errors.opdType.message}</p>}
-                      </div>
-
-                      {/* Referred By Field */}
-                      <div className="space-y-2">
-                        <Label htmlFor="referredBy" className="text-sm font-medium">
-                          Referred By
-                        </Label>
-                        <Input
-                          id="referredBy"
-                          type="text"
-                          {...register("referredBy")}
-                          placeholder="Enter referrer name (optional)"
-                        />
-                      </div>
-
-                      {/* Date Field */}
-                      <div className="space-y-2" data-tour="date">
-                        <Label htmlFor="date" className="text-sm font-medium">
-                          Appointment Date <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Controller
-                            control={control}
-                            name="date"
-                            rules={{ required: "Date is required" }}
-                            render={({ field }) => (
-                              <DatePicker
-                                selected={field.value}
-                                onChange={(date: Date | null) => date && field.onChange(date)}
-                                dateFormat="dd/MM/yyyy"
-                                placeholderText="Select Date"
-                                className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 border-gray-300 dark:border-gray-600 dark:bg-gray-800 ${
-                                  errors.date ? "border-red-500" : ""
-                                }`}
-                              />
-                            )}
-                          />
-                        </div>
-                        {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
-                      </div>
-
-                      {/* Time Field */}
-                      <div className="space-y-2" data-tour="time">
-                        <Label htmlFor="time" className="text-sm font-medium">
-                          Appointment Time <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="time"
-                            type="text"
-                            {...register("time", {
-                              required: "Time is required",
-                            })}
-                            placeholder="e.g. 10:30 AM"
-                            className={`pl-10 ${errors.time ? "border-red-500" : ""}`}
-                            defaultValue={formatAMPM(new Date())}
-                          />
-                        </div>
-                        {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
-                      </div>
-
-                      {/* Service Name Field */}
-                      <div className="space-y-2" data-tour="serviceName">
-                        <Label htmlFor="serviceName" className="text-sm font-medium">
-                          Service Name <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="relative">
-                          <Info className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            id="serviceName"
-                            type="text"
-                            {...register("serviceName", {
-                              required: "Service name is required",
-                            })}
-                            placeholder="Enter service name"
-                            className={`pl-10 ${errors.serviceName ? "border-red-500" : ""}`}
-                          />
-                        </div>
-                        {errors.serviceName && <p className="text-sm text-red-500">{errors.serviceName.message}</p>}
-                      </div>
-
-                      {/* Doctor Selection Field */}
-                      <div className="space-y-2" data-tour="doctor">
-                        <Label htmlFor="doctor" className="text-sm font-medium">
-                          Doctor <span className="text-red-500">*</span>
-                        </Label>
-                        <Controller
-                          control={control}
-                          name="doctor"
-                          rules={{
-                            required: "Doctor selection is required",
-                          }}
-                          render={({ field }) => (
-                            <Select onValueChange={field.onChange} value={field.value}>
-                              <SelectTrigger className={errors.doctor ? "border-red-500" : ""}>
-                                <SelectValue placeholder="Select doctor" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {doctors.map((doctor) => (
-                                  <SelectItem key={doctor.id} value={doctor.id}>
-                                    {doctor.name} {doctor.specialty ? `(${doctor.specialty})` : ""}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        />
-                        {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
-                      </div>
-
-                      {/* Conditional fields for hospital visit */}
-                      {watch("appointmentType") === "visithospital" && (
-                        <>
-                          {/* Address Field */}
-                          <div className="space-y-2" data-tour="address">
-                            <Label htmlFor="address" className="text-sm font-medium">
-                              Address
-                            </Label>
-                            <div className="relative">
-                              <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                              <Textarea
-                                id="address"
-                                {...register("address")}
-                                placeholder="Enter address (optional)"
-                                className="pl-10 min-h-[80px]"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Payment Method Field */}
-                          <div className="space-y-2" data-tour="paymentMethod">
-                            <Label htmlFor="paymentMethod" className="text-sm font-medium">
-                              Payment Method <span className="text-red-500">*</span>
-                            </Label>
-                            <Controller
-                              control={control}
-                              name="paymentMethod"
-                              rules={{
-                                required:
-                                  watch("appointmentType") === "visithospital" ? "Payment method is required" : false,
-                              }}
-                              render={({ field }) => (
-                                <Select onValueChange={field.onChange} value={field.value}>
-                                  <SelectTrigger className={errors.paymentMethod ? "border-red-500" : ""}>
-                                    <SelectValue placeholder="Select payment method" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {PaymentOptions.map((option) => (
-                                      <SelectItem key={option.value} value={option.value}>
-                                        {option.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            />
-                            {errors.paymentMethod && (
-                              <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>
-                            )}
-                          </div>
-
-                          {/* Amount Field */}
-                          <div className="space-y-2" data-tour="amount">
-                            <Label htmlFor="amount" className="text-sm font-medium">
-                              Amount (Rs) <span className="text-red-500">*</span>
-                            </Label>
-                            <div className="relative">
-                              <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="amount"
-                                type="number"
-                                placeholder="Enter amount"
-                                className={`pl-10 ${errors.amount ? "border-red-500" : ""}`}
-                                {...register("amount", {
-                                  required: watch("appointmentType") === "visithospital" ? "Amount is required" : false,
-                                  min: { value: 0, message: "Amount must be positive" },
-                                })}
-                                onWheel={(e) => {
-                                  e.preventDefault()
-                                  ;(e.currentTarget as HTMLElement).blur()
-                                }}
-                              />
-                            </div>
-                            {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
-                          </div>
-
-                          {/* Discount Field */}
-                          <div className="space-y-2" data-tour="discount">
-                            <Label htmlFor="discount" className="text-sm font-medium">
-                              Discount (Rs)
-                            </Label>
-                            <div className="relative">
-                              <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                              <Input
-                                id="discount"
-                                type="number"
-                                placeholder="Enter discount amount"
-                                className="pl-10"
-                                {...register("discount", {
-                                  min: { value: 0, message: "Discount must be positive" },
-                                  validate: (value) => {
-                                    const amount = watch("amount")
-                                    return value <= amount || "Discount cannot exceed total amount"
-                                  },
-                                })}
-                                onWheel={(e) => {
-                                  e.preventDefault()
-                                  ;(e.currentTarget as HTMLElement).blur()
-                                }}
-                              />
-                            </div>
-                            {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
-                            {watch("discount") > 0 && (
-                              <p className="text-sm text-emerald-600">
-                                Final amount: ₹{watch("amount") - watch("discount")}
-                              </p>
-                            )}
-                          </div>
-                        </>
-                      )}
-
-                      {/* Message Field */}
-                      <div className="space-y-2 col-span-2" data-tour="message">
-                        <Label htmlFor="message" className="text-sm font-medium">
-                          Additional Notes
-                        </Label>
-                        <div className="relative">
-                          <MessageSquare className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
-                          <Textarea
-                            id="message"
-                            {...register("message")}
-                            placeholder="Enter any additional notes (optional)"
-                            className="pl-10 min-h-[100px]"
-                          />
-                        </div>
-                      </div>
-                    </div>
+                    <PatientForm
+                      form={form}
+                      doctors={doctors}
+                      patientSuggestions={patientSuggestions}
+                      phoneSuggestions={phoneSuggestions}
+                      showNameSuggestions={showNameSuggestions}
+                      showPhoneSuggestions={showPhoneSuggestions}
+                      selectedPatient={selectedPatient}
+                      onPatientSelect={handlePatientSuggestionClick}
+                      onNameChange={handleNameInputChange}
+                      onPhoneChange={handlePhoneInputChange}
+                      setShowNameSuggestions={setShowNameSuggestions}
+                      setShowPhoneSuggestions={setShowPhoneSuggestions}
+                    />
 
                     <div className="flex flex-col sm:flex-row gap-4 pt-4">
                       <Button type="button" variant="outline" className="flex-1" onClick={() => setPreviewOpen(true)}>
@@ -1463,126 +772,16 @@ Gautami Hospital
                 </TabsContent>
 
                 <TabsContent value="oncall" className="p-6">
-                  <div className="space-y-6">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
-                      <h3 className="text-lg font-semibold text-emerald-700 dark:text-emerald-400">
-                        On-Call Appointments
-                      </h3>
-                      <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-                        <div className="relative flex-1 sm:w-64">
-                          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                          <Input
-                            placeholder="Search appointments..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10"
-                          />
-                          {searchQuery && (
-                            <button
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                              onClick={() => setSearchQuery("")}
-                            >
-                              <Cross2Icon className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                        <Button
-                          onClick={() => {
-                            setActiveTab("form")
-                            setValue("appointmentType", "oncall")
-                          }}
-                          className="bg-emerald-600 hover:bg-emerald-700"
-                        >
-                          Book On-Call
-                        </Button>
-                      </div>
-                    </div>
-
-                    {filteredOncallAppointments.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        {searchQuery ? "No matching appointments found" : "No on-call appointments found"}
-                      </div>
-                    ) : (
-                      <ScrollArea className="h-[500px]">
-                        <div className="space-y-4">
-                          {filteredOncallAppointments.map((appointment) => (
-                            <Card key={appointment.id} className="overflow-hidden">
-                              <CardHeader className="bg-emerald-50 dark:bg-gray-800 p-4">
-                                <div className="flex justify-between items-center">
-                                  <div>
-                                    <CardTitle className="text-lg">{appointment.name}</CardTitle>
-                                    <CardDescription>
-                                      {new Date(appointment.date).toLocaleDateString()} at {appointment.time}
-                                    </CardDescription>
-                                  </div>
-                                  <Badge>On-Call</Badge>
-                                </div>
-                              </CardHeader>
-                              <CardContent className="p-4">
-                                <div className="grid grid-cols-2 gap-2 text-sm">
-                                  <div className="font-medium">Phone:</div>
-                                  <div>{appointment.phone}</div>
-
-                                  <div className="font-medium">Age:</div>
-                                  <div>{appointment.age}</div>
-
-                                  <div className="font-medium">Gender:</div>
-                                  <div>{appointment.gender}</div>
-
-                                  {appointment.serviceName && (
-                                    <>
-                                      <div className="font-medium">Service:</div>
-                                      <div>{appointment.serviceName}</div>
-                                    </>
-                                  )}
-
-                                  {appointment.doctor && (
-                                    <>
-                                      <div className="font-medium">Doctor:</div>
-                                      <div>
-                                        {doctors.find((d) => d.id === appointment.doctor)?.name || appointment.doctor}
-                                      </div>
-                                    </>
-                                  )}
-
-                                  <div className="font-medium">Created:</div>
-                                  <div>{new Date(appointment.createdAt).toLocaleString()}</div>
-                                </div>
-                              </CardContent>
-                              <CardFooter className="bg-gray-50 dark:bg-gray-900 p-3 flex justify-between">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                  onClick={() => {
-                                    setAppointmentToDelete(appointment.id)
-                                    setDeleteDialogOpen(true)
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4 mr-1" />
-                                  Delete
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  onClick={() => {
-                                    setActiveTab("form")
-                                    setValue("name", appointment.name)
-                                    setValue("phone", appointment.phone)
-                                    setValue("age", appointment.age)
-                                    setValue("gender", appointment.gender)
-                                    setValue("appointmentType", "visithospital")
-                                    toast.info("On-call patient details loaded to form")
-                                  }}
-                                >
-                                  Book OPD Visit
-                                </Button>
-                              </CardFooter>
-                            </Card>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    )}
-                  </div>
+                  <OnCallAppointments
+                    appointments={oncallAppointments}
+                    doctors={doctors}
+                    onDeleteAppointment={handleDeleteAppointment}
+                    onBookOPDVisit={handleBookOPDVisit}
+                    onBookOnCall={() => {
+                      setActiveTab("form")
+                      setValue("appointmentType", "oncall")
+                    }}
+                  />
                 </TabsContent>
 
                 <TabsContent value="help" className="p-6">
@@ -1601,25 +800,36 @@ Gautami Hospital
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">Visit Hospital</p>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                              For patients who will physically visit the hospital. Complete all details including doctor
-                              selection.
+                              For patients who will physically visit the hospital. Complete all details including
+                              payment information.
                             </p>
                           </div>
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <p className="font-medium mb-1">On-Call</p>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                              For remote consultations. Basic patient details, service name, and doctor selection are
-                              required.
+                              For remote consultations. Basic patient details and modality selection are required.
                             </p>
                           </div>
                         </div>
 
-                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">OPD Type</h4>
-                        <div className="grid grid-cols-1 gap-4">
+                        <h4 className="font-semibold text-emerald-700 dark:text-emerald-400">Modality Options</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
-                            <p className="font-medium mb-1">OPD</p>
+                            <p className="font-medium mb-1">Consultation</p>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                              Regular outpatient department appointments for non-emergency consultations.
+                              Doctor consultation with first visit or follow-up pricing.
+                            </p>
+                          </div>
+                          <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                            <p className="font-medium mb-1">Casualty</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Emergency cases with custom study field.
+                            </p>
+                          </div>
+                          <div className="bg-white dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
+                            <p className="font-medium mb-1">X-Ray</p>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              X-Ray studies with predefined options.
                             </p>
                           </div>
                         </div>
@@ -1679,8 +889,6 @@ Gautami Hospital
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <div className="font-medium">Appointment Type:</div>
               <div>{watch("appointmentType") === "visithospital" ? "Visit Hospital" : "On-Call"}</div>
-              <div className="font-medium">OPD Type:</div>
-              <div>{watch("opdType") === "opd" ? "OPD" : "Casualty"}</div>
 
               <div className="font-medium">Patient Name:</div>
               <div>{watch("name")}</div>
@@ -1694,17 +902,27 @@ Gautami Hospital
               <div className="font-medium">Gender:</div>
               <div>{GenderOptions.find((g) => g.value === watch("gender"))?.label || watch("gender")}</div>
 
+              <div className="font-medium">Modality:</div>
+              <div>{ModalityOptions.find((m) => m.value === watch("modality"))?.label || watch("modality")}</div>
+
+              {watch("visitType") && (
+                <>
+                  <div className="font-medium">Visit Type:</div>
+                  <div className="capitalize">{watch("visitType")}</div>
+                </>
+              )}
+
+              {watch("study") && (
+                <>
+                  <div className="font-medium">Study:</div>
+                  <div>{watch("study")}</div>
+                </>
+              )}
+
               {watch("referredBy") && (
                 <>
                   <div className="font-medium">Referred By:</div>
                   <div>{watch("referredBy")}</div>
-                </>
-              )}
-
-              {watch("address") && watch("appointmentType") === "visithospital" && (
-                <>
-                  <div className="font-medium">Address:</div>
-                  <div>{watch("address")}</div>
                 </>
               )}
 
@@ -1714,19 +932,35 @@ Gautami Hospital
               <div className="font-medium">Time:</div>
               <div>{watch("time")}</div>
 
-              <div className="font-medium">Service:</div>
-              <div>{watch("serviceName")}</div>
+              {/* <div className="font-medium">Service:</div>
+              <div>{watch("serviceName")}</div> */}
 
-              <div className="font-medium">Doctor:</div>
-              <div>{doctors.find((d) => d.id === watch("doctor"))?.name || "No Doctor"}</div>
+              {watch("doctor") && (
+                <>
+                  <div className="font-medium">Doctor:</div>
+                  <div>{doctors.find((d) => d.id === watch("doctor"))?.name || "No Doctor"}</div>
+                </>
+              )}
 
               {watch("appointmentType") === "visithospital" && (
                 <>
                   <div className="font-medium">Payment Method:</div>
                   <div>{PaymentOptions.find((p) => p.value === watch("paymentMethod"))?.label}</div>
 
-                  <div className="font-medium">Amount:</div>
-                  <div>₹ {watch("amount")}</div>
+                  {watch("paymentMethod") === "mixed" ? (
+                    <>
+                      <div className="font-medium">Cash Amount:</div>
+                      <div>₹ {watch("cashAmount") || 0}</div>
+
+                      <div className="font-medium">Online Amount:</div>
+                      <div>₹ {watch("onlineAmount") || 0}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-medium">Amount:</div>
+                      <div>₹ {watch("cashAmount") || 0}</div>
+                    </>
+                  )}
 
                   {watch("discount") > 0 && (
                     <>
@@ -1734,7 +968,7 @@ Gautami Hospital
                       <div>₹ {watch("discount")}</div>
 
                       <div className="font-medium">Final Amount:</div>
-                      <div>₹ {watch("amount") - watch("discount")}</div>
+                      <div>₹ {calculateTotalAmount()}</div>
                     </>
                   )}
 
@@ -1764,24 +998,6 @@ Gautami Hospital
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Appointment</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this on-call appointment? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setAppointmentToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteAppointment} className="bg-red-500 hover:bg-red-600">
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   )
 }

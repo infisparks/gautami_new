@@ -7,7 +7,6 @@ import { ref, query, orderByChild, startAt, endAt, get, update, remove, push, on
 import { onAuthStateChanged } from "firebase/auth"
 import {
   Phone,
-  DollarSign,
   Edit,
   Trash2,
   Search,
@@ -18,6 +17,13 @@ import {
   History,
   ChevronDown,
   RefreshCw,
+  IndianRupeeIcon,
+  Cake,
+  MapPin,
+  Clock,
+  MessageSquare,
+  PersonStandingIcon as PersonIcon,
+  CalendarIcon,
 } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -49,7 +55,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useRouter } from "next/navigation"
 
-// Types
+// Enhanced Types matching the new form structure
 interface OPD_Summary {
   uhid: string
   id: string
@@ -57,71 +63,77 @@ interface OPD_Summary {
   time: string
   serviceName: string
   doctor: string
-  appointmentType: string
+  appointmentType: "visithospital" | "oncall"
   opdType: string
-  name: string // Patient name from OPD record
-  phone: string // Patient phone from OPD record
-  amount: number
-  createdAt: string
-}
-
-interface OPD_Full {
-  uhid: string
-  id: string
-  date: string
-  time: string
-  paymentMethod: string
-  originalAmount: number
-  amount: number
-  discount: number
-  serviceName: string
-  doctor: string
-  message?: string
-  referredBy?: string
-  appointmentType: string
-  opdType: string
-  enteredBy: string
-  createdAt: string
   name: string
   phone: string
-  age: string | number
-  gender: string
+  age: number
+  gender: "male" | "female" | "other"
   address?: string
+  amount: number
+  cashAmount: number
+  onlineAmount: number
+  originalAmount: number
+  discount: number
+  paymentMethod: "cash" | "online" | "mixed" | "card" | "upi"
+  modality: "consultation" | "casualty" | "xray" | "pathology"
+  visitType?: "first" | "followup"
+  study?: string
+  specialist?: string
+  referredBy?: string
+  message?: string
+  createdAt: string
+  enteredBy?: string
+}
+
+interface OPD_Full extends OPD_Summary {
+  lastModifiedBy?: string
+  lastModifiedAt?: string
 }
 
 interface Doctor {
   id: string
   name: string
-  opdCharge: number
-  specialty?: string
+  specialist: string[] | string
+  department?: string
+  firstVisitCharge: number
+  followUpCharge: number
 }
 
 interface EditFormData {
   name: string
   phone: string
   age: number
-  gender: string
+  gender: "male" | "female" | "other"
   address: string
   date: Date
   time: string
-  paymentMethod: string
-  amount: number
+  appointmentType: "visithospital" | "oncall"
+  paymentMethod: "cash" | "online" | "mixed" | "card" | "upi"
+  cashAmount: number
+  onlineAmount: number
   discount: number
-  serviceName: string
   doctor: string
   message: string
   referredBy: string
+  modality: "consultation" | "casualty" | "xray" | "pathology"
+  visitType: "first" | "followup"
+  study: string
 }
 
 interface FilterOptions {
   dateFilter: "today" | "week" | "month" | "all"
   appointmentType: "all" | "visithospital" | "oncall"
   doctor: string
+  modality: string
+  paymentMethod: string
 }
 
+// Enhanced Options matching the new form
 const PaymentOptions = [
   { value: "cash", label: "Cash" },
   { value: "online", label: "Online" },
+  { value: "mixed", label: "Cash + Online" },
   { value: "card", label: "Card" },
   { value: "upi", label: "UPI" },
 ]
@@ -130,6 +142,40 @@ const GenderOptions = [
   { value: "male", label: "Male" },
   { value: "female", label: "Female" },
   { value: "other", label: "Other" },
+]
+
+const ModalityOptions = [
+  { value: "consultation", label: "Consultation" },
+  { value: "casualty", label: "Casualty" },
+  { value: "xray", label: "X-Ray" },
+  { value: "pathology", label: "Pathology" },
+]
+
+const VisitTypeOptions = [
+  { value: "first", label: "First Visit" },
+  { value: "followup", label: "Follow Up" },
+]
+
+const XRayStudyOptions = [
+  "Chest X-Ray",
+  "Abdomen X-Ray",
+  "Spine X-Ray",
+  "Pelvis X-Ray",
+  "Extremity X-Ray",
+  "Skull X-Ray",
+]
+
+const PathologyStudyOptions = [
+  "Complete Blood Count (CBC)",
+  "Blood Sugar Test",
+  "Lipid Profile",
+  "Liver Function Test",
+  "Kidney Function Test",
+  "Thyroid Function Test",
+  "Urine Analysis",
+  "Stool Analysis",
+  "ECG",
+  "Echo Cardiogram",
 ]
 
 const ITEMS_PER_PAGE = 10
@@ -143,6 +189,7 @@ export default function ManageOPDPage() {
   const [filteredAppointments, setFilteredAppointments] = useState<OPD_Summary[]>([])
   const [displayedAppointments, setDisplayedAppointments] = useState<OPD_Summary[]>([])
   const [doctors, setDoctors] = useState<Doctor[]>([])
+  const [missingDoctors, setMissingDoctors] = useState<Set<string>>(new Set())
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -154,6 +201,8 @@ export default function ManageOPDPage() {
     dateFilter: "today",
     appointmentType: "all",
     doctor: "all",
+    modality: "all",
+    paymentMethod: "all",
   })
 
   // Loading states
@@ -175,7 +224,17 @@ export default function ManageOPDPage() {
     formState: { errors },
     reset,
     watch,
+    setValue,
   } = useForm<EditFormData>()
+
+  // Watch form values for dynamic behavior
+  const watchedModality = watch("modality")
+  const watchedDoctor = watch("doctor")
+  const watchedVisitType = watch("visitType")
+  const watchedPaymentMethod = watch("paymentMethod")
+  const watchedAppointmentType = watch("appointmentType")
+  const watchedCashAmount = watch("cashAmount")
+  const watchedOnlineAmount = watch("onlineAmount")
 
   // Auth listener
   useEffect(() => {
@@ -189,28 +248,127 @@ export default function ManageOPDPage() {
     return () => unsub()
   }, [])
 
-  // Fetch doctors
+  // Enhanced doctor fetching with specialist handling
   useEffect(() => {
     const doctorsRef = ref(db, "doctors")
     const unsub = onValue(doctorsRef, (snap) => {
       const data = snap.val()
       const list: Doctor[] = []
+
       if (data) {
-        Object.keys(data).forEach((key) => {
-          list.push({
-            id: key,
-            name: data[key].name,
-            opdCharge: data[key].opdCharge || 0,
-            specialty: data[key].specialty || "",
+        // Handle both array and object structures
+        if (Array.isArray(data)) {
+          // If data is an array (like your JSON structure)
+          data.forEach((doctorData, index) => {
+            if (doctorData && doctorData.id) {
+              list.push({
+                id: doctorData.id,
+                name: doctorData.name,
+                specialist: doctorData.specialist || "",
+                firstVisitCharge: doctorData.firstVisitCharge || 0,
+                followUpCharge: doctorData.followUpCharge || 0,
+                department: doctorData.department || "",
+              })
+            }
           })
-        })
+        } else {
+          // If data is an object (Firebase structure)
+          Object.keys(data).forEach((key) => {
+            list.push({
+              id: key,
+              name: data[key].name,
+              specialist: data[key].specialist || "",
+              firstVisitCharge: data[key].firstVisitCharge || 0,
+              followUpCharge: data[key].followUpCharge || 0,
+              department: data[key].department || "",
+            })
+          })
+        }
       }
-      list.unshift({ id: "all", name: "All Doctors", opdCharge: 0 })
-      list.push({ id: "no_doctor", name: "No Doctor", opdCharge: 0 })
+
+      console.log("Loaded doctors:", list.length)
+      console.log(
+        "Sample doctor IDs:",
+        list.slice(0, 3).map((d) => d.id),
+      )
+
+      // Add special entries
+      list.unshift({ id: "all", name: "All Doctors", specialist: "", firstVisitCharge: 0, followUpCharge: 0 })
+      list.push({ id: "no_doctor", name: "No Doctor", specialist: "", firstVisitCharge: 0, followUpCharge: 0 })
+
       setDoctors(list)
     })
     return () => unsub()
   }, [])
+
+  // Filter doctors by selected specialist
+  const getFilteredDoctors = useCallback(() => {
+    return doctors.filter((d) => d.id !== "no_doctor" && d.id !== "all")
+  }, [doctors])
+
+  // Get current doctor charges
+  const getCurrentDoctorCharges = useCallback(() => {
+    if (watchedModality === "consultation" && watchedDoctor && watchedVisitType) {
+      const selectedDoctor = doctors.find((d) => d.id === watchedDoctor)
+      if (selectedDoctor) {
+        return watchedVisitType === "first" ? selectedDoctor.firstVisitCharge : selectedDoctor.followUpCharge
+      }
+    }
+    return 0
+  }, [watchedModality, watchedDoctor, watchedVisitType, doctors])
+
+  // Reset dependent fields when modality changes
+  useEffect(() => {
+    if (watchedModality !== "consultation") {
+      setValue("doctor", "")
+      setValue("visitType", "first")
+    }
+  }, [watchedModality, setValue])
+
+  // Reset visit type when doctor changes and set default to "first"
+  useEffect(() => {
+    if (watchedModality === "consultation" && watchedDoctor) {
+      if (!watchedVisitType) {
+        setValue("visitType", "first")
+      }
+    }
+  }, [watchedDoctor, watchedModality, watchedVisitType, setValue])
+
+  // Enhanced doctor info retrieval
+  const getDoctorInfo = useCallback(
+    async (doctorId: string) => {
+      const existingDoctor = doctors.find((d) => d.id === doctorId)
+      if (existingDoctor) {
+        return existingDoctor
+      }
+
+      try {
+        const doctorSnap = await get(ref(db, `doctors/${doctorId}`))
+        if (doctorSnap.exists()) {
+          const doctorData = doctorSnap.val()
+          return {
+            id: doctorId,
+            name: doctorData.name || "Unknown Doctor",
+            specialist: doctorData.specialist || "",
+            firstVisitCharge: doctorData.firstVisitCharge || 0,
+            followUpCharge: doctorData.followUpCharge || 0,
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching doctor:", error)
+      }
+
+      setMissingDoctors((prev) => new Set([...prev, doctorId]))
+      return {
+        id: doctorId,
+        name: `Missing Doctor (${doctorId.slice(-8)})`,
+        specialist: "Not Found",
+        firstVisitCharge: 0,
+        followUpCharge: 0,
+      }
+    },
+    [doctors],
+  )
 
   // Get date range for filtering
   const getDateRange = useCallback((filterType: string) => {
@@ -244,7 +402,7 @@ export default function ManageOPDPage() {
     }
   }, [])
 
-  // Optimized data fetching with Firebase queries
+  // Enhanced data fetching with improved filtering
   const fetchAppointments = useCallback(
     async (resetData = false) => {
       if (resetData) {
@@ -259,7 +417,6 @@ export default function ManageOPDPage() {
         const allAppointments: OPD_Summary[] = []
         const opdDetailRef = ref(db, "patients/opddetail")
 
-        // Get all patient UHIDs first
         const uhidsSnapshot = await get(opdDetailRef)
         if (!uhidsSnapshot.exists()) {
           setAppointments([])
@@ -271,12 +428,10 @@ export default function ManageOPDPage() {
         const uhidsData = uhidsSnapshot.val()
         const uhids = Object.keys(uhidsData)
 
-        // Fetch appointments for each UHID
         for (const uhid of uhids) {
           const userOpdRef = ref(db, `patients/opddetail/${uhid}`)
           let appointmentQuery
 
-          // Apply date filtering at database level for better performance
           const dateRange = getDateRange(filters.dateFilter)
           if (dateRange) {
             appointmentQuery = query(userOpdRef, orderByChild("date"), startAt(dateRange.start), endAt(dateRange.end))
@@ -290,13 +445,20 @@ export default function ManageOPDPage() {
             Object.keys(appointmentsData).forEach((appointmentId) => {
               const appointment = appointmentsData[appointmentId]
 
-              // Apply appointment type filter
+              // Apply filters
               if (filters.appointmentType !== "all" && appointment.appointmentType !== filters.appointmentType) {
                 return
               }
 
-              // Apply doctor filter
               if (filters.doctor !== "all" && appointment.doctor !== filters.doctor) {
+                return
+              }
+
+              if (filters.modality !== "all" && appointment.modality !== filters.modality) {
+                return
+              }
+
+              if (filters.paymentMethod !== "all" && appointment.paymentMethod !== filters.paymentMethod) {
                 return
               }
 
@@ -305,22 +467,34 @@ export default function ManageOPDPage() {
                 id: appointmentId,
                 date: appointment.date,
                 time: appointment.time,
-                serviceName: appointment.serviceName,
+                serviceName: appointment.serviceName || "N/A",
                 doctor: appointment.doctor,
                 appointmentType: appointment.appointmentType,
                 opdType: appointment.opdType,
                 name: appointment.name || "Unknown",
                 phone: appointment.phone || "",
+                age: appointment.age || 0,
+                gender: appointment.gender || "other",
+                address: appointment.address || "",
                 amount: appointment.amount || 0,
+                cashAmount: appointment.cashAmount || 0,
+                onlineAmount: appointment.onlineAmount || 0,
+                originalAmount: appointment.originalAmount || appointment.amount || 0,
+                discount: appointment.discount || 0,
+                paymentMethod: appointment.paymentMethod || "cash",
+                modality: appointment.modality || "consultation",
+                visitType: appointment.visitType || "",
+                study: appointment.study || "",
+                referredBy: appointment.referredBy || "",
+                message: appointment.message || "",
                 createdAt: appointment.createdAt,
+                enteredBy: appointment.enteredBy || "",
               })
             })
           }
         }
 
-        // Sort by creation date (newest first)
         allAppointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-
         setAppointments(allAppointments)
       } catch (error) {
         console.error("Error fetching appointments:", error)
@@ -345,8 +519,6 @@ export default function ManageOPDPage() {
     }
 
     const searchTerm = query.toLowerCase().trim()
-
-    // Only search if query is 4+ characters for names or 5+ digits for phone numbers
     const isPhoneSearch = /^\d{5,}$/.test(searchTerm)
     const isNameSearch = searchTerm.length >= 4
 
@@ -365,8 +537,9 @@ export default function ManageOPDPage() {
         const matchesUhid = appointment.uhid.toLowerCase().includes(searchTerm)
         const doctorName = getDoctorName(appointment.doctor).toLowerCase()
         const matchesDoctor = doctorName.includes(searchTerm)
+        const matchesStudy = appointment.study?.toLowerCase().includes(searchTerm) || false
 
-        return matchesName || matchesService || matchesUhid || matchesDoctor
+        return matchesName || matchesService || matchesUhid || matchesDoctor || matchesStudy
       }
 
       return false
@@ -377,7 +550,7 @@ export default function ManageOPDPage() {
   useEffect(() => {
     const filtered = performSearch(searchQuery, appointments)
     setFilteredAppointments(filtered)
-    setCurrentPage(1) // Reset to first page when search changes
+    setCurrentPage(1)
   }, [searchQuery, appointments, performSearch])
 
   // Update displayed appointments based on pagination
@@ -399,9 +572,22 @@ export default function ManageOPDPage() {
   // Get doctor name
   const getDoctorName = useCallback(
     (id: string) => {
-      return doctors.find((d) => d.id === id)?.name || id
+      const doctor = doctors.find((d) => d.id === id)
+      if (doctor) return doctor.name
+
+      // Check if it's a missing doctor we've encountered
+      if (missingDoctors.has(id)) {
+        return `Missing Doctor (${id.slice(-8)})`
+      }
+
+      // If ID looks like one from your structure, show a more user-friendly format
+      if (id.startsWith("-OSPLgyozFztsKFV7k")) {
+        return `Doctor (${id.slice(-4)})`
+      }
+
+      return id
     },
-    [doctors],
+    [doctors, missingDoctors],
   )
 
   // Handle filter changes
@@ -414,8 +600,40 @@ export default function ManageOPDPage() {
     fetchAppointments(true)
   }, [fetchAppointments])
 
-  // Open edit dialog
+  // Enhanced payment display formatting
+  const formatPaymentDisplay = (appointment: OPD_Summary) => {
+    if (appointment.paymentMethod === "mixed") {
+      return `Cash: ₹${appointment.cashAmount} + Online: ₹${appointment.onlineAmount}`
+    }
+    return `₹${appointment.amount}`
+  }
+
+  // Get all available doctors for dropdown
+  const getAvailableDoctors = useCallback(() => {
+    const allDoctors = [...doctors]
+
+    missingDoctors.forEach((doctorId) => {
+      if (!allDoctors.find((d) => d.id === doctorId)) {
+        allDoctors.push({
+          id: doctorId,
+          name: `Missing Doctor (${doctorId.slice(-8)})`,
+          specialist: "Not Found",
+          firstVisitCharge: 0,
+          followUpCharge: 0,
+        })
+      }
+    })
+
+    return allDoctors.filter((d) => d.id !== "all")
+  }, [doctors, missingDoctors])
+
+  // Enhanced edit dialog opening with better data handling
   const openEditDialog = async (summary: OPD_Summary) => {
+    if (doctors.length === 0) {
+      toast.error("Please wait for doctors to load before editing.")
+      return
+    }
+
     setLoading(true)
     try {
       const opdSnap = await get(ref(db, `patients/opddetail/${summary.uhid}/${summary.id}`))
@@ -425,21 +643,56 @@ export default function ManageOPDPage() {
         return
       }
 
+      const patientSnap = await get(ref(db, `patients/patientinfo/${summary.uhid}`))
+      const patientData = patientSnap.val()
+
+      // Enhanced doctor matching - match by exact ID first
+      let doctorId = ""
+
+      // First try exact ID match
+      const doctorById = doctors.find((d) => d.id === opdData.doctor)
+
+      if (doctorById) {
+        doctorId = doctorById.id
+        console.log("Doctor found by exact ID match:", doctorById.name)
+      } else {
+        // If not found by ID, try to find by name
+        const doctorByName = doctors.find((d) => d.name === opdData.doctor)
+        if (doctorByName) {
+          doctorId = doctorByName.id
+          console.log("Doctor found by name match:", doctorByName.name)
+        } else {
+          // If still not found, check if the stored value is already a doctor ID from our list
+          const possibleDoctor = doctors.find((d) => d.id.includes(opdData.doctor) || opdData.doctor.includes(d.id))
+          if (possibleDoctor) {
+            doctorId = possibleDoctor.id
+            console.log("Doctor found by partial match:", possibleDoctor.name)
+          } else {
+            console.log("Doctor not found, setting to no_doctor. Searched for:", opdData.doctor)
+            doctorId = "no_doctor"
+          }
+        }
+      }
+
       reset({
-        name: opdData.name || "",
-        phone: opdData.phone || "",
-        age: Number(opdData.age || 0),
-        gender: opdData.gender || "",
-        address: opdData.address || "",
+        name: opdData.name || patientData?.name || "",
+        phone: opdData.phone || patientData?.phone || "",
+        age: Number(patientData?.age || opdData.age || 0),
+        gender: patientData?.gender || opdData.gender || "other",
+        address: patientData?.address || opdData.address || "",
         date: new Date(opdData.date),
         time: opdData.time,
+        appointmentType: opdData.appointmentType || "visithospital",
         paymentMethod: opdData.paymentMethod,
-        amount: opdData.originalAmount || opdData.amount,
+        cashAmount: opdData.cashAmount || 0,
+        onlineAmount: opdData.onlineAmount || 0,
         discount: opdData.discount || 0,
-        serviceName: opdData.serviceName,
-        doctor: opdData.doctor,
+        doctor: doctorId, // This will now properly match the doctor ID
         message: opdData.message || "",
         referredBy: opdData.referredBy || "",
+        modality: opdData.modality || "consultation",
+        visitType: opdData.visitType || "first",
+        study: opdData.study || "",
       })
 
       setUhidEditing(summary.uhid)
@@ -453,35 +706,73 @@ export default function ManageOPDPage() {
     }
   }
 
-  // Save edited appointment
+  // Calculate final amount based on payment method
+  const calculateFinalAmount = () => {
+    const paymentMethod = watch("paymentMethod")
+    const cashAmount = Number(watch("cashAmount")) || 0
+    const onlineAmount = Number(watch("onlineAmount")) || 0
+    const discount = Number(watch("discount")) || 0
+
+    if (paymentMethod === "mixed") {
+      return cashAmount + onlineAmount - discount
+    } else {
+      return cashAmount - discount
+    }
+  }
+
+  // Enhanced save edit function
   const handleSaveEdit = async (formData: EditFormData) => {
     if (!uhidEditing || !opdIdEditing) return
     setLoading(true)
 
     try {
+      const finalAmount = calculateFinalAmount()
+      const originalAmount =
+        formData.paymentMethod === "mixed"
+          ? Number(formData.cashAmount) + Number(formData.onlineAmount)
+          : Number(formData.cashAmount)
+
+      const selectedDoctor = doctors.find((d) => d.id === formData.doctor)
+      const doctorName = selectedDoctor ? selectedDoctor.name : "No Doctor"
+
       const updatedData: any = {
         name: formData.name,
         phone: formData.phone,
-        age: String(formData.age),
+        age: formData.age,
         gender: formData.gender,
         address: formData.address,
         date: formData.date.toISOString(),
         time: formData.time,
+        appointmentType: formData.appointmentType,
         paymentMethod: formData.paymentMethod,
-        originalAmount: formData.amount,
-        discount: formData.discount,
-        amount: formData.amount - formData.discount,
-        serviceName: formData.serviceName,
+        cashAmount: Number(formData.cashAmount),
+        onlineAmount: formData.paymentMethod === "mixed" ? Number(formData.onlineAmount) : 0,
+        originalAmount: originalAmount,
+        discount: Number(formData.discount),
+        amount: finalAmount,
         doctor: formData.doctor,
+        doctorName: doctorName,
         message: formData.message,
         referredBy: formData.referredBy,
+        modality: formData.modality,
+        visitType: formData.visitType,
+        study: formData.study,
         lastModifiedBy: currentUserEmail || "unknown",
         lastModifiedAt: new Date().toISOString(),
       }
 
       await update(ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}`), updatedData)
 
-      // Log the change
+      const patientUpdateData = {
+        name: formData.name,
+        phone: formData.phone,
+        age: formData.age,
+        gender: formData.gender,
+        address: formData.address,
+        updatedAt: new Date().toISOString(),
+      }
+      await update(ref(db, `patients/patientinfo/${uhidEditing}`), patientUpdateData)
+
       const changesRef = ref(db, "opdChanges")
       const newChangeRef = push(changesRef)
       await set(newChangeRef, {
@@ -491,6 +782,7 @@ export default function ManageOPDPage() {
         patientName: formData.name,
         editedBy: currentUserEmail || "unknown",
         editedAt: new Date().toISOString(),
+        changes: updatedData,
       })
 
       toast.success("Appointment updated successfully!")
@@ -498,7 +790,6 @@ export default function ManageOPDPage() {
       setUhidEditing(null)
       setOpdIdEditing(null)
 
-      // Refresh data
       refreshData()
     } catch (err) {
       console.error(err)
@@ -514,7 +805,9 @@ export default function ManageOPDPage() {
     setLoading(true)
 
     try {
-      // Log the delete
+      const appointmentData = await get(ref(db, `patients/opddetail/${toDeleteSummary.uhid}/${toDeleteSummary.id}`))
+      const data = appointmentData.val()
+
       const changesRef = ref(db, "opdChanges")
       const newChangeRef = push(changesRef)
       await set(newChangeRef, {
@@ -522,18 +815,17 @@ export default function ManageOPDPage() {
         appointmentId: toDeleteSummary.id,
         patientId: toDeleteSummary.uhid,
         patientName: toDeleteSummary.name,
+        appointmentData: data,
         deletedBy: currentUserEmail || "unknown",
         deletedAt: new Date().toISOString(),
       })
 
-      // Remove the appointment
       await remove(ref(db, `patients/opddetail/${toDeleteSummary.uhid}/${toDeleteSummary.id}`))
 
       toast.success("Appointment deleted successfully!")
       setDeleteDialogOpen(false)
       setToDeleteSummary(null)
 
-      // Refresh data
       refreshData()
     } catch (err) {
       console.error(err)
@@ -573,7 +865,7 @@ export default function ManageOPDPage() {
                 <div>
                   <CardTitle className="text-2xl md:text-3xl font-bold">Manage OPD Appointments</CardTitle>
                   <CardDescription className="text-emerald-100">
-                    Optimized with pagination, search & filtering
+                    Enhanced with specialist tracking, mixed payments & comprehensive filtering
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -610,9 +902,8 @@ export default function ManageOPDPage() {
             </CardHeader>
 
             <CardContent className="p-6">
-              {/* Search and Filters */}
+              {/* Enhanced Search and Filters */}
               <div className="mb-6 space-y-4">
-                {/* Search Bar */}
                 <div className="flex flex-col sm:flex-row gap-4 items-center">
                   <div className="relative flex-1 max-w-md">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -624,8 +915,7 @@ export default function ManageOPDPage() {
                     />
                   </div>
 
-                  {/* Filters */}
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     {/* Date Filter */}
                     <Select
                       value={filters.dateFilter}
@@ -654,6 +944,38 @@ export default function ManageOPDPage() {
                         <SelectItem value="all">All Types</SelectItem>
                         <SelectItem value="visithospital">Hospital Visit</SelectItem>
                         <SelectItem value="oncall">On Call</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Modality Filter */}
+                    <Select value={filters.modality} onValueChange={(value) => handleFilterChange("modality", value)}>
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Modalities</SelectItem>
+                        <SelectItem value="consultation">Consultation</SelectItem>
+                        <SelectItem value="casualty">Casualty</SelectItem>
+                        <SelectItem value="xray">X-Ray</SelectItem>
+                        <SelectItem value="pathology">Pathology</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Payment Method Filter */}
+                    <Select
+                      value={filters.paymentMethod}
+                      onValueChange={(value) => handleFilterChange("paymentMethod", value)}
+                    >
+                      <SelectTrigger className="w-40">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Payments</SelectItem>
+                        {PaymentOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
 
@@ -687,7 +1009,7 @@ export default function ManageOPDPage() {
                 </div>
               </div>
 
-              {/* Appointments List */}
+              {/* Enhanced Appointments List */}
               {displayedAppointments.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   {searchQuery
@@ -704,7 +1026,7 @@ export default function ManageOPDPage() {
                       <CardHeader className="bg-gray-50 dark:bg-gray-800 p-4">
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-2">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <CardTitle className="text-lg">{appointment.uhid}</CardTitle>
                               <Badge variant="outline">{appointment.opdType.toUpperCase()}</Badge>
                               <Badge
@@ -712,11 +1034,19 @@ export default function ManageOPDPage() {
                               >
                                 {appointment.appointmentType === "visithospital" ? "Hospital Visit" : "On-Call"}
                               </Badge>
+                              <Badge variant="outline" className="capitalize">
+                                {appointment.modality}
+                              </Badge>
+                              {appointment.visitType && (
+                                <Badge variant="secondary" className="capitalize">
+                                  {appointment.visitType}
+                                </Badge>
+                              )}
                             </div>
 
-                            <div className="text-sm text-gray-700 mb-2 flex items-center gap-4">
+                            <div className="text-sm text-gray-700 mb-2 flex items-center gap-4 flex-wrap">
                               <span className="flex items-center gap-1">
-                                <UserIcon className="h-4 w-4" />
+                                <PersonIcon className="h-4 w-4" />
                                 {appointment.name}
                               </span>
                               {appointment.phone && (
@@ -726,11 +1056,25 @@ export default function ManageOPDPage() {
                                 </span>
                               )}
                               <span className="flex items-center gap-1">
-                                <DollarSign className="h-4 w-4" />₹{appointment.amount}
+                                <Cake className="h-4 w-4" />
+                                {appointment.age} years
                               </span>
+                              <span className="flex items-center gap-1">
+                                <IndianRupeeIcon className="h-4 w-4" />
+                                {formatPaymentDisplay(appointment)}
+                                {appointment.discount > 0 && (
+                                  <span className="text-green-600 text-xs ml-1">(-₹{appointment.discount})</span>
+                                )}
+                              </span>
+                              <Badge
+                                variant={appointment.paymentMethod === "mixed" ? "default" : "outline"}
+                                className="text-xs"
+                              >
+                                {appointment.paymentMethod}
+                              </Badge>
                             </div>
 
-                            <CardDescription className="flex items-center gap-4">
+                            <CardDescription className="flex items-center gap-4 flex-wrap">
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-4 w-4" />
                                 {new Date(appointment.date).toLocaleDateString()} at {appointment.time}
@@ -743,6 +1087,19 @@ export default function ManageOPDPage() {
                                 <UserIcon className="h-4 w-4" />
                                 {getDoctorName(appointment.doctor)}
                               </span>
+                              {appointment.study && (
+                                <span className="text-xs text-gray-500">Study: {appointment.study}</span>
+                              )}
+                              {appointment.referredBy && (
+                                <span className="text-xs text-gray-500">Ref: {appointment.referredBy}</span>
+                              )}
+                              {appointment.address && (
+                                <span className="flex items-center gap-1 text-xs text-gray-500">
+                                  <MapPin className="h-3 w-3" />
+                                  {appointment.address.substring(0, 50)}
+                                  {appointment.address.length > 50 && "..."}
+                                </span>
+                              )}
                             </CardDescription>
                           </div>
                           <div className="flex gap-2">
@@ -798,9 +1155,9 @@ export default function ManageOPDPage() {
         </div>
       </div>
 
-      {/* Edit Dialog */}
+      {/* Enhanced Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Appointment</DialogTitle>
             <DialogDescription>Modify details for UHID {uhidEditing}</DialogDescription>
@@ -813,11 +1170,15 @@ export default function ManageOPDPage() {
                 <Label htmlFor="edit-name">
                   Patient Name <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="edit-name"
-                  {...register("name", { required: "Name is required" })}
-                  placeholder="Enter patient name"
-                />
+                <div className="relative">
+                  <PersonIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    id="edit-name"
+                    {...register("name", { required: "Name is required" })}
+                    placeholder="Enter patient name"
+                    className="pl-10"
+                  />
+                </div>
                 {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
               </div>
 
@@ -826,17 +1187,21 @@ export default function ManageOPDPage() {
                 <Label htmlFor="edit-phone">
                   Phone Number <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="edit-phone"
-                  {...register("phone", {
-                    required: "Phone is required",
-                    pattern: {
-                      value: /^[0-9]{10}$/,
-                      message: "Enter valid 10-digit phone",
-                    },
-                  })}
-                  placeholder="Enter phone"
-                />
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    id="edit-phone"
+                    {...register("phone", {
+                      required: "Phone is required",
+                      pattern: {
+                        value: /^[0-9]{10}$/,
+                        message: "Enter valid 10-digit phone",
+                      },
+                    })}
+                    placeholder="Enter phone"
+                    className="pl-10"
+                  />
+                </div>
                 {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
               </div>
 
@@ -845,15 +1210,19 @@ export default function ManageOPDPage() {
                 <Label htmlFor="edit-age">
                   Age <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="edit-age"
-                  type="number"
-                  {...register("age", {
-                    required: "Age is required",
-                    min: { value: 1, message: "Age must be ≥ 1" },
-                  })}
-                  placeholder="Enter age"
-                />
+                <div className="relative">
+                  <Cake className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    id="edit-age"
+                    type="number"
+                    {...register("age", {
+                      required: "Age is required",
+                      min: { value: 1, message: "Age must be ≥ 1" },
+                    })}
+                    placeholder="Enter age"
+                    className="pl-10"
+                  />
+                </div>
                 {errors.age && <p className="text-sm text-red-500">{errors.age.message}</p>}
               </div>
 
@@ -884,65 +1253,55 @@ export default function ManageOPDPage() {
                 {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
               </div>
 
-              {/* Address */}
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="edit-address">Address</Label>
-                <Textarea
-                  id="edit-address"
-                  {...register("address")}
-                  placeholder="Enter address"
-                  className="min-h-[80px]"
-                />
-              </div>
-
-              {/* Date */}
+              {/* Appointment Type */}
               <div className="space-y-2">
-                <Label htmlFor="edit-date">
-                  Appointment Date <span className="text-red-500">*</span>
+                <Label htmlFor="edit-appointmentType">
+                  Appointment Type <span className="text-red-500">*</span>
                 </Label>
                 <Controller
                   control={control}
-                  name="date"
-                  rules={{ required: "Date is required" }}
+                  name="appointmentType"
+                  rules={{ required: "Appointment type is required" }}
                   render={({ field }) => (
-                    <DatePicker
-                      selected={field.value}
-                      onChange={(d: Date | null) => d && field.onChange(d)}
-                      dateFormat="dd/MM/yyyy"
-                      placeholderText="Select date"
-                      className="w-full px-3 py-2 border rounded-md focus:ring-emerald-500"
-                    />
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select appointment type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="visithospital">Visit Hospital</SelectItem>
+                        <SelectItem value="oncall">On-Call</SelectItem>
+                      </SelectContent>
+                    </Select>
                   )}
                 />
-                {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
+                {errors.appointmentType && <p className="text-sm text-red-500">{errors.appointmentType.message}</p>}
               </div>
 
-              {/* Time */}
+              {/* Modality */}
               <div className="space-y-2">
-                <Label htmlFor="edit-time">
-                  Appointment Time <span className="text-red-500">*</span>
+                <Label htmlFor="edit-modality">
+                  Modality <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="edit-time"
-                  {...register("time", { required: "Time is required" })}
-                  placeholder="e.g. 10:30 AM"
+                <Controller
+                  control={control}
+                  name="modality"
+                  rules={{ required: "Modality is required" }}
+                  render={({ field }) => (
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select modality" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ModalityOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 />
-                {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
-              </div>
-
-              {/* Service Name */}
-              <div className="space-y-2">
-                <Label htmlFor="edit-serviceName">
-                  Service Name <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="edit-serviceName"
-                  {...register("serviceName", {
-                    required: "Service is required",
-                  })}
-                  placeholder="Enter service"
-                />
-                {errors.serviceName && <p className="text-sm text-red-500">{errors.serviceName.message}</p>}
+                {errors.modality && <p className="text-sm text-red-500">{errors.modality.message}</p>}
               </div>
 
               {/* Doctor */}
@@ -960,13 +1319,17 @@ export default function ManageOPDPage() {
                         <SelectValue placeholder="Select doctor" />
                       </SelectTrigger>
                       <SelectContent>
-                        {doctors
-                          .filter((doc) => doc.id !== "all")
-                          .map((doc) => (
-                            <SelectItem key={doc.id} value={doc.id}>
-                              {doc.name} {doc.specialty ? `(${doc.specialty})` : ""}
-                            </SelectItem>
-                          ))}
+                        {getFilteredDoctors().map((doc) => (
+                          <SelectItem key={doc.id} value={doc.id}>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{doc.name}</span>
+                              <span className="text-xs text-gray-500">
+                                ID: {doc.id} |{" "}
+                                {Array.isArray(doc.specialist) ? doc.specialist.join(", ") : doc.specialist}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   )}
@@ -974,70 +1337,309 @@ export default function ManageOPDPage() {
                 {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
               </div>
 
-              {/* Payment Method */}
-              <div className="space-y-2">
-                <Label htmlFor="edit-paymentMethod">
-                  Payment Method <span className="text-red-500">*</span>
-                </Label>
-                <Controller
-                  control={control}
-                  name="paymentMethod"
-                  rules={{ required: "Payment method is required" }}
-                  render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select payment" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PaymentOptions.map((opt) => (
-                          <SelectItem key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              {/* Visit Type (for consultation) */}
+              {watchedModality === "consultation" && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-visitType">Visit Type</Label>
+                  <Controller
+                    control={control}
+                    name="visitType"
+                    render={({ field }) => (
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select visit type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {VisitTypeOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                              {watchedDoctor &&
+                                (() => {
+                                  const selectedDoctor = doctors.find((d) => d.id === watchedDoctor)
+                                  if (selectedDoctor) {
+                                    const charge =
+                                      opt.value === "first"
+                                        ? selectedDoctor.firstVisitCharge
+                                        : selectedDoctor.followUpCharge
+                                    return ` - ₹${charge}`
+                                  }
+                                  return ""
+                                })()}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+              )}
+
+              {/* Study (for casualty/xray/pathology) */}
+              {(watchedModality === "casualty" || watchedModality === "xray" || watchedModality === "pathology") && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-study">{watchedModality === "pathology" ? "Pathology Test" : "Study"}</Label>
+                  {watchedModality === "casualty" ? (
+                    <Input id="edit-study" {...register("study")} placeholder="Enter study details" />
+                  ) : watchedModality === "xray" ? (
+                    <Controller
+                      control={control}
+                      name="study"
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select X-Ray study" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {XRayStudyOptions.map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                  ) : (
+                    <Controller
+                      control={control}
+                      name="study"
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select pathology test" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {PathologyStudyOptions.map((option) => (
+                              <SelectItem key={option} value={option}>
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
                   )}
-                />
-                {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
+                </div>
+              )}
+
+              {/* Address */}
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="edit-address">Address</Label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
+                  <Textarea
+                    id="edit-address"
+                    {...register("address")}
+                    placeholder="Enter address"
+                    className="pl-10 min-h-[80px]"
+                  />
+                </div>
               </div>
 
-              {/* Amount */}
+              {/* Date */}
               <div className="space-y-2">
-                <Label htmlFor="edit-amount">
-                  Amount (₹) <span className="text-red-500">*</span>
+                <Label htmlFor="edit-date">
+                  Appointment Date <span className="text-red-500">*</span>
                 </Label>
-                <Input
-                  id="edit-amount"
-                  type="number"
-                  {...register("amount", {
-                    required: "Amount is required",
-                    min: { value: 0, message: "Amount must be ≥ 0" },
-                  })}
-                  placeholder="Enter amount"
-                />
-                {errors.amount && <p className="text-sm text-red-500">{errors.amount.message}</p>}
+                <div className="relative">
+                  <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Controller
+                    control={control}
+                    name="date"
+                    rules={{ required: "Date is required" }}
+                    render={({ field }) => (
+                      <DatePicker
+                        selected={field.value}
+                        onChange={(d: Date | null) => d && field.onChange(d)}
+                        dateFormat="dd/MM/yyyy"
+                        placeholderText="Select date"
+                        className="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500 border-gray-300 dark:border-gray-600 dark:bg-gray-800"
+                      />
+                    )}
+                  />
+                </div>
+                {errors.date && <p className="text-sm text-red-500">{errors.date.message}</p>}
               </div>
+
+              {/* Time */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-time">
+                  Appointment Time <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                  <Input
+                    id="edit-time"
+                    {...register("time", { required: "Time is required" })}
+                    placeholder="e.g. 10:30 AM"
+                    className="pl-10"
+                  />
+                </div>
+                {errors.time && <p className="text-sm text-red-500">{errors.time.message}</p>}
+              </div>
+
+              {/* Payment Method */}
+              {watchedAppointmentType === "visithospital" && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-paymentMethod">
+                    Payment Method <span className="text-red-500">*</span>
+                  </Label>
+                  <Controller
+                    control={control}
+                    name="paymentMethod"
+                    rules={{ required: "Payment method is required" }}
+                    render={({ field }) => (
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select payment" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PaymentOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                  {errors.paymentMethod && <p className="text-sm text-red-500">{errors.paymentMethod.message}</p>}
+                </div>
+              )}
+
+              {/* Payment Amounts */}
+              {watchedAppointmentType === "visithospital" &&
+                (watchedPaymentMethod === "mixed" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-cashAmount">
+                        Cash Amount (₹) <span className="text-red-500">*</span>
+                      </Label>
+                      <div className="relative">
+                        <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                        <Input
+                          id="edit-cashAmount"
+                          type="number"
+                          {...register("cashAmount", {
+                            required: "Cash amount is required",
+                            min: { value: 0, message: "Amount must be ≥ 0" },
+                            valueAsNumber: true,
+                          })}
+                          placeholder="Enter cash amount"
+                          className="pl-10"
+                        />
+                      </div>
+                      {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-onlineAmount">
+                        Online Amount (₹) <span className="text-red-500">*</span>
+                      </Label>
+                      <div className="relative">
+                        <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                        <Input
+                          id="edit-onlineAmount"
+                          type="number"
+                          {...register("onlineAmount", {
+                            required: "Online amount is required",
+                            min: { value: 0, message: "Amount must be ≥ 0" },
+                            valueAsNumber: true,
+                          })}
+                          placeholder="Enter online amount"
+                          className="pl-10"
+                        />
+                      </div>
+                      {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
+                    </div>
+                  </>
+                ) : watchedPaymentMethod === "online" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-onlineAmount">
+                      Online Amount (₹) <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="relative">
+                      <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                      <Input
+                        id="edit-onlineAmount"
+                        type="number"
+                        {...register("onlineAmount", {
+                          required: "Online amount is required",
+                          min: { value: 0, message: "Amount must be ≥ 0" },
+                          valueAsNumber: true,
+                        })}
+                        placeholder="Enter online amount"
+                        className="pl-10"
+                      />
+                    </div>
+                    {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-cashAmount">
+                      Amount (₹) <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="relative">
+                      <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                      <Input
+                        id="edit-cashAmount"
+                        type="number"
+                        {...register("cashAmount", {
+                          required: "Amount is required",
+                          min: { value: 0, message: "Amount must be ≥ 0" },
+                          valueAsNumber: true,
+                        })}
+                        placeholder="Enter amount"
+                        className="pl-10"
+                      />
+                    </div>
+                    {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
+                  </div>
+                ))}
 
               {/* Discount */}
-              <div className="space-y-2">
-                <Label htmlFor="edit-discount">Discount (₹)</Label>
-                <Input
-                  id="edit-discount"
-                  type="number"
-                  {...register("discount", {
-                    min: { value: 0, message: "Discount must be ≥ 0" },
-                    validate: (val) => {
-                      const amt = watch("amount")
-                      return val <= amt || "Discount cannot exceed amount"
-                    },
-                  })}
-                  placeholder="Enter discount"
-                />
-                {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
-                {watch("discount") > 0 && (
-                  <p className="text-sm text-emerald-600">Final: ₹{watch("amount") - watch("discount")}</p>
-                )}
-              </div>
+              {watchedAppointmentType === "visithospital" && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-discount">Discount (₹)</Label>
+                  <div className="relative">
+                    <IndianRupeeIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <Input
+                      id="edit-discount"
+                      type="number"
+                      {...register("discount", {
+                        min: { value: 0, message: "Discount must be ≥ 0" },
+                        valueAsNumber: true,
+                        validate: (val) => {
+                          const cashAmt = Number(watch("cashAmount")) || 0
+                          const onlineAmt = Number(watch("onlineAmount")) || 0
+                          const total = cashAmt + onlineAmt
+                          return Number(val) <= total || "Discount cannot exceed total amount"
+                        },
+                      })}
+                      placeholder="Enter discount"
+                      className="pl-10"
+                    />
+                  </div>
+                  {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
+                 
+                  {getCurrentDoctorCharges() > 0 && (
+                    <div className="text-xs space-y-1">
+                      <p className="text-gray-600">Doctor Charges: ₹{getCurrentDoctorCharges()}</p>
+                      {watchedPaymentMethod === "mixed" && (
+                        <p className="text-gray-600">
+                          Total Paid: ₹{(Number(watchedCashAmount) || 0) + (Number(watchedOnlineAmount) || 0)}
+                        </p>
+                      )}
+                      {watchedPaymentMethod === "cash" && (
+                        <p className="text-gray-600">Cash Paid: ₹{Number(watchedCashAmount) || 0}</p>
+                      )}
+                      {watchedPaymentMethod === "online" && (
+                        <p className="text-gray-600">Online Paid: ₹{Number(watchedOnlineAmount) || 0}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Referred By */}
               <div className="space-y-2">
@@ -1048,12 +1650,15 @@ export default function ManageOPDPage() {
               {/* Message */}
               <div className="space-y-2 col-span-2">
                 <Label htmlFor="edit-message">Additional Notes</Label>
-                <Textarea
-                  id="edit-message"
-                  {...register("message")}
-                  placeholder="Enter notes"
-                  className="min-h-[100px]"
-                />
+                <div className="relative">
+                  <MessageSquare className="absolute left-3 top-3 h-4 w-4 text-gray-500" />
+                  <Textarea
+                    id="edit-message"
+                    {...register("message")}
+                    placeholder="Enter notes"
+                    className="pl-10 min-h-[100px]"
+                  />
+                </div>
               </div>
             </div>
 

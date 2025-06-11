@@ -21,22 +21,24 @@ interface IIPDCharges {
   [key: string]: number
 }
 
-// Form input interface
+// MODIFICATION: Form input interface now includes an array for specialists
 interface IDoctorFormInput {
   name: string
-  specialist: string
+  specialist: string[] // Changed to an array of strings
   department: "OPD" | "IPD" | "Both"
-  opdCharge?: number
+  firstVisitCharge?: number
+  followUpCharge?: number
   ipdCharges?: IIPDCharges
 }
 
-// Doctor interface for Firebase
+// MODIFICATION: Doctor interface for Firebase now includes an array for specialists
 interface IDoctor {
   id: string
   name: string
-  specialist: string
+  specialist: string[] // Changed to an array of strings
   department: "OPD" | "IPD" | "Both"
-  opdCharge?: number
+  firstVisitCharge?: number
+  followUpCharge?: number
   ipdCharges?: IIPDCharges
 }
 
@@ -64,11 +66,9 @@ const AdminDoctorsPage: React.FC = () => {
   // ---------------------------------------------------------------------------
   const dynamicIPDChargesSchema = useMemo(() => {
     return yup.lazy(() => {
-      // If no room types, just return an empty object
       if (!roomTypes.length) {
         return yup.object({})
       }
-      // Build a shape requiring each room
       const shape: Record<string, yup.NumberSchema> = {}
       roomTypes.forEach((room) => {
         shape[room] = yup
@@ -77,7 +77,6 @@ const AdminDoctorsPage: React.FC = () => {
           .positive("Must be positive")
           .required(`${room} charge is required`)
       })
-      // Return an object with the shape
       return yup.object().shape(shape)
     })
   }, [roomTypes])
@@ -88,29 +87,38 @@ const AdminDoctorsPage: React.FC = () => {
   const schema = useMemo(() => {
     return yup.object({
       name: yup.string().required("Doctor name is required"),
-      specialist: yup.string().required("Specialist is required"),
+      // MODIFICATION: Yup schema now validates an array of specialists
+      specialist: yup
+        .array()
+        .of(yup.string().required())
+        .min(1, "At least one specialist is required")
+        .required("Specialist is required"),
       department: yup
         .mixed<"OPD" | "IPD" | "Both">()
         .oneOf(["OPD", "IPD", "Both"], "Select a valid department")
         .required("Department is required"),
-
-      // For OPD or Both -> require an OPD charge
-      opdCharge: yup.number().when("department", ([dept], schema) => {
+      firstVisitCharge: yup.number().when("department", ([dept], schema) => {
         if (dept === "OPD" || dept === "Both") {
           return schema
-            .typeError("OPD amount must be a number")
-            .positive("OPD amount must be positive")
-            .required("OPD amount is required")
+            .typeError("First visit amount must be a number")
+            .positive("First visit amount must be positive")
+            .required("First visit amount is required")
         }
         return schema.notRequired()
       }),
-
-      // For IPD or Both -> apply the lazy IPD schema
+      followUpCharge: yup.number().when("department", ([dept], schema) => {
+        if (dept === "OPD" || dept === "Both") {
+          return schema
+            .typeError("Follow-up amount must be a number")
+            .positive("Follow-up amount must be positive")
+            .required("Follow-up amount is required")
+        }
+        return schema.notRequired()
+      }),
       ipdCharges: yup.mixed().when("department", ([dept], schema) => {
         if (dept === "IPD" || dept === "Both") {
           return dynamicIPDChargesSchema
         }
-        // Otherwise, not required
         return schema.notRequired()
       }),
     })
@@ -127,11 +135,13 @@ const AdminDoctorsPage: React.FC = () => {
     watch,
   } = useForm<IDoctorFormInput>({
     resolver: yupResolver(schema),
+    // MODIFICATION: Default values updated for specialist array
     defaultValues: {
       name: "",
-      specialist: "",
+      specialist: [],
       department: "OPD",
-      opdCharge: undefined,
+      firstVisitCharge: undefined,
+      followUpCharge: undefined,
       ipdCharges: {},
     },
   })
@@ -148,11 +158,13 @@ const AdminDoctorsPage: React.FC = () => {
     watch: watchEdit,
   } = useForm<IDoctorFormInput>({
     resolver: yupResolver(schema),
+    // MODIFICATION: Default values updated for specialist array
     defaultValues: {
       name: "",
-      specialist: "",
+      specialist: [],
       department: "OPD",
-      opdCharge: undefined,
+      firstVisitCharge: undefined,
+      followUpCharge: undefined,
       ipdCharges: {},
     },
   })
@@ -174,12 +186,14 @@ const AdminDoctorsPage: React.FC = () => {
     const unsubscribe = onValue(doctorsRef, (snapshot) => {
       const data = snapshot.val()
       if (data) {
+        // MODIFICATION: Mapping updated to handle specialist array
         const loadedDoctors: IDoctor[] = Object.keys(data).map((key) => ({
           id: key,
           name: data[key].name,
-          specialist: data[key].specialist,
+          specialist: data[key].specialist || [], // Ensure it's an array
           department: data[key].department,
-          opdCharge: data[key].opdCharge,
+          firstVisitCharge: data[key].firstVisitCharge,
+          followUpCharge: data[key].followUpCharge,
           ipdCharges: data[key].ipdCharges,
         }))
         setDoctors(loadedDoctors)
@@ -207,7 +221,8 @@ const AdminDoctorsPage: React.FC = () => {
       }
 
       if (formData.department === "OPD" || formData.department === "Both") {
-        newDoctor.opdCharge = formData.opdCharge
+        newDoctor.firstVisitCharge = formData.firstVisitCharge
+        newDoctor.followUpCharge = formData.followUpCharge
       }
       if (formData.department === "IPD" || formData.department === "Both") {
         newDoctor.ipdCharges = formData.ipdCharges
@@ -220,12 +235,13 @@ const AdminDoctorsPage: React.FC = () => {
         autoClose: 5000,
       })
 
-      // Reset the form
+      // MODIFICATION: Reset form with specialist array
       reset({
         name: "",
-        specialist: "",
+        specialist: [],
         department: "OPD",
-        opdCharge: undefined,
+        firstVisitCharge: undefined,
+        followUpCharge: undefined,
         ipdCharges: {},
       })
     } catch (error) {
@@ -276,11 +292,13 @@ const AdminDoctorsPage: React.FC = () => {
   // Initialize form when a doc is chosen for edit
   useEffect(() => {
     if (currentDoctor) {
+      // MODIFICATION: Reset edit form with specialist array
       resetEdit({
         name: currentDoctor.name,
-        specialist: currentDoctor.specialist,
+        specialist: currentDoctor.specialist || [],
         department: currentDoctor.department,
-        opdCharge: currentDoctor.opdCharge ?? undefined,
+        firstVisitCharge: currentDoctor.firstVisitCharge ?? undefined,
+        followUpCharge: currentDoctor.followUpCharge ?? undefined,
         ipdCharges: currentDoctor.ipdCharges ?? {},
       })
     }
@@ -300,13 +318,15 @@ const AdminDoctorsPage: React.FC = () => {
       }
 
       if (formData.department === "OPD" || formData.department === "Both") {
-        updatedDoctor.opdCharge = formData.opdCharge
+        updatedDoctor.firstVisitCharge = formData.firstVisitCharge
+        updatedDoctor.followUpCharge = formData.followUpCharge
       }
       if (formData.department === "IPD" || formData.department === "Both") {
         updatedDoctor.ipdCharges = formData.ipdCharges
       }
       if (formData.department === "IPD") {
-        delete updatedDoctor.opdCharge
+        delete updatedDoctor.firstVisitCharge
+        delete updatedDoctor.followUpCharge
       }
       if (formData.department === "OPD") {
         delete updatedDoctor.ipdCharges
@@ -334,29 +354,32 @@ const AdminDoctorsPage: React.FC = () => {
   const specialists = [
     "General Medicine",
     "Chest Physician",
-    "General Surgeon",
-    "Gynaecologist",
-    "ENT",
-    "CVTS Surgeon",
-    "Psychiatrist",
-    "Orthopaedic",
-    "Gastroenterologist",
-    "Paediatrician",
-    "Cardiologist",
     "Plastic Surgeon",
-    "Dermatologist",
-    "Nephrologist",
+    "Cardiology",
+    "Psychiatry",
     "Neuro-Physician",
-    "Neuro-Surgeon",
-    "Urologist",
-    "Onco-Surgeon",
-    "Maxo Facial Surgeon",
+    "Orthopedics",
+    "General Surgery",
+    "Dermatology",
+    "Nephrology",
+    "Pediatrics",
+    "Gastroenterology",
+    "Ophthalmology",
+    "ENT",
+    "Urology",
+    "Onco - Physician",
+    "Pediatric Surgery",
     "Physiotherapy",
+    "Maxo-Facial Surgeon",
+    "Anesthesiology",
+    "Neuro - Surgery",
+    "Onco - Surgeon",
+    "Gynecology"
+    
   ]
 
   // Function to prevent scroll wheel from changing number input values
   const preventWheelChange = (e: React.WheelEvent<HTMLInputElement>) => {
-    // Prevent the default wheel behavior when the input is focused
     e.preventDefault();
     (e.target as HTMLInputElement).blur();
   }
@@ -393,15 +416,16 @@ const AdminDoctorsPage: React.FC = () => {
               {errors.name && <p className="text-red-500 text-sm mt-1">{errors.name.message}</p>}
             </div>
 
-            {/* Specialist */}
+            {/* MODIFICATION: Specialist Multi-select */}
             <div className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Specialist (select one or more)</label>
               <select
+                multiple
                 {...register("specialist")}
-                className={`w-full pl-3 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
+                className={`w-full h-32 pl-3 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
                   errors.specialist ? "border-red-500" : "border-gray-300"
                 } transition duration-200 appearance-none bg-white`}
               >
-                <option value="">Select Specialist</option>
                 {specialists.map((spec) => (
                   <option key={spec} value={spec}>
                     {spec}
@@ -426,29 +450,44 @@ const AdminDoctorsPage: React.FC = () => {
               {errors.department && <p className="text-red-500 text-sm mt-1">{errors.department.message}</p>}
             </div>
 
-            {/* OPD Charge */}
+            {/* MODIFICATION: Two separate inputs for OPD charges */}
             {(departmentValue === "OPD" || departmentValue === "Both") && (
-              <div className="relative">
-                <input
-                  type="number"
-                  step="0.01"
-                  {...register("opdCharge")}
-                  placeholder="OPD Charge (in Rs.)"
-                  onWheel={preventWheelChange}
-                  className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
-                    errors.opdCharge ? "border-red-500" : "border-gray-300"
-                  } transition duration-200`}
-                />
-                {errors.opdCharge && <p className="text-red-500 text-sm mt-1">{errors.opdCharge.message}</p>}
-              </div>
+              <>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    {...register("firstVisitCharge")}
+                    placeholder="First Visit Charge (in Rs.)"
+                    onWheel={preventWheelChange}
+                    className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
+                      errors.firstVisitCharge ? "border-red-500" : "border-gray-300"
+                    } transition duration-200`}
+                  />
+                  {errors.firstVisitCharge && <p className="text-red-500 text-sm mt-1">{errors.firstVisitCharge.message}</p>}
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    {...register("followUpCharge")}
+                    placeholder="Follow Up Charge (in Rs.)"
+                    onWheel={preventWheelChange}
+                    className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-500 ${
+                      errors.followUpCharge ? "border-red-500" : "border-gray-300"
+                    } transition duration-200`}
+                  />
+                  {errors.followUpCharge && <p className="text-red-500 text-sm mt-1">{errors.followUpCharge.message}</p>}
+                </div>
+              </>
             )}
+
 
             {/* IPD Charges */}
             {(departmentValue === "IPD" || departmentValue === "Both") && roomTypes.length > 0 && (
               <div className="border p-4 rounded-lg space-y-4">
                 <p className="font-semibold text-gray-800">Enter IPD Ward Charges:</p>
                 {roomTypes.map((room) => {
-                  // If there's an error for a particular room
                   const roomError = errors.ipdCharges && (errors.ipdCharges as any)[room]
                   return (
                     <div key={room}>
@@ -496,9 +535,11 @@ const AdminDoctorsPage: React.FC = () => {
                   >
                     <div className="flex-1">
                       <p className="text-lg font-medium">{doctor.name}</p>
-                      <p className="text-gray-600">Specialist: {doctor.specialist}</p>
+                      {/* MODIFICATION: Display multiple specialists */}
+                      <p className="text-gray-600">Specialist: {doctor.specialist.join(", ")}</p>
                       <p className="text-gray-600">Department: {doctor.department}</p>
-                      {doctor.opdCharge != null && <p className="text-gray-600">OPD Charge: Rs {doctor.opdCharge}</p>}
+                      {doctor.firstVisitCharge != null && <p className="text-gray-600">First Visit Charge: Rs {doctor.firstVisitCharge}</p>}
+                      {doctor.followUpCharge != null && <p className="text-gray-600">Follow Up Charge: Rs {doctor.followUpCharge}</p>}
                       {doctor.ipdCharges && (
                         <div className="mt-2">
                           <p className="font-semibold">IPD Charges:</p>
@@ -539,9 +580,6 @@ const AdminDoctorsPage: React.FC = () => {
         {/* Edit Modal */}
         {isEditModalOpen && currentDoctor && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            {/* MODIFICATION HERE: 
-              Added `max-h-[90vh]` to constrain the height and `overflow-y-auto` to enable scrolling when content overflows.
-            */}
             <div className="bg-white rounded-3xl shadow-xl p-10 w-full max-w-lg relative max-h-[90vh] overflow-y-auto">
               <h2 className="text-2xl font-bold text-center text-blue-600 mb-6">Edit Doctor</h2>
               <form onSubmit={handleSubmitEdit(onEditSubmit)} className="space-y-6">
@@ -558,15 +596,16 @@ const AdminDoctorsPage: React.FC = () => {
                   {errorsEdit.name && <p className="text-red-500 text-sm mt-1">{errorsEdit.name.message}</p>}
                 </div>
 
-                {/* Specialist */}
+                {/* MODIFICATION: Specialist Multi-select in Edit Modal */}
                 <div className="relative">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Specialist (select one or more)</label>
                   <select
+                    multiple
                     {...registerEdit("specialist")}
-                    className={`w-full pl-3 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    className={`w-full h-32 pl-3 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       errorsEdit.specialist ? "border-red-500" : "border-gray-300"
                     } transition duration-200 appearance-none bg-white`}
                   >
-                    <option value="">Select Specialist</option>
                     {specialists.map((spec) => (
                       <option key={spec} value={spec}>
                         {spec}
@@ -595,24 +634,42 @@ const AdminDoctorsPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* OPD Charge */}
+                {/* MODIFICATION: Two separate inputs for OPD charges in the edit modal */}
                 {(departmentValueEdit === "OPD" || departmentValueEdit === "Both") && (
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step="0.01"
-                      {...registerEdit("opdCharge")}
-                      placeholder="OPD Charge (in Rs.)"
-                      onWheel={preventWheelChange}
-                      className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        errorsEdit.opdCharge ? "border-red-500" : "border-gray-300"
-                      } transition duration-200`}
-                    />
-                    {errorsEdit.opdCharge && (
-                      <p className="text-red-500 text-sm mt-1">{errorsEdit.opdCharge.message}</p>
-                    )}
-                  </div>
+                  <>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.01"
+                        {...registerEdit("firstVisitCharge")}
+                        placeholder="First Visit Charge (in Rs.)"
+                        onWheel={preventWheelChange}
+                        className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errorsEdit.firstVisitCharge ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                      {errorsEdit.firstVisitCharge && (
+                        <p className="text-red-500 text-sm mt-1">{errorsEdit.firstVisitCharge.message}</p>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        step="0.01"
+                        {...registerEdit("followUpCharge")}
+                        placeholder="Follow Up Charge (in Rs.)"
+                        onWheel={preventWheelChange}
+                        className={`w-full pl-4 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                          errorsEdit.followUpCharge ? "border-red-500" : "border-gray-300"
+                        } transition duration-200`}
+                      />
+                      {errorsEdit.followUpCharge && (
+                        <p className="text-red-500 text-sm mt-1">{errorsEdit.followUpCharge.message}</p>
+                      )}
+                    </div>
+                  </>
                 )}
+
 
                 {/* IPD Charges */}
                 {(departmentValueEdit === "IPD" || departmentValueEdit === "Both") && roomTypes.length > 0 && (
