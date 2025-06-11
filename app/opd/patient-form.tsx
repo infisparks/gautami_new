@@ -77,7 +77,7 @@ export function PatientForm({
   const {
     register,
     control,
-    formState: { errors },
+    formState: { errors, isSubmitted }, // Destructure isSubmitted
     watch,
     setValue,
   } = form
@@ -136,29 +136,35 @@ export function PatientForm({
 
   // Reset dependent fields when modality changes
   useEffect(() => {
-    if (watchedModality !== "consultation") {
-      setValue("specialist", "")
-      setValue("doctor", "")
-      setValue("visitType", undefined)
+    if (!isSubmitted) { // Only run if the form has not been submitted
+        if (watchedModality !== "consultation") {
+            setValue("specialist", "")
+            setValue("doctor", "")
+            setValue("visitType", undefined)
+        }
     }
-  }, [watchedModality, setValue])
+  }, [watchedModality, setValue, isSubmitted])
 
   // Reset doctor and visit type when specialist changes
   useEffect(() => {
-    if (watchedModality === "consultation") {
-      setValue("doctor", "")
-      setValue("visitType", undefined)
+    if (!isSubmitted) { // Only run if the form has not been submitted
+        if (watchedModality === "consultation") {
+            setValue("doctor", "")
+            setValue("visitType", undefined)
+        }
     }
-  }, [watchedSpecialist, watchedModality, setValue])
+  }, [watchedSpecialist, watchedModality, setValue, isSubmitted])
 
   // Reset visit type when doctor changes and set default to "first"
   useEffect(() => {
-    if (watchedModality === "consultation" && watchedDoctor) {
-      setValue("visitType", "first")
-    } else if (watchedModality === "consultation") {
-      setValue("visitType", undefined)
+    if (!isSubmitted) { // Only run if the form has not been submitted
+        if (watchedModality === "consultation" && watchedDoctor) {
+            setValue("visitType", "first")
+        } else if (watchedModality === "consultation") {
+            setValue("visitType", undefined)
+        }
     }
-  }, [watchedDoctor, watchedModality, setValue])
+  }, [watchedDoctor, watchedModality, setValue, isSubmitted])
 
   // Set default payment method to cash when appointment type is visithospital
   useEffect(() => {
