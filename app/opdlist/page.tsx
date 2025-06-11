@@ -908,7 +908,7 @@ export default function ManageOPDPage() {
                     <CardHeader className="pb-2">
                       <CardTitle className="text-lg flex items-center gap-2">
                         <FileText className="h-4 w-4" />
-                        Today's Appointments
+                        Todays Appointments
                       </CardTitle>
                       <CardDescription>Appointments scheduled for today</CardDescription>
                     </CardHeader>
