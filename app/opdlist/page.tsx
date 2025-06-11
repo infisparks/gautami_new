@@ -12,7 +12,6 @@ import {
   Search,
   ArrowLeft,
   Calendar,
-  UserIcon,
   Stethoscope,
   History,
   ChevronDown,
@@ -61,7 +60,6 @@ interface OPD_Summary {
   id: string
   date: string
   time: string
-  serviceName: string
   doctor: string
   appointmentType: "visithospital" | "oncall"
   opdType: string
@@ -70,20 +68,24 @@ interface OPD_Summary {
   age: number
   gender: "male" | "female" | "other"
   address?: string
-  amount: number
-  cashAmount: number
-  onlineAmount: number
-  originalAmount: number
-  discount: number
-  paymentMethod: "cash" | "online" | "mixed" | "card" | "upi"
   modality: "consultation" | "casualty" | "xray" | "pathology"
   visitType?: "first" | "followup"
   study?: string
-  specialist?: string
   referredBy?: string
   message?: string
   createdAt: string
   enteredBy?: string
+  // Payment information from nested payment object
+  payment?: {
+    cashAmount: number
+    onlineAmount: number
+    paymentMethod: "cash" | "online" | "mixed" | "card" | "upi"
+    discount: number
+    totalAmount: number
+    finalAmount: number
+    doctorCharges: number
+    createdAt: string
+  }
 }
 
 interface OPD_Full extends OPD_Summary {
@@ -235,6 +237,7 @@ export default function ManageOPDPage() {
   const watchedAppointmentType = watch("appointmentType")
   const watchedCashAmount = watch("cashAmount")
   const watchedOnlineAmount = watch("onlineAmount")
+  const watchedDiscount = watch("discount")
 
   // Auth listener
   useEffect(() => {
@@ -358,7 +361,8 @@ export default function ManageOPDPage() {
         console.error("Error fetching doctor:", error)
       }
 
-      setMissingDoctors((prev) => new Set([...prev, doctorId]))
+      // FIX APPLIED HERE
+      setMissingDoctors((prev) => new Set([...Array.from(prev), doctorId]))
       return {
         id: doctorId,
         name: `Missing Doctor (${doctorId.slice(-8)})`,
@@ -458,7 +462,7 @@ export default function ManageOPDPage() {
                 return
               }
 
-              if (filters.paymentMethod !== "all" && appointment.paymentMethod !== filters.paymentMethod) {
+              if (filters.paymentMethod !== "all" && appointment.payment?.paymentMethod !== filters.paymentMethod) {
                 return
               }
 
@@ -467,7 +471,6 @@ export default function ManageOPDPage() {
                 id: appointmentId,
                 date: appointment.date,
                 time: appointment.time,
-                serviceName: appointment.serviceName || "N/A",
                 doctor: appointment.doctor,
                 appointmentType: appointment.appointmentType,
                 opdType: appointment.opdType,
@@ -476,12 +479,6 @@ export default function ManageOPDPage() {
                 age: appointment.age || 0,
                 gender: appointment.gender || "other",
                 address: appointment.address || "",
-                amount: appointment.amount || 0,
-                cashAmount: appointment.cashAmount || 0,
-                onlineAmount: appointment.onlineAmount || 0,
-                originalAmount: appointment.originalAmount || appointment.amount || 0,
-                discount: appointment.discount || 0,
-                paymentMethod: appointment.paymentMethod || "cash",
                 modality: appointment.modality || "consultation",
                 visitType: appointment.visitType || "",
                 study: appointment.study || "",
@@ -489,6 +486,7 @@ export default function ManageOPDPage() {
                 message: appointment.message || "",
                 createdAt: appointment.createdAt,
                 enteredBy: appointment.enteredBy || "",
+                payment: appointment.payment || null,
               })
             })
           }
@@ -533,13 +531,12 @@ export default function ManageOPDPage() {
 
       if (isNameSearch) {
         const matchesName = appointment.name.toLowerCase().includes(searchTerm)
-        const matchesService = appointment.serviceName.toLowerCase().includes(searchTerm)
         const matchesUhid = appointment.uhid.toLowerCase().includes(searchTerm)
         const doctorName = getDoctorName(appointment.doctor).toLowerCase()
         const matchesDoctor = doctorName.includes(searchTerm)
         const matchesStudy = appointment.study?.toLowerCase().includes(searchTerm) || false
 
-        return matchesName || matchesService || matchesUhid || matchesDoctor || matchesStudy
+        return matchesName || matchesUhid || matchesDoctor || matchesStudy
       }
 
       return false
@@ -602,10 +599,20 @@ export default function ManageOPDPage() {
 
   // Enhanced payment display formatting
   const formatPaymentDisplay = (appointment: OPD_Summary) => {
-    if (appointment.paymentMethod === "mixed") {
-      return `Cash: ₹${appointment.cashAmount} + Online: ₹${appointment.onlineAmount}`
+    if (!appointment.payment) {
+      return "No payment info"
     }
-    return `₹${appointment.amount}`
+
+    const { cashAmount, onlineAmount, paymentMethod, discount } = appointment.payment
+
+    if (paymentMethod === "mixed") {
+      const totalPaid = cashAmount + onlineAmount
+      return `Cash: ₹${cashAmount} + Online: ₹${onlineAmount} = ₹${totalPaid}${discount > 0 ? ` (Discount: ₹${discount})` : ""}`
+    } else if (paymentMethod === "online") {
+      return `₹${onlineAmount} (Online)${discount > 0 ? ` (Discount: ₹${discount})` : ""}`
+    } else {
+      return `₹${cashAmount} (${paymentMethod.toUpperCase()})${discount > 0 ? ` (Discount: ₹${discount})` : ""}`
+    }
   }
 
   // Get all available doctors for dropdown
@@ -683,10 +690,10 @@ export default function ManageOPDPage() {
         date: new Date(opdData.date),
         time: opdData.time,
         appointmentType: opdData.appointmentType || "visithospital",
-        paymentMethod: opdData.paymentMethod,
-        cashAmount: opdData.cashAmount || 0,
-        onlineAmount: opdData.onlineAmount || 0,
-        discount: opdData.discount || 0,
+        paymentMethod: opdData.payment?.paymentMethod || "cash",
+        cashAmount: opdData.payment?.cashAmount || 0,
+        onlineAmount: opdData.payment?.onlineAmount || 0,
+        discount: opdData.payment?.discount || 0,
         doctor: doctorId, // This will now properly match the doctor ID
         message: opdData.message || "",
         referredBy: opdData.referredBy || "",
@@ -711,12 +718,13 @@ export default function ManageOPDPage() {
     const paymentMethod = watch("paymentMethod")
     const cashAmount = Number(watch("cashAmount")) || 0
     const onlineAmount = Number(watch("onlineAmount")) || 0
-    const discount = Number(watch("discount")) || 0
 
     if (paymentMethod === "mixed") {
-      return cashAmount + onlineAmount - discount
+      return cashAmount + onlineAmount
+    } else if (paymentMethod === "online") {
+      return onlineAmount
     } else {
-      return cashAmount - discount
+      return cashAmount
     }
   }
 
@@ -726,11 +734,12 @@ export default function ManageOPDPage() {
     setLoading(true)
 
     try {
-      const finalAmount = calculateFinalAmount()
-      const originalAmount =
-        formData.paymentMethod === "mixed"
-          ? Number(formData.cashAmount) + Number(formData.onlineAmount)
-          : Number(formData.cashAmount)
+      const cashAmount = Number(formData.cashAmount) || 0
+      const onlineAmount = formData.paymentMethod === "mixed" ? Number(formData.onlineAmount) || 0 : 0
+      const discount = Number(formData.discount) || 0
+      const totalAmount = cashAmount + onlineAmount
+      const finalAmount = totalAmount - discount
+      const doctorCharges = getCurrentDoctorCharges()
 
       const selectedDoctor = doctors.find((d) => d.id === formData.doctor)
       const doctorName = selectedDoctor ? selectedDoctor.name : "No Doctor"
@@ -744,12 +753,6 @@ export default function ManageOPDPage() {
         date: formData.date.toISOString(),
         time: formData.time,
         appointmentType: formData.appointmentType,
-        paymentMethod: formData.paymentMethod,
-        cashAmount: Number(formData.cashAmount),
-        onlineAmount: formData.paymentMethod === "mixed" ? Number(formData.onlineAmount) : 0,
-        originalAmount: originalAmount,
-        discount: Number(formData.discount),
-        amount: finalAmount,
         doctor: formData.doctor,
         doctorName: doctorName,
         message: formData.message,
@@ -761,7 +764,24 @@ export default function ManageOPDPage() {
         lastModifiedAt: new Date().toISOString(),
       }
 
+      // Update the main appointment record
       await update(ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}`), updatedData)
+
+      // Update payment information separately if it's a hospital visit
+      if (formData.appointmentType === "visithospital") {
+        const paymentData = {
+          cashAmount: cashAmount,
+          onlineAmount: onlineAmount,
+          paymentMethod: formData.paymentMethod,
+          discount: discount,
+          totalAmount: totalAmount,
+          finalAmount: finalAmount,
+          doctorCharges: doctorCharges,
+          createdAt: new Date().toISOString(),
+        }
+
+        await update(ref(db, `patients/opddetail/${uhidEditing}/${opdIdEditing}/payment`), paymentData)
+      }
 
       const patientUpdateData = {
         name: formData.name,
@@ -842,6 +862,21 @@ export default function ManageOPDPage() {
     return { total, showing }
   }, [filteredAppointments.length, displayedAppointments.length])
 
+  // Auto-adjust discount based on doctor charges and payment amounts
+  useEffect(() => {
+    const doctorCharges = getCurrentDoctorCharges()
+    if (doctorCharges > 0 && watchedAppointmentType === "visithospital") {
+      const cashAmount = Number(watchedCashAmount) || 0
+      const onlineAmount = Number(watchedOnlineAmount) || 0
+      const totalPaid = cashAmount + onlineAmount
+
+      if (totalPaid > 0 && totalPaid <= doctorCharges) {
+        const calculatedDiscount = doctorCharges - totalPaid
+        setValue("discount", calculatedDiscount)
+      }
+    }
+  }, [watchedCashAmount, watchedOnlineAmount, watchedAppointmentType, getCurrentDoctorCharges, setValue])
+
   if (initialLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-100 dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
@@ -865,7 +900,7 @@ export default function ManageOPDPage() {
                 <div>
                   <CardTitle className="text-2xl md:text-3xl font-bold">Manage OPD Appointments</CardTitle>
                   <CardDescription className="text-emerald-100">
-                    Enhanced with specialist tracking, mixed payments & comprehensive filtering
+                    Enhanced with payment tracking, doctor charges & comprehensive filtering
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -1059,19 +1094,25 @@ export default function ManageOPDPage() {
                                 <Cake className="h-4 w-4" />
                                 {appointment.age} years
                               </span>
-                              <span className="flex items-center gap-1">
-                                <IndianRupeeIcon className="h-4 w-4" />
-                                {formatPaymentDisplay(appointment)}
-                                {appointment.discount > 0 && (
-                                  <span className="text-green-600 text-xs ml-1">(-₹{appointment.discount})</span>
-                                )}
-                              </span>
-                              <Badge
-                                variant={appointment.paymentMethod === "mixed" ? "default" : "outline"}
-                                className="text-xs"
-                              >
-                                {appointment.paymentMethod}
-                              </Badge>
+                              {appointment.payment && (
+                                <span className="flex items-center gap-1">
+                                  <IndianRupeeIcon className="h-4 w-4" />
+                                  {formatPaymentDisplay(appointment)}
+                                </span>
+                              )}
+                              {appointment.payment && (
+                                <Badge
+                                  variant={appointment.payment.paymentMethod === "mixed" ? "default" : "outline"}
+                                  className="text-xs"
+                                >
+                                  {appointment.payment.paymentMethod}
+                                </Badge>
+                              )}
+                              {appointment.payment && appointment.payment.doctorCharges > 0 && (
+                                <span className="text-xs text-blue-600">
+                                  Doctor: ₹{appointment.payment.doctorCharges}
+                                </span>
+                              )}
                             </div>
 
                             <CardDescription className="flex items-center gap-4 flex-wrap">
@@ -1081,10 +1122,6 @@ export default function ManageOPDPage() {
                               </span>
                               <span className="flex items-center gap-1">
                                 <Stethoscope className="h-4 w-4" />
-                                {appointment.serviceName}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <UserIcon className="h-4 w-4" />
                                 {getDoctorName(appointment.doctor)}
                               </span>
                               {appointment.study && (
@@ -1610,10 +1647,19 @@ export default function ManageOPDPage() {
                         min: { value: 0, message: "Discount must be ≥ 0" },
                         valueAsNumber: true,
                         validate: (val) => {
+                          const doctorCharges = getCurrentDoctorCharges()
                           const cashAmt = Number(watch("cashAmount")) || 0
                           const onlineAmt = Number(watch("onlineAmount")) || 0
-                          const total = cashAmt + onlineAmt
-                          return Number(val) <= total || "Discount cannot exceed total amount"
+                          const totalPaid = cashAmt + onlineAmt
+
+                          // Allow discount to be auto-calculated
+                          if (doctorCharges > 0) {
+                            return (
+                              totalPaid + Number(val) <= doctorCharges ||
+                              "Total payment + discount cannot exceed doctor charges"
+                            )
+                          }
+                          return true
                         },
                       })}
                       placeholder="Enter discount"
@@ -1621,7 +1667,7 @@ export default function ManageOPDPage() {
                     />
                   </div>
                   {errors.discount && <p className="text-sm text-red-500">{errors.discount.message}</p>}
-                 
+
                   {getCurrentDoctorCharges() > 0 && (
                     <div className="text-xs space-y-1">
                       <p className="text-gray-600">Doctor Charges: ₹{getCurrentDoctorCharges()}</p>
@@ -1635,6 +1681,13 @@ export default function ManageOPDPage() {
                       )}
                       {watchedPaymentMethod === "online" && (
                         <p className="text-gray-600">Online Paid: ₹{Number(watchedOnlineAmount) || 0}</p>
+                      )}
+                      <p className="text-green-600">Amount Paid: ₹{calculateFinalAmount()}</p>
+                      {watchedDiscount > 0 && (
+                        <p className="text-blue-600">
+                          Balance: ₹{getCurrentDoctorCharges() - calculateFinalAmount()} (Auto-discount: ₹
+                          {watchedDiscount})
+                        </p>
                       )}
                     </div>
                   )}

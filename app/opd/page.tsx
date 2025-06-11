@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form"
 import { db, auth } from "@/lib/firebase"
 import { ref, push, update, get, onValue, set, remove } from "firebase/database"
 import Head from "next/head"
-import { CheckCircle, HelpCircle } from "lucide-react"
+import { CheckCircle, HelpCircle } from 'lucide-react'
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import Joyride, { type CallBackProps, STATUS } from "react-joyride"
@@ -165,6 +165,9 @@ const OPDBookingPage: React.FC = () => {
   // Watchers
   const watchedName = watch("name")
   const watchedPhone = watch("phone")
+  const watchedDoctor = watch("doctor")
+  const watchedVisitType = watch("visitType")
+  const watchedModality = watch("modality")
 
   // Fetch doctors
   useEffect(() => {
@@ -288,6 +291,19 @@ const OPDBookingPage: React.FC = () => {
     setSelectedPatient(null)
   }
 
+  // Get doctor charges based on selected doctor and visit type
+  const getDoctorCharges = () => {
+    if (watchedModality === "consultation" && watchedDoctor && watchedVisitType) {
+      const selectedDoctor = doctors.find(d => d.id === watchedDoctor)
+      if (selectedDoctor) {
+        return watchedVisitType === "first" 
+          ? selectedDoctor.firstVisitCharge || 0 
+          : selectedDoctor.followUpCharge || 0
+      }
+    }
+    return 0
+  }
+
   // Calculate total amount
   const calculateTotalAmount = () => {
     const cashAmount = Number(watch("cashAmount")) || 0
@@ -331,7 +347,9 @@ const OPDBookingPage: React.FC = () => {
     const cashAmount = data.appointmentType === "visithospital" ? Number(data.cashAmount) || 0 : 0
     const onlineAmount = data.appointmentType === "visithospital" ? Number(data.onlineAmount) || 0 : 0
     const discount = data.appointmentType === "visithospital" ? Number(data.discount) || 0 : 0
-    const finalAmount = cashAmount + onlineAmount - discount
+    const totalAmount = cashAmount + onlineAmount
+    const finalAmount = totalAmount - discount
+    const doctorCharges = getDoctorCharges()
 
     setLoading(true)
     try {
@@ -354,7 +372,7 @@ const OPDBookingPage: React.FC = () => {
           visitType: data.visitType || "",
           study: data.study || "",
           enteredBy: currentUserEmail || "unknown",
-          originalAmount: cashAmount + onlineAmount,
+          originalAmount: totalAmount,
           amount: finalAmount,
           discount: discount,
           referredBy: data.referredBy || "",
@@ -424,13 +442,6 @@ Gautami Hospital
             patientId: uhid,
             date: data.date.toISOString(),
             time: data.time,
-            paymentMethod: data.paymentMethod,
-            cashAmount: cashAmount,
-            onlineAmount: onlineAmount,
-            originalAmount: cashAmount + onlineAmount,
-            amount: finalAmount,
-            discount: discount,
-            // serviceName: data.serviceName,
             doctor: data.doctor || "",
             modality: data.modality,
             visitType: data.visitType || "",
@@ -448,9 +459,11 @@ Gautami Hospital
             const paymentData = {
               cashAmount: cashAmount,
               onlineAmount: onlineAmount,
-              discount: discount,
-              totalAmount: finalAmount,
               paymentMethod: data.paymentMethod,
+              discount: discount,
+              totalAmount: totalAmount,
+              finalAmount: finalAmount,
+              doctorCharges: doctorCharges,
               createdAt: new Date().toISOString(),
             }
 
@@ -487,13 +500,6 @@ Gautami Hospital
             patientId: newUhid,
             date: data.date.toISOString(),
             time: data.time,
-            paymentMethod: data.paymentMethod,
-            cashAmount: cashAmount,
-            onlineAmount: onlineAmount,
-            originalAmount: cashAmount + onlineAmount,
-            amount: finalAmount,
-            discount: discount,
-            // serviceName: data.serviceName,
             doctor: data.doctor || "",
             modality: data.modality,
             visitType: data.visitType || "",
@@ -511,9 +517,11 @@ Gautami Hospital
             const paymentData = {
               cashAmount: cashAmount,
               onlineAmount: onlineAmount,
-              discount: discount,
-              totalAmount: finalAmount,
               paymentMethod: data.paymentMethod,
+              discount: discount,
+              totalAmount: totalAmount,
+              finalAmount: finalAmount,
+              doctorCharges: doctorCharges,
               createdAt: new Date().toISOString(),
             }
 
@@ -522,7 +530,7 @@ Gautami Hospital
 
             // Save payment data under user id/ipdid/payment
             if (opdId) {
-              await set(ref(db, `patients/${uhid}/${opdId}/payment`), paymentData)
+              await set(ref(db, `patients/opddetail/${uhid}/${opdId}/payment`), paymentData)
             }
           }
         }
@@ -939,6 +947,13 @@ Gautami Hospital
                 <>
                   <div className="font-medium">Doctor:</div>
                   <div>{doctors.find((d) => d.id === watch("doctor"))?.name || "No Doctor"}</div>
+                </>
+              )}
+
+              {watchedModality === "consultation" && watchedDoctor && (
+                <>
+                  <div className="font-medium">Doctor Charges:</div>
+                  <div>₹ {getDoctorCharges()}</div>
                 </>
               )}
 

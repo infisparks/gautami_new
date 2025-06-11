@@ -29,7 +29,6 @@ import {
   Filter,
   IndianRupeeIcon,
   TrendingUp,
-  Calculator,
 } from "lucide-react"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
@@ -58,14 +57,18 @@ interface IOPDEntry {
   uhid: string // patientId
   name: string
   phone: string
+  age?: number
+  address?: string
+  gender?: string
   amount: number
-  originalAmount: number
   cashAmount: number
   onlineAmount: number
   discount: number
+  doctorCharges: number
   createdAt: string
   date: string // ISO string
   doctor: string // Doctor ID
+  doctorName: string
   message: string
   paymentMethod: string
   time: string
@@ -75,6 +78,9 @@ interface IOPDEntry {
   modality: string
   visitType?: string
   study?: string
+  referredBy?: string
+  lastModifiedAt?: string
+  lastModifiedBy?: string
 }
 
 interface IDoctor {
@@ -183,7 +189,7 @@ const AdminDashboardPage: React.FC = () => {
         const dateRange = getDateRange(filter)
         const allAppointments: IOPDEntry[] = []
 
-        // Get all patient UHIDs from opddetail
+        // Get all patient UHIDs from the new structure
         const opdDetailRef = ref(db, "patients/opddetail")
         const uhidsSnapshot = await get(opdDetailRef)
 
@@ -210,21 +216,27 @@ const AdminDashboardPage: React.FC = () => {
             const appointmentsData = snapshot.val()
             Object.keys(appointmentsData).forEach((appointmentId) => {
               const appointment = appointmentsData[appointmentId]
+              const payment = appointment.payment || {}
+
               allAppointments.push({
                 id: appointmentId,
                 uhid,
                 name: appointment.name || "Unknown",
                 phone: appointment.phone || "",
-                amount: Number(appointment.amount) || 0,
-                originalAmount: Number(appointment.originalAmount) || Number(appointment.amount) || 0,
-                cashAmount: Number(appointment.cashAmount) || 0,
-                onlineAmount: Number(appointment.onlineAmount) || 0,
-                discount: Number(appointment.discount) || 0,
+                age: appointment.age,
+                address: appointment.address,
+                gender: appointment.gender,
+                amount: Number(payment.totalAmount) || 0,
+                cashAmount: Number(payment.cashAmount) || 0,
+                onlineAmount: Number(payment.onlineAmount) || 0,
+                discount: Number(payment.discount) || 0,
+                doctorCharges: Number(payment.doctorCharges) || 0,
                 createdAt: appointment.createdAt,
                 date: appointment.date,
                 doctor: appointment.doctor,
+                doctorName: appointment.doctorName || "",
                 message: appointment.message || "",
-                paymentMethod: appointment.paymentMethod || "cash",
+                paymentMethod: payment.paymentMethod || "cash",
                 time: appointment.time || "",
                 appointmentType: appointment.appointmentType || "visithospital",
                 opdType: appointment.opdType || "opd",
@@ -232,6 +244,9 @@ const AdminDashboardPage: React.FC = () => {
                 modality: appointment.modality || "",
                 visitType: appointment.visitType || "",
                 study: appointment.study || "",
+                referredBy: appointment.referredBy || "",
+                lastModifiedAt: appointment.lastModifiedAt,
+                lastModifiedBy: appointment.lastModifiedBy,
               })
             })
           }
@@ -520,7 +535,7 @@ const AdminDashboardPage: React.FC = () => {
           </div>
 
           {/* Enhanced Payment Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium text-green-100">Total Cash Collected</CardTitle>
@@ -562,7 +577,7 @@ const AdminDashboardPage: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">₹{dashboardStats.totalRevenue.toLocaleString()}</div>
-                <p className="text-xs text-purple-100 mt-1">Net revenue after discounts</p>
+                <p className="text-xs text-purple-100 mt-1">Total collected amount</p>
               </CardContent>
             </Card>
 
@@ -576,27 +591,6 @@ const AdminDashboardPage: React.FC = () => {
                 <p className="text-xs text-muted-foreground">Avg: ₹{Math.round(dashboardStats.averageAmount)}</p>
               </CardContent>
             </Card>
-
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Discount</CardTitle>
-                <Calculator className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  ₹{dashboardStats.paymentBreakdown.totalDiscount.toLocaleString()}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {dashboardStats.paymentBreakdown.totalAmount > 0
-                    ? Math.round(
-                        (dashboardStats.paymentBreakdown.totalDiscount / dashboardStats.paymentBreakdown.totalAmount) *
-                          100,
-                      )
-                    : 0}
-                  % discount given
-                </p>
-              </CardContent>
-            </Card>
           </div>
 
           {/* Enhanced Payment Collection Summary */}
@@ -608,7 +602,7 @@ const AdminDashboardPage: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-emerald-100">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <Banknote className="h-6 w-6 text-green-600" />
@@ -646,23 +640,7 @@ const AdminDashboardPage: React.FC = () => {
                   <div className="text-3xl font-bold text-purple-700 mb-1">
                     ₹{dashboardStats.totalRevenue.toLocaleString()}
                   </div>
-                  <div className="text-sm text-gray-600">
-                    After ₹{dashboardStats.paymentBreakdown.totalDiscount.toLocaleString()} discount
-                  </div>
-                </div>
-
-                <div className="text-center p-4 bg-white rounded-lg shadow-sm border border-orange-100">
-                  <div className="flex items-center justify-center gap-2 mb-2">
-                    <Calculator className="h-6 w-6 text-orange-600" />
-                    <span className="font-semibold text-gray-700">Collection Rate</span>
-                  </div>
-                  <div className="text-3xl font-bold text-orange-700 mb-1">
-                    {dashboardStats.paymentBreakdown.totalAmount > 0
-                      ? Math.round((dashboardStats.totalRevenue / dashboardStats.paymentBreakdown.totalAmount) * 100)
-                      : 100}
-                    %
-                  </div>
-                  <div className="text-sm text-gray-600">Efficiency rate</div>
+                  <div className="text-sm text-gray-600">{dashboardStats.totalAppointments} appointments</div>
                 </div>
               </div>
             </CardContent>
@@ -930,7 +908,7 @@ const AdminDashboardPage: React.FC = () => {
                               <div className="text-sm text-gray-500">{appt.phone}</div>
                             </div>
                           </td>
-                          <td className="py-3 px-4">{doctorMap[appt.doctor] || "Unknown"}</td>
+                          <td className="py-3 px-4">{appt.doctorName || doctorMap[appt.doctor] || "Unknown"}</td>
                           <td className="py-3 px-4">
                             <Badge variant="outline" className="capitalize">
                               {appt.modality}
@@ -1012,6 +990,24 @@ const AdminDashboardPage: React.FC = () => {
                     <span className="font-medium text-gray-600">UHID:</span>
                     <span className="font-mono text-xs">{selectedAppointment.uhid}</span>
                   </div>
+                  {selectedAppointment.age && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Age:</span>
+                      <span>{selectedAppointment.age}</span>
+                    </div>
+                  )}
+                  {selectedAppointment.gender && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Gender:</span>
+                      <span className="capitalize">{selectedAppointment.gender}</span>
+                    </div>
+                  )}
+                  {selectedAppointment.address && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Address:</span>
+                      <span>{selectedAppointment.address}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1020,8 +1016,16 @@ const AdminDashboardPage: React.FC = () => {
                 <div className="space-y-2 text-sm bg-blue-50 p-4 rounded-lg">
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Doctor:</span>
-                    <span className="font-semibold">{doctorMap[selectedAppointment.doctor] || "Unknown"}</span>
+                    <span className="font-semibold">
+                      {selectedAppointment.doctorName || doctorMap[selectedAppointment.doctor] || "Unknown"}
+                    </span>
                   </div>
+                  {selectedAppointment.referredBy && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Referred By:</span>
+                      <span>{selectedAppointment.referredBy}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Type:</span>
                     <Badge variant="outline">{selectedAppointment.appointmentType}</Badge>
@@ -1059,6 +1063,10 @@ const AdminDashboardPage: React.FC = () => {
                     </Badge>
                   </div>
                   <div className="flex justify-between">
+                    <span className="font-medium text-gray-600">Doctor Charges:</span>
+                    <span className="font-semibold">₹{selectedAppointment.doctorCharges}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span className="font-medium text-gray-600">Cash Amount:</span>
                     <span className="font-semibold text-green-700">₹{selectedAppointment.cashAmount}</span>
                   </div>
@@ -1066,17 +1074,15 @@ const AdminDashboardPage: React.FC = () => {
                     <span className="font-medium text-gray-600">Online Amount:</span>
                     <span className="font-semibold text-blue-700">₹{selectedAppointment.onlineAmount}</span>
                   </div>
+                  {selectedAppointment.discount > 0 && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Discount:</span>
+                      <span className="text-red-600 font-semibold">₹{selectedAppointment.discount}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t pt-2">
                     <span className="font-medium text-gray-600">Total Amount:</span>
                     <span className="font-bold text-lg">₹{selectedAppointment.amount}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium text-gray-600">Original Amount:</span>
-                    <span>₹{selectedAppointment.originalAmount}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="font-medium text-gray-600">Discount:</span>
-                    <span className="text-red-600 font-semibold">₹{selectedAppointment.discount}</span>
                   </div>
                 </div>
               </div>
@@ -1100,6 +1106,18 @@ const AdminDashboardPage: React.FC = () => {
                     <div className="flex justify-between">
                       <span className="font-medium text-gray-600">Entered By:</span>
                       <span className="text-xs">{selectedAppointment.enteredBy}</span>
+                    </div>
+                  )}
+                  {selectedAppointment.lastModifiedAt && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Last Modified:</span>
+                      <span className="text-xs">{format(new Date(selectedAppointment.lastModifiedAt), "PPp")}</span>
+                    </div>
+                  )}
+                  {selectedAppointment.lastModifiedBy && (
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600">Modified By:</span>
+                      <span className="text-xs">{selectedAppointment.lastModifiedBy}</span>
                     </div>
                   )}
                 </div>
