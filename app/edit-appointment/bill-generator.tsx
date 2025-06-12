@@ -2,6 +2,7 @@
 
 import { jsPDF } from "jspdf"
 import { format } from "date-fns"
+import { toWords } from 'number-to-words'
 import { Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { IFormInput } from "../opd/types"
@@ -52,7 +53,7 @@ export function BillGenerator({
       // no letterhead
     }
 
-    // Show date/time on top-right (aligned right, margin 20)
+    // Show date/time on top-right
     let yPos = 48
     doc.setFontSize(9)
     doc.setFont("helvetica", "normal")
@@ -108,14 +109,6 @@ export function BillGenerator({
     doc.text(`${appointmentData.age ?? "-"} yrs`, rightX + 15, rightY)
     yPos = Math.max(yPos, rightY) + 5
 
-    // Services header
-    // doc.setFontSize(11)
-    // doc.setFont("helvetica", "bold")
-    // doc.setFillColor(240, 248, 255)
-    // doc.rect(20, yPos - 2, pageWidth - 40, 6, "F")
-    // doc.text("SERVICES PROVIDED", 22, yPos + 2)
-    // yPos += 10
-
     // Table header
     doc.setFontSize(8)
     doc.setFont("helvetica", "bold")
@@ -167,6 +160,7 @@ export function BillGenerator({
     const online = Number(appointmentData.onlineAmount) || 0
     const paid = cash + online
     const net = totalCharges - discount
+    const due = net - paid
     const sx = pageWidth - 70
     doc.setFontSize(9)
     doc.setFont("helvetica", "bold")
@@ -189,9 +183,10 @@ export function BillGenerator({
     doc.setFont("helvetica", "bold")
     doc.text("Net Amount:", sx - 35, yPos)
     doc.text(`Rs. ${net}`, pageWidth - 22, yPos, { align: "right" })
-    yPos += 1
+    yPos += 5
+
+    // Paid breakdown
     if (appointmentData.appointmentType === "visithospital") {
-      yPos += 5
       doc.setFont("helvetica", "normal")
       const line = (lbl: string, val: number) => {
         doc.text(lbl, sx - 35, yPos)
@@ -206,19 +201,45 @@ export function BillGenerator({
       } else {
         line("Online Paid:", online)
       }
-      // TOTAL PAID: Transparent bg (no rect, just text in green)
-      yPos += 1
       doc.setFont("helvetica", "bold")
-      doc.setTextColor(0, 128, 0)
-      doc.text("TOTAL PAID:", sx - 35, yPos + 2)
-      doc.text(`Rs. ${paid}`, pageWidth - 22, yPos + 2, { align: "right" })
-      doc.setTextColor(0, 0, 0)
+      doc.text("Total Paid:", sx - 35, yPos)
+      doc.text(`Rs. ${paid}`, pageWidth - 22, yPos, { align: "right" })
+      yPos += 5
     }
 
-    // --- No footer ---
+    // Due amount
+    if (due > 0) {
+      doc.setFont("helvetica", "bold")
+      doc.setTextColor(200, 0, 0)
+      doc.text("Due Amount:", sx - 35, yPos)
+      doc.text(`Rs. ${due}`, pageWidth - 22, yPos, { align: "right" })
+      doc.setTextColor(0, 0, 0)
+      yPos += 5
+    }
+
+    // Amounts in words
+    doc.setFontSize(9)
+    doc.setFont("helvetica", "italic")
+    const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+  
+    yPos += 5
+    doc.text(
+      `Total Paid (in words): ${capitalize(toWords(paid))} only`,
+      20,
+      yPos
+    )
+    yPos += 5
+    if (due > 0) {
+      doc.text(
+        `Due Amount (in words): ${capitalize(toWords(due))} only`,
+        20,
+        yPos
+      )
+      yPos += 5
+    }
 
     // Save
-    const fname = `Bill_${appointmentData.name.replace(/\s+/g, "_")}_${format(
+    const fname = `Bill_${appointmentData.name.replace(/\s+/g, "_")}__${format(
       appointmentData.date,
       "ddMMyyyy"
     )}.pdf`
