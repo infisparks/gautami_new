@@ -764,38 +764,41 @@ export default function ManageOPDPage() {
                                     <TableCell className="text-right font-medium">
                                       ₹{calculateTotalAmount(app)}
                                     </TableCell>
-                                    <TableCell className="text-right">
-                                      <div className="flex justify-end gap-2">
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => viewAppointmentDetails(app)}
-                                                className="h-8 w-8"
-                                              >
-                                                <Eye className="h-4 w-4" />
-                                              </Button>
-                                            </TooltipTrigger>
-                                            <TooltipContent>View details</TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
+                                   {/* Inside table cells for actions: */}
+<TableCell className="text-right">
+  <div className="flex justify-end gap-2">
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => viewAppointmentDetails(app)}
+            className="h-8 w-8"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>View details</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
 
-                                        <TooltipProvider>
-                                          <Tooltip>
-                                            <TooltipTrigger asChild>
-                                              <EditButton
-                                                uhid={app.patientId}
-                                                appointmentId={app.id}
-                                                className="h-8 w-8 p-0"
-                                              />
-                                            </TooltipTrigger>
-                                            <TooltipContent>Edit appointment</TooltipContent>
-                                          </Tooltip>
-                                        </TooltipProvider>
-                                      </div>
-                                    </TableCell>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <EditButton
+            uhid={app.patientId}
+            appointmentId={app.id}
+            compact
+            className="h-8 w-8 p-0"
+          />
+        </TooltipTrigger>
+        <TooltipContent>Edit appointment</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  </div>
+</TableCell>
+
                                   </TableRow>
                                 ))}
                               </TableBody>

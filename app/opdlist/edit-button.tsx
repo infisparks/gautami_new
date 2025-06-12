@@ -8,9 +8,15 @@ interface EditButtonProps {
   uhid: string
   appointmentId: string
   className?: string
+  compact?: boolean
 }
 
-export function EditButton({ uhid, appointmentId, className = "" }: EditButtonProps) {
+export function EditButton({
+  uhid,
+  appointmentId,
+  className = "",
+  compact = false,
+}: EditButtonProps) {
   const router = useRouter()
 
   const handleClick = () => {
@@ -19,13 +25,14 @@ export function EditButton({ uhid, appointmentId, className = "" }: EditButtonPr
 
   return (
     <Button
-      size="sm"
+      size={compact ? "icon" : "sm"}
       variant="outline"
       onClick={handleClick}
       className={`text-blue-600 hover:text-blue-700 ${className}`}
+      aria-label="Edit Appointment"
     >
-      <Edit className="h-4 w-4 mr-1" />
-      Edit
+      <Edit className={compact ? "h-5 w-5" : "h-4 w-4 mr-1"} />
+      {!compact && "Edit"}
     </Button>
   )
 }

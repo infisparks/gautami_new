@@ -37,6 +37,8 @@ import {
   Tag,
   Save,
   RefreshCw,
+  Search,
+  Clock,
 } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
@@ -74,8 +76,11 @@ interface DiscountForm {
 }
 
 interface DoctorVisitForm {
-  doctorId: string
+  doctorId?: string  
   visitCharge: number
+  visitTimes: number
+  customDoctorName?: string
+  isCustomDoctor: boolean
 }
 
 export interface BillingRecord {
@@ -91,8 +96,8 @@ export interface BillingRecord {
   relativePhone?: string
   relativeAddress?: string
   dischargeDate?: string
-  amount: number            // deposit total
-  paymentType: string       // not used heavily here, but kept
+  amount: number // deposit total
+  paymentType: string // not used heavily here, but kept
   roomType?: string
   bed?: string
   services: ServiceItem[]
@@ -137,12 +142,28 @@ const discountSchema = yup
 
 const doctorVisitSchema = yup
   .object({
-    doctorId: yup.string().required("Select a doctor"),
+    doctorId: yup.string().when("isCustomDoctor", {
+      is: false,
+      then: (schema) => schema.required("Select a doctor"),
+      otherwise: (schema) => schema.notRequired(),
+    }),
     visitCharge: yup
       .number()
       .typeError("Visit charge must be a number")
       .positive("Must be positive")
       .required("Charge is required"),
+    visitTimes: yup
+      .number()
+      .typeError("Visit times must be a number")
+      .min(1, "Must be at least 1")
+      .max(10, "Cannot exceed 10 visits")
+      .required("Visit times is required"),
+    customDoctorName: yup.string().when("isCustomDoctor", {
+      is: true,
+      then: (schema) => schema.required("Doctor name is required"),
+      otherwise: (schema) => schema.notRequired(),
+    }),
+    isCustomDoctor: yup.boolean().required(),
   })
   .required()
 
@@ -165,6 +186,8 @@ export default function BillingPage() {
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
+  const [filteredDoctors, setFilteredDoctors] = useState<IDoctor[]>([])
+  const [doctorSearchTerm, setDoctorSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
   const [discountUpdated, setDiscountUpdated] = useState(false)
@@ -191,6 +214,7 @@ export default function BillingPage() {
     const unsubscribe = onValue(docsRef, (snapshot) => {
       if (!snapshot.exists()) {
         setDoctors([])
+        setFilteredDoctors([])
         return
       }
       const data = snapshot.val()
@@ -203,9 +227,24 @@ export default function BillingPage() {
         ipdCharges: data[key].ipdCharges,
       }))
       setDoctors(list)
+      setFilteredDoctors(list)
     })
     return () => unsubscribe()
   }, [])
+
+  // ===== Filter Doctors based on search term =====
+  useEffect(() => {
+    if (!doctorSearchTerm.trim()) {
+      setFilteredDoctors(doctors)
+    } else {
+      const filtered = doctors.filter(
+        (doctor) =>
+          doctor.name.toLowerCase().includes(doctorSearchTerm.toLowerCase()) ||
+          doctor.specialist.toLowerCase().includes(doctorSearchTerm.toLowerCase()),
+      )
+      setFilteredDoctors(filtered)
+    }
+  }, [doctorSearchTerm, doctors])
 
   // ===== Fetch Service Options for CreatableSelect =====
   useEffect(() => {
@@ -307,7 +346,7 @@ export default function BillingPage() {
 
         setSelectedRecord(record)
 
-        // Initialize discount form if there’s an existing discount
+        // Initialize discount form if there's an existing discount
         if (record.discount) {
           resetDiscount({ discount: record.discount })
         }
@@ -367,13 +406,21 @@ export default function BillingPage() {
     setValue: setVisitValue,
   } = useForm<DoctorVisitForm>({
     resolver: yupResolver(doctorVisitSchema),
-    defaultValues: { doctorId: "", visitCharge: 0 },
+    defaultValues: {
+      doctorId: "",
+      visitCharge: 0,
+      visitTimes: 1,
+      customDoctorName: "",
+      isCustomDoctor: false,
+    },
   })
 
   // Auto-fill visit charge when a doctor is selected
   const watchSelectedDoctorId = watchVisit("doctorId")
+  const watchIsCustomDoctor = watchVisit("isCustomDoctor")
+
   useEffect(() => {
-    if (!watchSelectedDoctorId || !selectedRecord) return
+    if (watchIsCustomDoctor || !watchSelectedDoctorId || !selectedRecord) return
     const doc = doctors.find((d) => d.id === watchSelectedDoctorId)
     if (!doc) return
     let amount = 0
@@ -392,7 +439,7 @@ export default function BillingPage() {
       }
     }
     setVisitValue("visitCharge", amount)
-  }, [watchSelectedDoctorId, selectedRecord, doctors, setVisitValue])
+  }, [watchSelectedDoctorId, selectedRecord, doctors, setVisitValue, watchIsCustomDoctor])
 
   // ===== Calculations =====
   const hospitalServiceTotal = selectedRecord
@@ -441,7 +488,7 @@ export default function BillingPage() {
         lastVisit: Date | null
         items: ServiceItem[]
       }
-    >
+    >,
   )
   const aggregatedConsultantChargesArray = Object.values(aggregatedConsultantCharges)
 
@@ -450,7 +497,7 @@ export default function BillingPage() {
     patientMobile: string,
     patientName: string,
     paymentAmount: number,
-    updatedDeposit: number
+    updatedDeposit: number,
   ) => {
     const apiUrl = "https://wa.medblisss.com/send-text"
     const payload = {
@@ -498,10 +545,7 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(
-        db,
-        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
-      )
+      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
       await update(recordRef, { services: sanitizedServices })
 
       toast.success("Additional service added successfully!")
@@ -523,10 +567,7 @@ export default function BillingPage() {
     try {
       // Push new payment under billing node
       const newPaymentRef = push(
-        ref(
-          db,
-          `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`
-        )
+        ref(db, `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`),
       )
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
@@ -540,7 +581,7 @@ export default function BillingPage() {
       const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
       const billingRootRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
       )
       await update(billingRootRef, { totalDeposit: updatedDeposit })
 
@@ -549,7 +590,7 @@ export default function BillingPage() {
         selectedRecord.mobileNumber,
         selectedRecord.name,
         Number(formData.paymentAmount),
-        updatedDeposit
+        updatedDeposit,
       )
 
       toast.success("Payment recorded successfully!")
@@ -577,10 +618,7 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const discountVal = Number(formData.discount)
-      const recordRef = ref(
-        db,
-        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
-      )
+      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
       await update(recordRef, { discount: discountVal })
 
       toast.success("Discount applied successfully!")
@@ -599,26 +637,41 @@ export default function BillingPage() {
     }
   }
 
-  // 5. Add Consultant Charge
+  // 5. Add Consultant Charge (Enhanced with multiple visits and custom doctor)
   const onSubmitDoctorVisit: SubmitHandler<DoctorVisitForm> = async (data) => {
     if (!selectedRecord) return
     setLoading(true)
     try {
-      const doc = doctors.find((d) => d.id === data.doctorId)
-      if (!doc) {
-        toast.error("Invalid doctor selection.")
-        setLoading(false)
-        return
+      let doctorName = ""
+
+      if (data.isCustomDoctor) {
+        doctorName = data.customDoctorName || "Custom Doctor"
+      } else {
+        const doc = doctors.find((d) => d.id === data.doctorId)
+        if (!doc) {
+          toast.error("Invalid doctor selection.")
+          setLoading(false)
+          return
+        }
+        doctorName = doc.name || "Unknown"
       }
+
       const oldServices = [...selectedRecord.services]
-      const newItem: ServiceItem = {
-        serviceName: `Consultant Charge: Dr. ${doc.name || "Unknown"}`,
-        doctorName: doc.name || "Unknown",
-        type: "doctorvisit",
-        amount: Number(data.visitCharge) || 0,
-        createdAt: new Date().toLocaleString(),
+      const newItems: ServiceItem[] = []
+
+      // Create multiple visit records based on visitTimes
+      for (let i = 0; i < data.visitTimes; i++) {
+        const newItem: ServiceItem = {
+          serviceName: `Consultant Charge: Dr. ${doctorName}`,
+          doctorName: doctorName,
+          type: "doctorvisit",
+          amount: Number(data.visitCharge) || 0,
+          createdAt: new Date().toLocaleString(),
+        }
+        newItems.push(newItem)
       }
-      const updatedServices = [newItem, ...oldServices]
+
+      const updatedServices = [...newItems, ...oldServices]
       const sanitizedServices = updatedServices.map((svc) => ({
         serviceName: svc.serviceName || "",
         doctorName: svc.doctorName || "",
@@ -627,16 +680,21 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(
-        db,
-        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
-      )
+      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
       await update(recordRef, { services: sanitizedServices })
 
-      toast.success("Consultant charge added successfully!")
+      toast.success(
+        `Consultant charge${data.visitTimes > 1 ? "s" : ""} added successfully! (${data.visitTimes} visit${data.visitTimes > 1 ? "s" : ""})`,
+      )
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
       setSelectedRecord(updatedRecord)
-      resetVisit({ doctorId: "", visitCharge: 0 })
+      resetVisit({
+        doctorId: "",
+        visitCharge: 0,
+        visitTimes: 1,
+        customDoctorName: "",
+        isCustomDoctor: false,
+      })
     } catch (error) {
       console.error("Error adding consultant charge:", error)
       toast.error("Failed to add consultant charge. Please try again.")
@@ -653,10 +711,7 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const updatedServices = selectedRecord.services.filter((svc) => svc !== item)
-      const recordRef = ref(
-        db,
-        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
-      )
+      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
       await update(recordRef, { services: updatedServices })
 
       toast.success("Service deleted successfully!")
@@ -677,7 +732,7 @@ export default function BillingPage() {
     try {
       const paymentRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`,
       )
       await remove(paymentRef)
 
@@ -685,7 +740,7 @@ export default function BillingPage() {
       const updatedDeposit = selectedRecord.amount - paymentAmount
       const billingRootRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
+        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
       )
       await update(billingRootRef, { totalDeposit: updatedDeposit })
 
@@ -707,12 +762,9 @@ export default function BillingPage() {
     setLoading(true)
     try {
       const updatedServices = selectedRecord.services.filter(
-        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName
+        (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName,
       )
-      const recordRef = ref(
-        db,
-        `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`
-      )
+      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
       await update(recordRef, { services: updatedServices })
 
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
@@ -781,9 +833,7 @@ export default function BillingPage() {
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                     <div>
                       <h1 className="text-2xl font-bold text-white">{selectedRecord.name}</h1>
-                      <p className="text-teal-50">
-                        UHID: {selectedRecord.uhid ? selectedRecord.uhid : "Not assigned"}
-                      </p>
+                      <p className="text-teal-50">UHID: {selectedRecord.uhid ? selectedRecord.uhid : "Not assigned"}</p>
                     </div>
 
                     <div className="mt-2 md:mt-0 flex flex-col md:items-end">
@@ -1205,13 +1255,12 @@ export default function BillingPage() {
                                   name="serviceName"
                                   render={({ field }) => {
                                     // If the typed-in service is not in the array, create an object so CreatableSelect won't complain
-                                    const selectedOption =
-                                      serviceOptions.find(
-                                        (option) => option.label.toLowerCase() === field.value.toLowerCase()
-                                      ) || {
-                                        label: field.value,
-                                        value: field.value,
-                                      }
+                                    const selectedOption = serviceOptions.find(
+                                      (option) => option.label.toLowerCase() === field.value.toLowerCase(),
+                                    ) || {
+                                      label: field.value,
+                                      value: field.value,
+                                    }
 
                                     return (
                                       <CreatableSelect
@@ -1224,7 +1273,9 @@ export default function BillingPage() {
                                             // If user chose an existing service, auto-fill the amount
                                             field.onChange(selected.label)
                                             // If that option has a known amount, set it
-                                            const foundOption = serviceOptions.find((opt) => opt.label === selected.label)
+                                            const foundOption = serviceOptions.find(
+                                              (opt) => opt.label === selected.label,
+                                            )
                                             if (foundOption) {
                                               setValueService("amount", foundOption.amount)
                                             }
@@ -1379,8 +1430,7 @@ export default function BillingPage() {
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Type
-                                  </th>{" "}
-                                  {/* New Column */}
+                                  </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Date
                                   </th>
@@ -1402,17 +1452,14 @@ export default function BillingPage() {
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
                                       {payment.type || "advance"}
-                                    </td>{" "}
-                                    {/* New cell */}
+                                    </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-center">
                                       {!selectedRecord.dischargeDate && (
                                         <button
-                                          onClick={() =>
-                                            payment.id && handleDeletePayment(payment.id, payment.amount)
-                                          }
+                                          onClick={() => payment.id && handleDeletePayment(payment.id, payment.amount)}
                                           className="text-red-500 hover:text-red-700 transition-colors"
                                           title="Delete payment"
                                         >
@@ -1492,7 +1539,7 @@ export default function BillingPage() {
                   </div>
                 )}
 
-                {/* Consultants Tab */}
+                {/* Consultants Tab - Enhanced */}
                 {activeTab === "consultants" && (
                   <div className="p-6">
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1565,7 +1612,7 @@ export default function BillingPage() {
                         )}
                       </div>
 
-                      {/* Add Consultant Charge Form */}
+                      {/* Enhanced Add Consultant Charge Form */}
                       {!selectedRecord.dischargeDate && (
                         <div className="lg:col-span-1">
                           <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -1573,31 +1620,90 @@ export default function BillingPage() {
                               <UserPlus size={16} className="mr-2 text-teal-600" /> Add Consultant Charge
                             </h3>
                             <form onSubmit={handleSubmitVisit(onSubmitDoctorVisit)} className="space-y-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Select Doctor</label>
-                                <select
-                                  {...registerVisit("doctorId")}
-                                  className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsVisit.doctorId ? "border-red-500" : "border-gray-300"
-                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                >
-                                  <option value="">-- Select Doctor --</option>
-                                  {doctors.map((doc) => (
-                                    <option key={doc.id} value={doc.id}>
-                                      {doc.name} ({doc.specialist})
-                                    </option>
-                                  ))}
-                                </select>
-                                {errorsVisit.doctorId && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
-                                )}
+                              {/* Custom Doctor Toggle */}
+                              <div className="flex items-center space-x-2 mb-4">
+                                <input
+                                  type="checkbox"
+                                  {...registerVisit("isCustomDoctor")}
+                                  id="customDoctorToggle"
+                                  className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                                />
+                                <label htmlFor="customDoctorToggle" className="text-sm font-medium text-gray-700">
+                                  Add custom doctor
+                                </label>
                               </div>
+
+                              {/* Doctor Selection or Custom Entry */}
+                              {!watchIsCustomDoctor ? (
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    <Search size={16} className="inline mr-1" />
+                                    Search & Select Doctor
+                                  </label>
+
+                                  {/* Doctor Search Input */}
+                                  <div className="relative mb-2">
+                                    <Search className="absolute top-3 left-3 text-gray-400 h-4 w-4" />
+                                    <input
+                                      type="text"
+                                      placeholder="Search doctors by name or specialty..."
+                                      value={doctorSearchTerm}
+                                      onChange={(e) => setDoctorSearchTerm(e.target.value)}
+                                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
+                                    />
+                                  </div>
+
+                                  {/* Doctor Dropdown */}
+                                  <select
+                                    {...registerVisit("doctorId")}
+                                    className={`w-full px-3 py-2 rounded-lg border ${
+                                      errorsVisit.doctorId ? "border-red-500" : "border-gray-300"
+                                    } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                  >
+                                    <option value="">-- Select Doctor --</option>
+                                    {filteredDoctors.map((doc) => (
+                                      <option key={doc.id} value={doc.id}>
+                                        {doc.name} ({doc.specialist})
+                                      </option>
+                                    ))}
+                                  </select>
+                                  {errorsVisit.doctorId && (
+                                    <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
+                                  )}
+
+                                  {/* Show filtered results count */}
+                                  {doctorSearchTerm && (
+                                    <p className="text-xs text-gray-500 mt-1">
+                                      {filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? "s" : ""} found
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                                    Custom Doctor Name
+                                  </label>
+                                  <input
+                                    type="text"
+                                    {...registerVisit("customDoctorName")}
+                                    placeholder="Enter doctor name"
+                                    className={`w-full px-3 py-2 rounded-lg border ${
+                                      errorsVisit.customDoctorName ? "border-red-500" : "border-gray-300"
+                                    } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                  />
+                                  {errorsVisit.customDoctorName && (
+                                    <p className="text-red-500 text-xs mt-1">{errorsVisit.customDoctorName.message}</p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Visit Charge */}
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Visit Charge (₹)</label>
                                 <input
                                   type="number"
                                   {...registerVisit("visitCharge")}
-                                  placeholder="Auto-filled or override"
+                                  placeholder={watchIsCustomDoctor ? "Enter charge amount" : "Auto-filled or override"}
                                   className={`w-full px-3 py-2 rounded-lg border ${
                                     errorsVisit.visitCharge ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
@@ -1606,6 +1712,31 @@ export default function BillingPage() {
                                   <p className="text-red-500 text-xs mt-1">{errorsVisit.visitCharge.message}</p>
                                 )}
                               </div>
+
+                              {/* Visit Times */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  <Clock size={16} className="inline mr-1" />
+                                  Number of Visits
+                                </label>
+                                <input
+                                  type="number"
+                                  {...registerVisit("visitTimes")}
+                                  min="1"
+                                  max="10"
+                                  placeholder="e.g., 2 for 2 visits"
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsVisit.visitTimes ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                />
+                                {errorsVisit.visitTimes && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsVisit.visitTimes.message}</p>
+                                )}
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Each visit will be recorded separately with current timestamp
+                                </p>
+                              </div>
+
                               <button
                                 type="submit"
                                 disabled={loading}
