@@ -37,6 +37,119 @@ function generatePatientId(): string {
     .join("")
 }
 
+// WhatsApp message sending function
+async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
+  try {
+    const phoneWithCountryCode = `91${phone.replace(/\D/g, "")}`
+
+    const response = await fetch("https://wa.medblisss.com/send-text", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        token: "99583991572",
+        number: phoneWithCountryCode,
+        message: message,
+      }),
+    })
+
+    if (response.ok) {
+      console.log("WhatsApp message sent successfully")
+      return true
+    } else {
+      console.error("Failed to send WhatsApp message:", response.statusText)
+      return false
+    }
+  } catch (error) {
+    console.error("Error sending WhatsApp message:", error)
+    return false
+  }
+}
+
+// Generate professional WhatsApp messages
+function generateAppointmentMessage(data: IFormInput, uhid: string, appointmentType: "hospital" | "oncall"): string {
+  const appointmentDate = data.date.toLocaleDateString("en-IN", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  })
+
+  if (appointmentType === "oncall") {
+    return `🏥 *APPOINTMENT CONFIRMATION*
+
+Dear ${data.name},
+
+Your *On-Call Appointment* has been successfully registered!
+
+📋 *Appointment Details:*
+• Patient ID: ${uhid}
+• Date: ${appointmentDate}
+• Time: ${data.time}
+• Type: On-Call Consultation
+${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
+
+📞 Our medical team will contact you at the scheduled time.
+
+${data.message ? `📝 *Notes:* ${data.message}` : ""}
+
+For any queries, please contact our reception.
+
+Thank you for choosing our healthcare services!
+
+*Gautami Medford NX *`
+  } else {
+    // Hospital visit message
+    const modalities = data.modalities || []
+    const servicesText = modalities
+      .map((m) => {
+        let serviceDesc = `• ${m.type.charAt(0).toUpperCase() + m.type.slice(1)}`
+        if (m.specialist) serviceDesc += ` - ${m.specialist}`
+        if (m.doctor) serviceDesc += ` (Dr. ${m.doctor})`
+        if (m.service) serviceDesc += ` - ${m.service}`
+        serviceDesc += ` - ₹${m.charges}`
+        return serviceDesc
+      })
+      .join("\n")
+
+    const totalCharges = modalities.reduce((total, m) => total + m.charges, 0)
+    const totalPaid = (Number(data.cashAmount) || 0) + (Number(data.onlineAmount) || 0)
+    const discount = Number(data.discount) || 0
+
+    return `🏥 *APPOINTMENT CONFIRMATION*
+
+Dear ${data.name},
+
+Your *Appointment* has been successfully booked!
+
+📋 *Appointment Details:*
+• Patient ID: ${uhid}
+• Date: ${appointmentDate}
+• Time: ${data.time}
+• Type: Hospital Visit
+${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
+
+
+
+💰 *Payment Summary:*
+• Total Charges: ₹${totalCharges}
+${discount > 0 ? `• Discount: ₹${discount}` : ""}
+• Amount Paid: ₹${totalPaid}
+• Payment Method: ${data.paymentMethod?.charAt(0).toUpperCase() + data.paymentMethod?.slice(1)}
+
+
+
+${data.message ? `📝 *Notes:* ${data.message}` : ""}
+
+For any queries, please contact our reception.
+
+Thank you for choosing our healthcare services!
+
+*Gautami Medford NX Healthcare*`
+  }
+}
+
 export default function Page() {
   const router = useRouter()
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
@@ -249,7 +362,16 @@ export default function Page() {
           createdAt: new Date().toISOString(),
         })
 
-        toast.success("On-call appointment registered successfully!")
+        // Send WhatsApp message for on-call appointment
+        const professionalMessage = generateAppointmentMessage(data, uhid, "oncall")
+        const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
+
+        if (messageSent) {
+          toast.success("On-call appointment registered successfully! Confirmation sent via WhatsApp.")
+        } else {
+          toast.success("On-call appointment registered successfully!")
+          toast.warning("WhatsApp message could not be sent. Please contact the patient manually.")
+        }
       } else {
         // Hospital visit - existing logic
         const cash = Number(data.cashAmount) || 0
@@ -315,7 +437,16 @@ export default function Page() {
           })
         }
 
-        toast.success("Hospital appointment booked successfully!")
+        // Send WhatsApp message for hospital appointment
+        const professionalMessage = generateAppointmentMessage(data, uhid, "hospital")
+        const messageSent = await sendWhatsAppMessage(data.phone, professionalMessage)
+
+        if (messageSent) {
+          toast.success("Hospital appointment booked successfully! Confirmation sent via WhatsApp.")
+        } else {
+          toast.success("Hospital appointment booked successfully!")
+          toast.warning("WhatsApp message could not be sent. Please contact the patient manually.")
+        }
       }
 
       setIsSubmitted(true)
@@ -418,6 +549,7 @@ export default function Page() {
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
               <h2 className="text-2xl font-bold text-green-700">Appointment Registered!</h2>
               <p className="text-gray-600">Your appointment has been successfully registered.</p>
+              <p className="text-sm text-gray-500">WhatsApp confirmation sent to patient.</p>
               <p className="text-sm text-gray-500">Resetting form shortly...</p>
             </div>
           </CardContent>
