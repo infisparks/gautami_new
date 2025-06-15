@@ -31,7 +31,7 @@ export default function RootLayout({
   // Logged-in Firebase user
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  // "admin", "staff", "opd", or "ipd" (or null if not found)
+  // "admin", "staff", "opd", "ipd", "opd-ipd" (or null if not found)
   const [userType, setUserType] = useState<string | null>(null);
 
   const router = useRouter();
@@ -53,11 +53,7 @@ export default function RootLayout({
       const userRef = ref(db, `user/${user.uid}`); // e.g. "user/UID" => { type: "staff" }
       onValue(userRef, (snapshot) => {
         const data = snapshot.val();
-        if (data && data.type) {
-          setUserType(data.type);
-        } else {
-          setUserType(null);
-        }
+        setUserType(data?.type ?? null);
       });
     } else {
       setUserType(null);
@@ -66,69 +62,92 @@ export default function RootLayout({
 
   // 3. Protect routes
   useEffect(() => {
-    if (!loading) {
-      // If user not logged in, allow only /login or /register
-      if (!user) {
-        const publicPaths = ["/login", "/register"];
-        if (!publicPaths.includes(pathname)) {
-          router.push("/login");
-        }
-      } else {
-        // If user IS logged in and tries to go to /login or /register => push to a default page
-        if (pathname === "/login" || pathname === "/register") {
-          router.push("/dashboard");
-        }
+    if (loading) return;
 
-        // If user is "staff" and tries to go to restricted route => redirect to /opd
-        if (userType === "staff") {
-          const restrictedPaths = [
-            "/dashboard",
-            "/opdadmin",
-            "/ipdadmin",
-            "/patientadmin",
-            "/bloodadmin",
-            "/mortalityadmin",
-            "/surgeryadmin",
-            "/dr",
-          ];
-          if (restrictedPaths.includes(pathname)) {
-            router.push("/opd");
-          }
-        }
-
-        // ** If user is "opd", only allow /opd, /opdlist, and /addDoctor **
-        if (userType === "opd") {
-          const allowedPaths = ["/opd", "/opdlist", "/addDoctor"];
-          // MODIFICATION: Check if pathname starts with any allowed path to handle potential sub-routes
-          const isAllowed = allowedPaths.some(path => pathname.startsWith(path));
-          if (!isAllowed) {
-            router.push("/opd");
-          }
-        }
-
-        // ** If user is "ipd", allow access to /ipd, /billing/*, and other specified pages **
-        if (userType === "ipd") {
-          // MODIFICATION: Changed to check if the pathname starts with an allowed base path.
-          // This correctly handles all nested routes like /billing/[patientId]/[ipdId] and /billing/edit/...
-          const allowedBasePaths = [
-            "/ipd", 
-            "/billing", 
-            "/bed-management", 
-            "/addDoctor",
-            "/manage",
-            "/discharge-summary",
-            "/drugchart",
-            "/ot"
-          ];
-          
-          const isAllowed = allowedBasePaths.some(basePath => pathname.startsWith(basePath));
-          
-          if (!isAllowed) {
-            router.push("/ipd");
-          }
-        }
+    // Not logged in => only /login or /register allowed
+    if (!user) {
+      const publicPaths = ["/login", "/register"];
+      if (!publicPaths.includes(pathname)) {
+        router.push("/login");
       }
+      return;
     }
+
+    // If logged in, disallow /login & /register
+    if (pathname === "/login" || pathname === "/register") {
+      router.push("/dashboard");
+      return;
+    }
+
+    // STAFF: redirect to OPD on restricted pages
+    if (userType === "staff") {
+      const restrictedPaths = [
+        "/dashboard",
+        "/opdadmin",
+        "/ipdadmin",
+        "/patientadmin",
+        "/bloodadmin",
+        "/mortalityadmin",
+        "/surgeryadmin",
+        "/dr",
+      ];
+      if (restrictedPaths.includes(pathname)) {
+        router.push("/opd");
+      }
+      return;
+    }
+
+    // OPD only
+    if (userType === "opd") {
+      const allowedPaths = ["/opd", "/opdlist", "/addDoctor"];
+      if (!allowedPaths.some(path => pathname.startsWith(path))) {
+        router.push("/opd");
+      }
+      return;
+    }
+
+    // IPD only
+    if (userType === "ipd") {
+      const allowedBasePaths = [
+        "/ipd",
+        "/billing",
+        "/bed-management",
+        "/addDoctor",
+        "/manage",
+        "/discharge-summary",
+        "/drugchart",
+        "/ot"
+      ];
+      if (!allowedBasePaths.some(base => pathname.startsWith(base))) {
+        router.push("/ipd");
+      }
+      return;
+    }
+
+    // OPD-IPD combined: allow both sets
+    if (userType === "opd-ipd") {
+      const allowedBasePaths = [
+        // OPD routes
+        "/opd",
+        "/opdlist",
+        "/addDoctor",
+        // IPD routes
+        "/ipd",
+        "/billing",
+        "/bed-management",
+        "/manage",
+        "/discharge-summary",
+        "/drugchart",
+        "/ot"
+      ];
+      if (!allowedBasePaths.some(base => pathname.startsWith(base))) {
+        router.push("/opd");
+      }
+      return;
+    }
+
+    // (Admins or other roles fall through without extra guards)
+
   }, [user, userType, loading, pathname, router]);
 
   return (
