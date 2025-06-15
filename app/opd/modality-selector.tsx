@@ -1,9 +1,9 @@
 "use client"
+
 import { useState, useCallback, useMemo } from "react"
 import { Plus, Edit2, Check, DollarSign, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
@@ -63,14 +63,14 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
         return IPDServiceOptions
       case "radiology":
         return RadiologyServiceOptions
-        case "casualty":             // ← add this
-        return Casualty;           
+      case "casualty":
+        return Casualty
       default:
         return []
     }
   }, [])
 
-  // Get available specialists
+  // Get available specialists (deduplicated, sorted)
   const getAvailableSpecialists = useMemo(() => {
     const specialistSet = new Set<string>()
     doctors.forEach((doctor) => {
@@ -94,7 +94,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
       }
       return modality.charges
     },
-    [doctors],
+    [doctors]
   )
 
   // Update modality
@@ -111,10 +111,10 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
             return updated
           }
           return m
-        }),
+        })
       )
     },
-    [modalities, onChange, calculateDoctorCharges, editingCharges],
+    [modalities, onChange, calculateDoctorCharges, editingCharges]
   )
 
   // Remove modality
@@ -132,7 +132,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
         return copy
       })
     },
-    [modalities, onChange],
+    [modalities, onChange]
   )
 
   // Start editing charges
@@ -199,31 +199,27 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
 
                 {modality.type === "consultation" ? (
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    {/* Specialist (with search) */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Specialist *</Label>
-                      <Select
+                      <SearchDropdown
+                        options={getAvailableSpecialists.map(spec => ({
+                          service: spec,
+                          amount: 0
+                        }))}
                         value={modality.specialist || ""}
-                        onValueChange={(value) => {
+                        onSelect={(spec) => {
                           updateModality(modality.id, {
-                            specialist: value,
+                            specialist: spec,
                             doctor: "",
                             visitType: undefined,
                           })
                         }}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {getAvailableSpecialists.map((specialist) => (
-                            <SelectItem key={specialist} value={specialist}>
-                              {specialist}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        placeholder="Search & select specialist"
+                      />
                     </div>
 
+                    {/* Doctor (searchable, already present) */}
                     {modality.specialist && (
                       <div className="space-y-1">
                         <Label className="text-xs font-medium text-gray-600">Doctor *</Label>
@@ -239,40 +235,36 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                       </div>
                     )}
 
+                    {/* Visit Type */}
                     {modality.doctor && (
                       <div className="space-y-1">
                         <Label className="text-xs font-medium text-gray-600">Visit Type *</Label>
-                        <Select
+                        <select
                           value={modality.visitType || ""}
-                          onValueChange={(value) => {
-                            updateModality(modality.id, { visitType: value as "first" | "followup" })
+                          onChange={(e) => {
+                            updateModality(modality.id, { visitType: e.target.value as "first" | "followup" })
                           }}
+                          className="h-9 rounded-md border border-gray-300 px-3"
                         >
-                          <SelectTrigger className="h-9">
-                            <SelectValue placeholder="Select" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {VisitTypeOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
+                          <option value="">Select</option>
+                          {VisitTypeOptions.map((option) => {
+                            const doc = doctors.find((d) => d.id === modality.doctor)
+                            const charge =
+                              doc && option.value === "first"
+                                ? doc.firstVisitCharge
+                                : doc?.followUpCharge
+                            return (
+                              <option key={option.value} value={option.value}>
                                 {option.label}
-                                {(() => {
-                                  const doc = doctors.find((d) => d.id === modality.doctor)
-                                  if (doc) {
-                                    const charge =
-                                      option.value === "first"
-                                        ? doc.firstVisitCharge
-                                        : doc.followUpCharge
-                                    return ` - ₹${charge}`
-                                  }
-                                  return ""
-                                })()}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                                {charge ? ` - ₹${charge}` : ""}
+                              </option>
+                            )
+                          })}
+                        </select>
                       </div>
                     )}
 
+                    {/* Charges */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Charges</Label>
                       <div className="relative">
@@ -318,6 +310,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* Service (with search) */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Service *</Label>
                       <SearchDropdown
@@ -329,7 +322,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         placeholder="Search & select service"
                       />
                     </div>
-
+                    {/* Doctor (optional) */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Doctor (Optional)</Label>
                       <DoctorSearchDropdown
@@ -341,7 +334,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         placeholder="Select doctor"
                       />
                     </div>
-
+                    {/* Charges */}
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Charges</Label>
                       <div className="relative">
