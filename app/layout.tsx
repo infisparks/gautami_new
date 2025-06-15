@@ -99,7 +99,7 @@ export default function RootLayout({
 
     // OPD only
     if (userType === "opd") {
-      const allowedPaths = ["/opd", "/opdlist", "/addDoctor"];
+      const allowedPaths = ["/opd", "/opdlist", "/addDoctor",  "/edit-appointment"];
       if (!allowedPaths.some(path => pathname.startsWith(path))) {
         router.push("/opd");
       }
@@ -132,6 +132,7 @@ export default function RootLayout({
         "/opdlist",
         "/addDoctor",
         // IPD routes
+       "/edit-appointment",
         "/ipd",
         "/billing",
         "/bed-management",
