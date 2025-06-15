@@ -169,7 +169,9 @@ const Sidebar: React.FC<SidebarProps> = ({ userType }) => {
       const isActive =
         pathname === item.href ||
         item.submenu?.some((sub) => pathname === sub.href);
-      const hasSub = item.submenu?.length! > 0;
+        const hasSub = (item.submenu?.length ?? 0) > 0;
+
+
       const isOpenSub = openSubmenus[item.title];
 
       if (hasSub) {
