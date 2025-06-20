@@ -25,6 +25,7 @@ import {
   User,
   FileText,
   CreditCard,
+  UserCheck,
 } from "lucide-react"
 
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
@@ -41,9 +42,9 @@ interface Doctor {
 // Updated OPD interfaces for new structure
 interface IModality {
   charges: number
-  doctor?: string
+  doctor?: string // This should be the doctor's name as stored in the modality
   specialist?: string
-  type: "consultation" | "casualty" | "xray"
+  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom" // Added custom
   visitType?: string
   service?: string
 }
@@ -557,55 +558,54 @@ const DashboardPage: React.FC = () => {
     return allAppointments.filter((app) => app.name.toLowerCase().includes(query) || app.phone.includes(query))
   }, [opdAppointments, ipdAppointments, otAppointments, filters.searchQuery])
 
-  // Chart data
-  const chartData = useMemo(() => {
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    const opdData = new Array(7).fill(0)
-    const ipdData = new Array(7).fill(0)
+  // Calculate doctor consultations
+  const doctorConsultations = useMemo(() => {
+    const consultationsMap = new Map<string, number>() // Map<DoctorName, Count>
 
     opdAppointments.forEach((app) => {
-      const dayIndex = new Date(app.date).getDay()
-      const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1
-      opdData[adjustedIndex]++
+      app.modalities.forEach((modality) => {
+        if (modality.type === "consultation" && modality.doctor) {
+          const doctorName = modality.doctor
+          consultationsMap.set(doctorName, (consultationsMap.get(doctorName) || 0) + 1)
+        }
+      })
     })
 
-    ipdAppointments.forEach((app) => {
-      const dayIndex = new Date(app.admissionDate).getDay()
-      const adjustedIndex = dayIndex === 0 ? 6 : dayIndex - 1
-      ipdData[adjustedIndex]++
-    })
+    // Convert map to array of objects and sort by count (descending)
+    return Array.from(consultationsMap.entries())
+      .map(([doctorName, count]) => ({ doctorName, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [opdAppointments])
 
+  // Chart data for doctor consultations
+  const doctorConsultationChartData = useMemo(() => {
+    const topDoctors = doctorConsultations.slice(0, 10) // Limit to top 10 doctors for readability
     return {
-      labels: days,
+      labels: topDoctors.map((d) => d.doctorName),
       datasets: [
         {
-          label: "OPD Appointments",
-          data: opdData,
-          backgroundColor: "rgba(56, 189, 248, 0.6)",
-          borderColor: "rgba(56, 189, 248, 1)",
-          borderWidth: 1,
-        },
-        {
-          label: "IPD Admissions",
-          data: ipdData,
-          backgroundColor: "rgba(251, 146, 60, 0.6)",
-          borderColor: "rgba(251, 146, 60, 1)",
+          label: "Consultations",
+          data: topDoctors.map((d) => d.count),
+          backgroundColor: "rgba(75, 192, 192, 0.6)",
+          borderColor: "rgba(75, 192, 192, 1)",
           borderWidth: 1,
         },
       ],
     }
-  }, [opdAppointments, ipdAppointments])
+  }, [doctorConsultations])
 
   // Helper function to get modalities summary
   const getModalitiesSummary = (modalities: IModality[]) => {
     const consultations = modalities.filter((m) => m.type === "consultation").length
     const casualty = modalities.filter((m) => m.type === "casualty").length
     const xrays = modalities.filter((m) => m.type === "xray").length
+    const custom = modalities.filter((m) => m.type === "custom").length // Added custom
 
     const parts = []
     if (consultations > 0) parts.push(`${consultations} Consultation${consultations > 1 ? "s" : ""}`)
     if (casualty > 0) parts.push(`${casualty} Casualty`)
     if (xrays > 0) parts.push(`${xrays} X-ray${xrays > 1 ? "s" : ""}`)
+    if (custom > 0) parts.push(`${custom} Custom Service${custom > 1 ? "s" : ""}`) // Added custom
 
     return parts.join(", ") || "No services"
   }
@@ -708,6 +708,36 @@ const DashboardPage: React.FC = () => {
         )}`
     }
   }
+
+  const chartData = useMemo(() => {
+    const today = format(new Date(), "yyyy-MM-dd")
+    const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
+    const dayBeforeYesterday = format(addDays(new Date(), -2), "yyyy-MM-dd")
+
+    const todayOpd = opdAppointments.filter((app) => app.date === today).length
+    const yesterdayOpd = opdAppointments.filter((app) => app.date === yesterday).length
+    const dayBeforeYesterdayOpd = opdAppointments.filter((app) => app.date === dayBeforeYesterday).length
+
+    const todayIpd = ipdAppointments.filter((app) => app.admissionDate === today).length
+    const yesterdayIpd = ipdAppointments.filter((app) => app.admissionDate === yesterday).length
+    const dayBeforeYesterdayIpd = ipdAppointments.filter((app) => app.admissionDate === dayBeforeYesterday).length
+
+    return {
+      labels: [dayBeforeYesterday, yesterday, today],
+      datasets: [
+        {
+          label: "OPD Appointments",
+          data: [dayBeforeYesterdayOpd, yesterdayOpd, todayOpd],
+          backgroundColor: "rgba(54, 162, 235, 0.6)",
+        },
+        {
+          label: "IPD Admissions",
+          data: [dayBeforeYesterdayIpd, yesterdayIpd, todayIpd],
+          backgroundColor: "rgba(255, 99, 132, 0.6)",
+        },
+      ],
+    }
+  }, [opdAppointments, ipdAppointments])
 
   return (
     <>
@@ -915,7 +945,7 @@ const DashboardPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Payment Breakdown and Chart */}
+            {/* Payment Breakdown and Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               {/* Payment Breakdown */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
@@ -971,7 +1001,7 @@ const DashboardPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Weekly Chart */}
+              {/* Weekly Appointments Chart */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
                   <Activity className="mr-2 h-5 w-5 text-gray-600" />
@@ -996,6 +1026,80 @@ const DashboardPage: React.FC = () => {
                     },
                   }}
                 />
+              </div>
+            </div>
+
+            {/* Doctor Consultations List and Chart */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* Doctor Consultations List */}
+              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" />
+                  Doctor Consultations
+                </h2>
+                {doctorConsultations.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Doctor Name
+                          </th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Consultations
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {doctorConsultations.map((doc) => (
+                          <tr key={doc.doctorName} className="hover:bg-gray-50">
+                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                              {doc.doctorName}
+                            </td>
+                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{doc.count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center text-gray-500 py-8">
+                    <p>No consultation data for the selected period.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Doctor Consultations Chart */}
+              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" />
+                  Top Doctors by Consultations
+                </h2>
+                {doctorConsultationChartData.labels.length > 0 ? (
+                  <Bar
+                    data={doctorConsultationChartData}
+                    options={{
+                      responsive: true,
+                      plugins: {
+                        legend: {
+                          position: "top",
+                        },
+                      },
+                      scales: {
+                        y: {
+                          beginAtZero: true,
+                          ticks: {
+                            stepSize: 1,
+                          },
+                        },
+                      },
+                    }}
+                  />
+                ) : (
+                  <div className="text-center text-gray-500 py-8">
+                    <p>No data to display chart for the selected period.</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1454,6 +1558,7 @@ const DashboardPage: React.FC = () => {
                                   selectedAppointment.remainingAmount > 0 && (
                                     <div className="flex justify-between items-center">
                                       <span className="text-red-700">Remaining:</span>
+
                                       <span className="font-bold text-red-600">
                                         {formatCurrency(selectedAppointment.remainingAmount)}
                                       </span>

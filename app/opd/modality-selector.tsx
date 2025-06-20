@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useMemo } from "react"
-import { Plus, Edit2, Check, DollarSign, Trash2 } from "lucide-react"
+import { Plus, Edit2, Check, DollarSign, Trash2, IndianRupeeIcon } from "lucide-react" // Added IndianRupeeIcon
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -48,6 +48,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
       id: generateModalityId(),
       type,
       charges: getDefaultCharges(type),
+      service: type === "custom" ? "" : undefined, // Initialize custom service name
     }
     onChange([...modalities, newModality])
   }
@@ -94,7 +95,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
       }
       return modality.charges
     },
-    [doctors]
+    [doctors],
   )
 
   // Update modality
@@ -104,17 +105,20 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
         modalities.map((m) => {
           if (m.id === id) {
             const updated = { ...m, ...updates }
-            // Only calculate charges if not manually edited
-            if (!editingCharges[id] && !updates.charges && updated.type === "consultation") {
+            // Special handling for custom service charges
+            if (updated.type === "custom" && updates.charges !== undefined) {
+              updated.charges = updates.charges
+            } else if (!editingCharges[id] && !updates.charges && updated.type === "consultation") {
+              // Only calculate charges if not manually edited and it's a consultation
               updated.charges = calculateDoctorCharges(updated)
             }
             return updated
           }
           return m
-        })
+        }),
       )
     },
-    [modalities, onChange, calculateDoctorCharges, editingCharges]
+    [modalities, onChange, calculateDoctorCharges, editingCharges],
   )
 
   // Remove modality
@@ -132,7 +136,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
         return copy
       })
     },
-    [modalities, onChange]
+    [modalities, onChange],
   )
 
   // Start editing charges
@@ -203,9 +207,9 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                     <div className="space-y-1">
                       <Label className="text-xs font-medium text-gray-600">Specialist *</Label>
                       <SearchDropdown
-                        options={getAvailableSpecialists.map(spec => ({
+                        options={getAvailableSpecialists.map((spec) => ({
                           service: spec,
-                          amount: 0
+                          amount: 0,
                         }))}
                         value={modality.specialist || ""}
                         onSelect={(spec) => {
@@ -249,10 +253,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           <option value="">Select</option>
                           {VisitTypeOptions.map((option) => {
                             const doc = doctors.find((d) => d.id === modality.doctor)
-                            const charge =
-                              doc && option.value === "first"
-                                ? doc.firstVisitCharge
-                                : doc?.followUpCharge
+                            const charge = doc && option.value === "first" ? doc.firstVisitCharge : doc?.followUpCharge
                             return (
                               <option key={option.value} value={option.value}>
                                 {option.label}
@@ -306,6 +307,46 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           </div>
                         )}
                       </div>
+                    </div>
+                  </div>
+                ) : modality.type === "custom" ? ( // New custom service fields
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* Custom Service Name */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-600">Custom Service Name *</Label>
+                      <Input
+                        type="text"
+                        placeholder="Enter service name"
+                        value={modality.service || ""}
+                        onChange={(e) => updateModality(modality.id, { service: e.target.value })}
+                        className="h-9"
+                      />
+                    </div>
+                    {/* Custom Service Amount */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-600">Amount *</Label>
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          placeholder="Enter amount"
+                          value={modality.charges}
+                          onChange={(e) => updateModality(modality.id, { charges: Number(e.target.value) })}
+                          className="h-9 pr-8"
+                        />
+                        <IndianRupeeIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                      </div>
+                    </div>
+                    {/* Doctor (optional for custom service) */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium text-gray-600">Doctor (Optional)</Label>
+                      <DoctorSearchDropdown
+                        doctors={doctors}
+                        value={modality.doctor || ""}
+                        onSelect={(doctorId) => {
+                          updateModality(modality.id, { doctor: doctorId })
+                        }}
+                        placeholder="Select doctor"
+                      />
                     </div>
                   </div>
                 ) : (

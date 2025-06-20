@@ -23,7 +23,7 @@ export interface IFormInput {
 
 export interface ModalitySelection {
   id: string
-  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology"
+  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom"
   doctor?: string
   specialist?: string
   visitType?: "first" | "followup"
@@ -31,6 +31,7 @@ export interface ModalitySelection {
   study?: string
   charges: number
 }
+
 
 export interface PatientRecord {
   id: string
@@ -110,6 +111,8 @@ export const ModalityOptions = [
   { value: "pathology",    label: "Pathology",     baseCharge: 200 },
   { value: "ipd",          label: "IPD",           baseCharge: 1000 },
   { value: "radiology",    label: "Radiology",     baseCharge: 800 },
+  { value: "custom", label: "Custom Service", baseCharge: 0 },
+
 ]
 
 export const VisitTypeOptions = [

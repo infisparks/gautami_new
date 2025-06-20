@@ -31,6 +31,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ModalitySelector } from "./modality-selector"
 import type { Doctor } from "./types"
+import { DoctorSearchDropdown } from "./Component/doctor-search-dropdown" // Import DoctorSearchDropdown
 
 interface PatientFormProps {
   form: UseFormReturn<IFormInput>
@@ -362,6 +363,26 @@ export function PatientForm({
                 )}
               />
               {errors.gender && <p className="text-sm text-red-500">{errors.gender.message}</p>}
+            </div>
+
+            {/* Consulting Doctor - New Field */}
+            <div className="space-y-2">
+              <Label htmlFor="doctor" className="text-sm font-medium">
+                Consulting Doctor (Optional)
+              </Label>
+              <Controller
+                control={control}
+                name="doctor"
+                render={({ field }) => (
+                  <DoctorSearchDropdown
+                    doctors={doctors}
+                    value={field.value || ""}
+                    onSelect={field.onChange}
+                    placeholder="Select consulting doctor"
+                  />
+                )}
+              />
+              {errors.doctor && <p className="text-sm text-red-500">{errors.doctor.message}</p>}
             </div>
           </div>
 
