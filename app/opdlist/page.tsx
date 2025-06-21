@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { db } from "@/lib/firebase";
+import { eachDayOfInterval } from "date-fns";
 import { ref, query, get } from "firebase/database";
 import { useRouter } from "next/navigation";
 import { format, startOfWeek, endOfWeek, isWithinInterval } from "date-fns";
@@ -124,18 +125,14 @@ export default function ManageOPDPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const opdRef = ref(db, "patients/opddetail");
+      const todayKey = getTodayDateKey(); // eg: 2024-06-21
+      const opdRef = ref(db, `patients/opddetail/${todayKey}`);
       const snap = await get(query(opdRef));
       const data = snap.val() as Record<string, any> | null;
-      const todayKey = getTodayDateKey();
-      const result = flattenAppointments(data, (a) => {
-        return (a.date || "").split("T")[0] === todayKey;
-      });
+      const result = flattenAppointments(data, () => true); // No filter, already by date
       setAppointments(result);
       setDownloadedCount(result.length);
-      // Show size of all data fetched:
-      const json = JSON.stringify(data || {});
-      setDownloadedBytes(byteSize(json));
+      setDownloadedBytes(byteSize(JSON.stringify(data || {})));
     } catch (err) {
       setError("Failed to load today's appointments");
       setAppointments([]);
@@ -151,19 +148,33 @@ export default function ManageOPDPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const opdRef = ref(db, "patients/opddetail");
-      const snap = await get(query(opdRef));
-      const data = snap.val() as Record<string, any> | null;
       const start = startOfWeek(new Date(), { weekStartsOn: 1 });
       const end = endOfWeek(new Date(), { weekStartsOn: 1 });
-      const result = flattenAppointments(data, (a) => {
-        const apptDate = new Date(a.date);
-        return isWithinInterval(apptDate, { start, end });
+      const days = eachDayOfInterval({ start, end });
+  
+      const fetches = days.map(day => {
+        const dateKey = format(day, "yyyy-MM-dd");
+        const opdRef = ref(db, `patients/opddetail/${dateKey}`);
+        return get(query(opdRef)).then(snap => ({
+          data: snap.val() as Record<string, any> | null,
+          dateKey,
+        }));
       });
-      setAppointments(result);
-      setDownloadedCount(result.length);
-      const json = JSON.stringify(data || {});
-      setDownloadedBytes(byteSize(json));
+  
+      const snaps = await Promise.all(fetches);
+  
+      let allResults: Appointment[] = [];
+      let totalBytes = 0;
+      for (const { data } of snaps) {
+        if (data) {
+          allResults = allResults.concat(flattenAppointments(data, () => true));
+          totalBytes += byteSize(JSON.stringify(data));
+        }
+      }
+  
+      setAppointments(allResults);
+      setDownloadedCount(allResults.length);
+      setDownloadedBytes(totalBytes);
     } catch (err) {
       setError("Failed to load this week's appointments");
       setAppointments([]);
@@ -173,6 +184,7 @@ export default function ManageOPDPage() {
       setIsLoading(false);
     }
   }, []);
+  
 
   // Search only when search term is >= 5
   useEffect(() => {
@@ -185,18 +197,47 @@ export default function ManageOPDPage() {
       setSearching(true);
       setError(null);
       try {
-        const opdRef = ref(db, "patients/opddetail");
-        const snap = await get(query(opdRef));
-        const data = snap.val() as Record<string, any> | null;
+        let results: Appointment[] = [];
+        let totalBytes = 0;
         const t = searchTerm.toLowerCase();
-        const result = flattenAppointments(data, (a) =>
-          (a.name || "").toLowerCase().includes(t) ||
-          (a.phone || "").includes(t)
-        );
-        setAppointments(result);
-        setDownloadedCount(result.length);
-        const json = JSON.stringify(data || {});
-        setDownloadedBytes(byteSize(json));
+  
+        if (tab === "today") {
+          const todayKey = getTodayDateKey();
+          const opdRef = ref(db, `patients/opddetail/${todayKey}`);
+          const snap = await get(query(opdRef));
+          const data = snap.val() as Record<string, any> | null;
+          if (data) {
+            results = flattenAppointments(data, (a) =>
+              (a.name || "").toLowerCase().includes(t) ||
+              (a.phone || "").includes(t)
+            );
+            totalBytes += byteSize(JSON.stringify(data));
+          }
+        } else {
+          // week search
+          const start = startOfWeek(new Date(), { weekStartsOn: 1 });
+          const end = endOfWeek(new Date(), { weekStartsOn: 1 });
+          const days = eachDayOfInterval({ start, end });
+          for (const day of days) {
+            const dateKey = format(day, "yyyy-MM-dd");
+            const opdRef = ref(db, `patients/opddetail/${dateKey}`);
+            const snap = await get(query(opdRef));
+            const data = snap.val() as Record<string, any> | null;
+            if (data) {
+              results = results.concat(
+                flattenAppointments(data, (a) =>
+                  (a.name || "").toLowerCase().includes(t) ||
+                  (a.phone || "").includes(t)
+                )
+              );
+              totalBytes += byteSize(JSON.stringify(data));
+            }
+          }
+        }
+  
+        setAppointments(results);
+        setDownloadedCount(results.length);
+        setDownloadedBytes(totalBytes);
       } catch (err) {
         setError("Failed to search appointments");
         setAppointments([]);
@@ -208,7 +249,7 @@ export default function ManageOPDPage() {
     }, 500);
     return () => clearTimeout(timeout);
   }, [searchTerm, tab, fetchTodayAppointments, fetchWeekAppointments]);
-
+  
   // Initial load
   useEffect(() => {
     setSearchTerm("");

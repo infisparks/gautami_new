@@ -8,34 +8,35 @@ import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { ArrowLeft, Save, User, Clock, AlertCircle } from "lucide-react"
 import { useRouter, useSearchParams } from "next/navigation"
-
 import { EditAppointmentForm } from "./edit-appointment-form"
 import type { IFormInput, Doctor, ModalitySelection } from "../opd/types"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { format } from "date-fns"
 
 function formatAMPM(date: Date): string {
   let hours = date.getHours()
-  const minutes = date.getMinutes()  // now a const
+  const minutes = date.getMinutes()
   const ampm = hours >= 12 ? "PM" : "AM"
   hours = hours % 12 || 12
   const minutesStr = minutes < 10 ? `0${minutes}` : minutes.toString()
   return `${hours}:${minutesStr} ${ampm}`
 }
 
-
 export default function EditAppointmentPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const uhid = searchParams.get("uhid")
   const appointmentId = searchParams.get("id")
+  const urlDate = searchParams.get("date") // try to get date from query
 
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [dateKey, setDateKey] = useState<string | null>(urlDate) // Track the dateKey for correct node
 
   const form = useForm<IFormInput>({
     defaultValues: {
@@ -62,7 +63,6 @@ export default function EditAppointmentPage() {
     },
     mode: "onChange",
   })
-
   const { handleSubmit, reset } = form
 
   // Auth listener
@@ -72,7 +72,7 @@ export default function EditAppointmentPage() {
     })
   }, [])
 
-  // Fetch doctors
+  // Fetch doctors (unchanged)
   useEffect(() => {
     const fetchDoctors = async () => {
       try {
@@ -81,8 +81,6 @@ export default function EditAppointmentPage() {
         if (snapshot.exists()) {
           const data = snapshot.val()
           let doctorsList: Doctor[] = []
-
-          // Handle both array and object structures based on your data
           if (Array.isArray(data)) {
             doctorsList = data.map((doc: any) => ({
               id: doc.id,
@@ -104,8 +102,6 @@ export default function EditAppointmentPage() {
               ipdCharges: data[key].ipdCharges || {},
             }))
           }
-
-          // Add a "no doctor" option
           doctorsList.push({
             id: "no_doctor",
             name: "No Doctor",
@@ -114,7 +110,6 @@ export default function EditAppointmentPage() {
             firstVisitCharge: 0,
             followUpCharge: 0,
           })
-
           setDoctors(doctorsList)
         }
       } catch (error) {
@@ -122,11 +117,10 @@ export default function EditAppointmentPage() {
         toast.error("Failed to load doctors")
       }
     }
-
     fetchDoctors()
   }, [])
 
-  // Load appointment data
+  // Load appointment data from new date-based structure
   useEffect(() => {
     const loadAppointmentData = async () => {
       if (!uhid || !appointmentId) {
@@ -134,43 +128,62 @@ export default function EditAppointmentPage() {
         setIsLoading(false)
         return
       }
-
-      if (doctors.length === 0) {
-        return // Wait for doctors to load first
-      }
+      if (doctors.length === 0) return // Wait for doctors to load
 
       setIsLoading(true)
       try {
-        // Fetch appointment data
-        const appointmentRef = ref(db, `patients/opddetail/${uhid}/${appointmentId}`)
-        const appointmentSnap = await get(appointmentRef)
+        let foundDateKey = dateKey
 
+        // If we don't already have dateKey, scan all dates for this appointment
+        if (!foundDateKey) {
+          const opdRef = ref(db, `patients/opddetail`)
+          const opdSnap = await get(opdRef)
+          if (!opdSnap.exists()) {
+            setError("Appointment data not found.")
+            setIsLoading(false)
+            return
+          }
+          const opdData = opdSnap.val()
+          // Scan all dates to find this UHID/ID combo
+          outer: for (const dateK of Object.keys(opdData)) {
+            const uhidData = opdData[dateK]?.[uhid]
+            if (uhidData && uhidData[appointmentId]) {
+              foundDateKey = dateK
+              break outer
+            }
+          }
+          if (!foundDateKey) {
+            setError("Appointment not found in any date node.")
+            setIsLoading(false)
+            return
+          }
+          setDateKey(foundDateKey)
+        }
+
+        // Now, load appointment data using foundDateKey
+        const appointmentRef = ref(db, `patients/opddetail/${foundDateKey}/${uhid}/${appointmentId}`)
+        const appointmentSnap = await get(appointmentRef)
         if (!appointmentSnap.exists()) {
           setError(`Appointment not found for UHID: ${uhid} and ID: ${appointmentId}`)
           setIsLoading(false)
           return
         }
-
         const appointmentData = appointmentSnap.val()
 
-        // Fetch patient data
+        // Patient info
         const patientRef = ref(db, `patients/patientinfo/${uhid}`)
         const patientSnap = await get(patientRef)
         const patientData = patientSnap.exists() ? patientSnap.val() : {}
 
-        // Process modalities
+        // Modalities
         let modalities: ModalitySelection[] = []
-
         if (appointmentData.modalities && Array.isArray(appointmentData.modalities)) {
-          // New format - already has modalities array
           modalities = appointmentData.modalities.map((modality: any, index: number) => {
-            // Find doctor ID from name
             let doctorId = ""
             if (modality.doctor) {
               const matchedDoctor = doctors.find((d) => d.name === modality.doctor)
               doctorId = matchedDoctor ? matchedDoctor.id : "no_doctor"
             }
-
             return {
               id: `modality_${Date.now()}_${index}`,
               type: modality.type,
@@ -182,32 +195,8 @@ export default function EditAppointmentPage() {
               charges: modality.charges || 0,
             }
           })
-        } else if (appointmentData.modality) {
-          // Old format - convert single modality to array
-          const charges = appointmentData.payment?.doctorCharges || 0
-
-          // Find doctor ID from name
-          let doctorId = ""
-          if (appointmentData.doctor) {
-            const matchedDoctor = doctors.find((d) => d.name === appointmentData.doctor)
-            doctorId = matchedDoctor ? matchedDoctor.id : "no_doctor"
-          }
-
-          modalities = [
-            {
-              id: `modality_${Date.now()}_0`,
-              type: appointmentData.modality,
-              doctor: doctorId,
-              specialist: appointmentData.specialist || "",
-              visitType: appointmentData.visitType || "first",
-              service: appointmentData.service || "",
-              study: appointmentData.study || "",
-              charges: charges,
-            },
-          ]
         }
 
-        // Reset form with loaded data
         let doctorId = ""
         if (appointmentData.doctor) {
           const matchedDoctor = doctors.find((d) => d.name === appointmentData.doctor)
@@ -236,7 +225,6 @@ export default function EditAppointmentPage() {
           study: appointmentData.study || "",
           referredBy: appointmentData.referredBy || "",
         })
-
         setError(null)
       } catch (error) {
         console.error("Error loading appointment:", error)
@@ -245,23 +233,20 @@ export default function EditAppointmentPage() {
         setIsLoading(false)
       }
     }
-
     loadAppointmentData()
-  }, [uhid, appointmentId, doctors, reset])
+  }, [uhid, appointmentId, doctors, reset, dateKey])
 
+  // On save: always update correct dateKey path
   const onSubmit = async (data: IFormInput) => {
-    if (!uhid || !appointmentId) {
+    if (!uhid || !appointmentId || !dateKey) {
       toast.error("Missing appointment information")
       return
     }
-
     setIsSaving(true)
     try {
       const cash = data.appointmentType === "visithospital" ? Number(data.cashAmount) || 0 : 0
       const online = data.appointmentType === "visithospital" ? Number(data.onlineAmount) || 0 : 0
       const discount = data.appointmentType === "visithospital" ? Number(data.discount) || 0 : 0
-
-      // Calculate total charges from all modalities
       const totalCharges = data.modalities.reduce((total, modality) => total + modality.charges, 0)
       const totalPaid = cash + online
 
@@ -280,7 +265,6 @@ export default function EditAppointmentPage() {
         const doctorName = modality.doctor
           ? doctors.find((d) => d.id === modality.doctor)?.name || modality.doctor
           : null
-
         return {
           type: modality.type,
           doctor: doctorName,
@@ -291,11 +275,9 @@ export default function EditAppointmentPage() {
           charges: modality.charges,
         }
       })
-
-      // Get main doctor name from ID
       const mainDoctorName = data.doctor ? doctors.find((d) => d.id === data.doctor)?.name || data.doctor : null
 
-      // Update appointment data
+      // Update appointment data (always use dateKey)
       const updatedAppointmentData = {
         name: data.name,
         phone: data.phone,
@@ -313,12 +295,9 @@ export default function EditAppointmentPage() {
         lastModifiedBy: currentUserEmail || "unknown",
         lastModifiedAt: new Date().toISOString(),
       }
-
-      await update(ref(db, `patients/opddetail/${uhid}/${appointmentId}`), updatedAppointmentData)
-
-      // Update payment information
+      await update(ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}`), updatedAppointmentData)
       if (data.appointmentType === "visithospital") {
-        await update(ref(db, `patients/opddetail/${uhid}/${appointmentId}/payment`), {
+        await update(ref(db, `patients/opddetail/${dateKey}/${uhid}/${appointmentId}/payment`), {
           cashAmount: cash,
           onlineAmount: online,
           paymentMethod: data.paymentMethod,
@@ -328,7 +307,6 @@ export default function EditAppointmentPage() {
           updatedAt: new Date().toISOString(),
         })
       }
-
       // Log the change
       const changesRef = ref(db, "opdChanges")
       const newChangeRef = push(changesRef)
@@ -341,7 +319,6 @@ export default function EditAppointmentPage() {
         editedAt: new Date().toISOString(),
         changes: updatedAppointmentData,
       })
-
       toast.success("Appointment updated successfully!")
       setTimeout(() => {
         router.push("/opdlist")

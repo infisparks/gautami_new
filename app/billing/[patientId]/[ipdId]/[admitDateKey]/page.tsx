@@ -13,6 +13,8 @@ import { motion, AnimatePresence } from "framer-motion"
 import { CheckCircle } from "lucide-react"
 // ***** IMPORTANT: Use CreatableSelect from react-select/creatable
 import CreatableSelect from "react-select/creatable"
+// Import `Select` from `react-select`
+import Select from "react-select"
 
 import {
   Plus,
@@ -42,7 +44,7 @@ import {
 } from "lucide-react"
 import { format, parseISO } from "date-fns"
 import { Dialog, Transition } from "@headlessui/react"
-import InvoiceDownload from "./../../InvoiceDownload"
+import InvoiceDownload from "../../../InvoiceDownload"
 
 // ===== Interfaces =====
 interface ServiceItem {
@@ -54,7 +56,7 @@ interface ServiceItem {
 }
 
 interface Payment {
-  id?: string
+  id?: string // Changed to optional string to match Firebase key behavior
   amount: number
   paymentType: string
   type?: string
@@ -64,6 +66,7 @@ interface Payment {
 interface AdditionalServiceForm {
   serviceName: string
   amount: number
+  quantity: number // NEW: Added quantity field
 }
 
 interface PaymentForm {
@@ -76,7 +79,7 @@ interface DiscountForm {
 }
 
 interface DoctorVisitForm {
-  doctorId?: string  
+  doctorId?: string
   visitCharge: number
   visitTimes: number
   customDoctorName?: string
@@ -116,6 +119,12 @@ const additionalServiceSchema = yup
       .typeError("Amount must be a number")
       .positive("Must be positive")
       .required("Amount is required"),
+    quantity: yup // NEW: Added quantity validation
+      .number()
+      .typeError("Quantity must be a number")
+      .integer("Quantity must be an integer")
+      .min(1, "Quantity must be at least 1")
+      .required("Quantity is required"),
   })
   .required()
 
@@ -178,7 +187,7 @@ interface IDoctor {
 }
 
 export default function BillingPage() {
-  const { patientId, ipdId } = useParams() as { patientId: string; ipdId: string }
+  const { patientId, ipdId, admitDateKey } = useParams() as { patientId: string; ipdId: string; admitDateKey: string }
   const router = useRouter()
 
   const [selectedRecord, setSelectedRecord] = useState<BillingRecord | null>(null)
@@ -186,8 +195,6 @@ export default function BillingPage() {
   const [isPaymentHistoryOpen, setIsPaymentHistoryOpen] = useState(false)
   const [beds, setBeds] = useState<any>({})
   const [doctors, setDoctors] = useState<IDoctor[]>([])
-  const [filteredDoctors, setFilteredDoctors] = useState<IDoctor[]>([])
-  const [doctorSearchTerm, setDoctorSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState<"overview" | "services" | "payments" | "consultants">("overview")
   const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
   const [discountUpdated, setDiscountUpdated] = useState(false)
@@ -195,167 +202,7 @@ export default function BillingPage() {
   // State to hold service options for CreatableSelect
   const [serviceOptions, setServiceOptions] = useState<{ value: string; label: string; amount: number }[]>([])
 
-  // ===== Fetch Beds Data =====
-  useEffect(() => {
-    const bedsRef = ref(db, "beds")
-    const unsubscribe = onValue(bedsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setBeds(snapshot.val())
-      } else {
-        setBeds({})
-      }
-    })
-    return () => unsubscribe()
-  }, [])
-
-  // ===== Fetch Doctors List =====
-  useEffect(() => {
-    const docsRef = ref(db, "doctors")
-    const unsubscribe = onValue(docsRef, (snapshot) => {
-      if (!snapshot.exists()) {
-        setDoctors([])
-        setFilteredDoctors([])
-        return
-      }
-      const data = snapshot.val()
-      const list: IDoctor[] = Object.keys(data).map((key) => ({
-        id: key,
-        name: data[key].name,
-        specialist: data[key].specialist,
-        department: data[key].department,
-        opdCharge: data[key].opdCharge,
-        ipdCharges: data[key].ipdCharges,
-      }))
-      setDoctors(list)
-      setFilteredDoctors(list)
-    })
-    return () => unsubscribe()
-  }, [])
-
-  // ===== Filter Doctors based on search term =====
-  useEffect(() => {
-    if (!doctorSearchTerm.trim()) {
-      setFilteredDoctors(doctors)
-    } else {
-      const filtered = doctors.filter(
-        (doctor) =>
-          doctor.name.toLowerCase().includes(doctorSearchTerm.toLowerCase()) ||
-          doctor.specialist.toLowerCase().includes(doctorSearchTerm.toLowerCase()),
-      )
-      setFilteredDoctors(filtered)
-    }
-  }, [doctorSearchTerm, doctors])
-
-  // ===== Fetch Service Options for CreatableSelect =====
-  useEffect(() => {
-    const serviceRef = ref(db, "service")
-    const unsubscribe = onValue(serviceRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val()
-        const options = Object.keys(data).map((key) => ({
-          value: key,
-          label: data[key].serviceName,
-          amount: Number(data[key].amount) || 0,
-        }))
-        setServiceOptions(options)
-      } else {
-        setServiceOptions([])
-      }
-    })
-    return () => unsubscribe()
-  }, [])
-
-  // ===== Load Selected Patient Record =====
-  // We need both patient demographics (from "patients/patientinfo/[patientId]")
-  // and IPD‐details (from "patients/ipddetail/userinfoipd/[patientId]/[ipdId]")
-  useEffect(() => {
-    if (!patientId || !ipdId) return
-
-    // 1) Fetch patient demographic data
-    const patientInfoRef = ref(db, `patients/patientinfo/${patientId}`)
-    onValue(patientInfoRef, (snapInfo) => {
-      if (!snapInfo.exists()) return
-      const patientData = snapInfo.val()
-
-      // 2) Fetch IPD detail under new structure:
-      const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`)
-      onValue(ipdRef, async (snapIPD) => {
-        if (!snapIPD.exists()) {
-          return
-        }
-        const ipd = snapIPD.val()
-
-        // Build services[]
-        const servicesArray: ServiceItem[] = ipd.services
-          ? ipd.services.map((svc: any) => ({
-              serviceName: svc.serviceName || "",
-              doctorName: svc.doctorName || "",
-              type: svc.type || "service",
-              amount: Number(svc.amount) || 0,
-              createdAt: svc.createdAt || "",
-            }))
-          : []
-
-        // Build payments[] by fetching from billing node:
-        let paymentsArray: Payment[] = []
-        const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}/payments`)
-        const billingSnap = await get(billingRef)
-        if (billingSnap.exists()) {
-          const paymentsData: Record<string, any> = billingSnap.val()
-          paymentsArray = Object.keys(paymentsData).map((k) => ({
-            id: k,
-            amount: Number(paymentsData[k].amount) || 0,
-            paymentType: paymentsData[k].paymentType || "cash",
-            type: paymentsData[k].type || "advance",
-            date: paymentsData[k].date || new Date().toISOString(),
-          }))
-        }
-
-        // Fetch deposit total from billing node:
-        let depositTotal = 0
-        const billingRootRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}`)
-        const billingRootSnap = await get(billingRootRef)
-        if (billingRootSnap.exists()) {
-          const billingRootData = billingRootSnap.val()
-          depositTotal = Number(billingRootData.totalDeposit) || 0
-        }
-
-        const record: BillingRecord = {
-          patientId,
-          uhid: patientData.uhid ?? patientId,
-          ipdId,
-          name: patientData.name || "Unknown",
-          mobileNumber: patientData.phone || "",
-          address: patientData.address || "",
-          age: patientData.age || "",
-          gender: patientData.gender || "",
-          relativeName: ipd.relativeName || "",
-          relativePhone: ipd.relativePhone || "",
-          relativeAddress: ipd.relativeAddress || "",
-          dischargeDate: ipd.dischargeDate || "",
-          amount: depositTotal,
-          paymentType: ipd.paymentType || "advance",
-          roomType: ipd.roomType || "",
-          bed: ipd.bed || "",
-          services: servicesArray,
-          payments: paymentsArray,
-          discount: ipd.discount ? Number(ipd.discount) : 0,
-          admitDate: ipd.date ? ipd.date : ipd.createdAt ? ipd.createdAt : undefined,
-          createdAt: ipd.createdAt || "",
-        }
-
-        setSelectedRecord(record)
-
-        // Initialize discount form if there's an existing discount
-        if (record.discount) {
-          resetDiscount({ discount: record.discount })
-        }
-      })
-    })
-    // No need to explicitly unsubscribe here since onValue returns a function, but Next.js 13 / React might remount.
-  }, [patientId, ipdId])
-
-  // ===== React Hook Form setups =====
+  // ===== React Hook Form setups (Moved to top-level) =====
 
   // Additional Service Form (with CreatableSelect)
   const {
@@ -367,7 +214,7 @@ export default function BillingPage() {
     control: serviceControl,
   } = useForm<AdditionalServiceForm>({
     resolver: yupResolver(additionalServiceSchema),
-    defaultValues: { serviceName: "", amount: 0 },
+    defaultValues: { serviceName: "", amount: 0, quantity: 1 }, // UPDATED: Added default quantity
   })
 
   // Payment Form
@@ -404,6 +251,7 @@ export default function BillingPage() {
     reset: resetVisit,
     watch: watchVisit,
     setValue: setVisitValue,
+    control: visitControl, // ADDED: Destructure control for DoctorVisitForm
   } = useForm<DoctorVisitForm>({
     resolver: yupResolver(doctorVisitSchema),
     defaultValues: {
@@ -415,6 +263,215 @@ export default function BillingPage() {
     },
   })
 
+  // ===== Fetch Beds Data =====
+  useEffect(() => {
+    const bedsRef = ref(db, "beds")
+    const unsubscribe = onValue(bedsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setBeds(snapshot.val())
+      } else {
+        setBeds({})
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // ===== Fetch Doctors List =====
+  useEffect(() => {
+    const docsRef = ref(db, "doctors")
+    const unsubscribe = onValue(docsRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        setDoctors([])
+        return
+      }
+      const data = snapshot.val()
+      const list: IDoctor[] = Object.keys(data).map((key) => ({
+        id: key,
+        name: data[key].name,
+        specialist: data[key].specialist,
+        department: data[key].department,
+        opdCharge: data[key].opdCharge,
+        ipdCharges: data[key].ipdCharges,
+      }))
+      setDoctors(list)
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // ===== Fetch Service Options for CreatableSelect =====
+  useEffect(() => {
+    const serviceRef = ref(db, "service")
+    const unsubscribe = onValue(serviceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val()
+        const options = Object.keys(data).map((key) => ({
+          value: key,
+          label: data[key].serviceName,
+          amount: Number(data[key].amount) || 0,
+        }))
+        setServiceOptions(options)
+      } else {
+        setServiceOptions([])
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
+  // Helper to format date for Firebase path key
+  const getAdmitDateKey = (dateString: string | undefined) => {
+    if (!dateString) return ""
+    try {
+      // Assuming dateString is an ISO string like "2025-06-21T06:04:51.312Z"
+      return format(parseISO(dateString), "yyyy-MM-dd")
+    } catch (e) {
+      console.error("Error parsing date for admitDateKey:", e)
+      return ""
+    }
+  }
+
+  // ===== Load Selected Patient Record =====
+  // We need both patient demographics (from "patients/patientinfo/[patientId]")
+  // and IPD‐details (from "patients/ipddetail/userinfoipd/[patientId]/[ipdId]")
+  useEffect(() => {
+    if (!patientId || !ipdId || !admitDateKey) return
+
+    setLoading(true)
+
+    const ipdBillingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${admitDateKey}/${patientId}/${ipdId}`)
+    const ipdInfoRef = ref(db, `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`)
+    const patientInfoRef = ref(db, `patients/patientinfo/${patientId}`)
+
+    // Add explicit types here
+    let billingData: Record<string, any> | null = null
+    let infoData: Record<string, any> | null = null
+    let patientInfoData: Record<string, any> | null = null
+    let billingLoaded = false
+    let infoLoaded = false
+    let patientInfoLoaded = false
+
+    const checkAndSetRecord = () => {
+      if (billingLoaded && infoLoaded && patientInfoLoaded) {
+        let record: BillingRecord | null = null
+
+        if (infoData) {
+          record = {
+            patientId,
+            uhid: infoData.uhid ?? patientId,
+            ipdId,
+            name: infoData.name || (patientInfoData?.name ?? "Unknown"),
+            mobileNumber: infoData.phone || (patientInfoData?.phone ?? ""),
+            address: infoData.address || (patientInfoData?.address ?? ""),
+            age: infoData.age || (patientInfoData?.age ?? ""),
+            gender: infoData.gender || (patientInfoData?.gender ?? ""),
+            relativeName: infoData.relativeName || "",
+            relativePhone: infoData.relativePhone || "",
+            relativeAddress: infoData.relativeAddress || "",
+            dischargeDate: infoData.dischargeDate || "",
+            amount: 0,
+            paymentType: infoData.paymentType || "advance",
+            roomType: infoData.roomType || "",
+            bed: infoData.bed || "",
+            services: [],
+            payments: [],
+            discount: 0,
+            admitDate: infoData.admissionDate
+              ? infoData.admissionDate
+              : infoData.createdAt
+                ? infoData.createdAt
+                : undefined,
+            createdAt: infoData.createdAt || "",
+          }
+
+          if (billingData) {
+            const servicesArray =
+              billingData.services && Array.isArray(billingData.services)
+                ? billingData.services.map((svc: any) => ({
+                    serviceName: svc.serviceName || "",
+                    doctorName: svc.doctorName || "",
+                    type: svc.type || "service",
+                    amount: Number(svc.amount) || 0,
+                    createdAt: svc.createdAt || "",
+                  }))
+                : []
+
+            let paymentsArray: Payment[] = []
+            if (billingData.payments) {
+              paymentsArray = Object.keys(billingData.payments).map((k) => ({
+                id: k,
+                amount: Number(billingData?.payments[k].amount) || 0,
+                paymentType: billingData?.payments[k].paymentType || "cash",
+                type: billingData?.payments[k].type || "advance",
+                date: billingData?.payments[k].date || new Date().toISOString(),
+              }))
+            }
+
+            const depositTotal = Number(billingData.totalDeposit) || 0
+
+            record = {
+              ...record,
+              amount: depositTotal,
+              services: servicesArray,
+              payments: paymentsArray,
+              discount: billingData.discount ? Number(billingData.discount) : 0,
+            }
+          } else {
+            toast.info("No billing record found for this IPD entry. Displaying patient details only.")
+          }
+        } else {
+          toast.error("Patient information not found.")
+        }
+
+        setSelectedRecord(record)
+        if (record?.discount) {
+          resetDiscount({ discount: record.discount })
+        }
+        setLoading(false)
+      }
+    }
+
+    const unsubscribeBilling = onValue(
+      ipdBillingRef,
+      (snap) => {
+        billingData = snap.val() as Record<string, any> | null
+        billingLoaded = true
+        checkAndSetRecord()
+      },
+      (error) => {
+        billingLoaded = true
+        checkAndSetRecord()
+      },
+    )
+
+    const unsubscribeInfo = onValue(
+      ipdInfoRef,
+      (snap) => {
+        infoData = snap.val() as Record<string, any> | null
+        infoLoaded = true
+        checkAndSetRecord()
+      },
+      (error) => {
+        infoLoaded = true
+        checkAndSetRecord()
+      },
+    )
+
+    // NEW: fetch patientinfo ONCE (no onValue, just get)
+    get(patientInfoRef)
+      .then((snap) => {
+        patientInfoData = snap.exists() ? (snap.val() as Record<string, any>) : null
+        patientInfoLoaded = true
+        checkAndSetRecord()
+      })
+      .catch(() => {
+        patientInfoLoaded = true
+        checkAndSetRecord()
+      })
+
+    return () => {
+      unsubscribeBilling()
+      unsubscribeInfo()
+    }
+  }, [patientId, ipdId, admitDateKey, resetDiscount])
   // Auto-fill visit charge when a doctor is selected
   const watchSelectedDoctorId = watchVisit("doctorId")
   const watchIsCustomDoctor = watchVisit("isCustomDoctor")
@@ -526,17 +583,29 @@ export default function BillingPage() {
   const onSubmitAdditionalService: SubmitHandler<AdditionalServiceForm> = async (data) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot add service.")
+      setLoading(false)
+      return
+    }
     try {
       const oldServices = [...selectedRecord.services]
-      const newItem: ServiceItem = {
-        serviceName: data.serviceName,
-        doctorName: "",
-        type: "service",
-        amount: Number(data.amount),
-        createdAt: new Date().toLocaleString(),
+      const newItems: ServiceItem[] = [] // Changed to an array to hold multiple items
+
+      // Loop based on quantity to create multiple service entries
+      for (let i = 0; i < data.quantity; i++) {
+        const newItem: ServiceItem = {
+          serviceName: data.serviceName,
+          doctorName: "", // Services don't have doctorName
+          type: "service",
+          amount: Number(data.amount),
+          createdAt: new Date().toLocaleString(), // Unique timestamp for each item
+        }
+        newItems.push(newItem)
       }
 
-      const updatedServices = [newItem, ...oldServices]
+      const updatedServices = [...newItems, ...oldServices] // Add all new items
       const sanitizedServices = updatedServices.map((svc) => ({
         serviceName: svc.serviceName || "",
         doctorName: svc.doctorName || "",
@@ -545,13 +614,16 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
+      )
       await update(recordRef, { services: sanitizedServices })
 
-      toast.success("Additional service added successfully!")
+      toast.success(`Additional service${data.quantity > 1 ? "s" : ""} added successfully!`) // UPDATED: Toast message reflects quantity
       const updatedRecord = { ...selectedRecord, services: sanitizedServices }
       setSelectedRecord(updatedRecord)
-      resetService({ serviceName: "", amount: 0 })
+      resetService({ serviceName: "", amount: 0, quantity: 1 }) // UPDATED: Reset quantity to 1
     } catch (error) {
       console.error("Error adding service:", error)
       toast.error("Failed to add service. Please try again.")
@@ -564,26 +636,36 @@ export default function BillingPage() {
   const onSubmitPayment: SubmitHandler<PaymentForm> = async (formData) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot record payment.")
+      setLoading(false)
+      return
+    }
     try {
-      // Push new payment under billing node
+      // Push new payment directly under the ipdId node
       const newPaymentRef = push(
-        ref(db, `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`),
+        ref(
+          db,
+          `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments`, // Changed path
+        ),
       )
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
         type: "advance",
         date: new Date().toISOString(),
+        id: newPaymentRef.key!, // Asserting key is string, as Firebase push keys are never null
       }
       await update(newPaymentRef, newPayment)
 
-      // Update deposit total under billing node
+      // Update deposit total directly under the ipdId node
       const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
-      const billingRootRef = ref(
+      const recordRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
-      await update(billingRootRef, { totalDeposit: updatedDeposit })
+      await update(recordRef, { totalDeposit: updatedDeposit })
 
       // Optional: send payment notification
       await sendPaymentNotification(
@@ -594,7 +676,9 @@ export default function BillingPage() {
       )
 
       toast.success("Payment recorded successfully!")
-      const updatedPayments = [newPayment, ...selectedRecord.payments]
+      // To ensure the UI updates correctly, we need to fetch the new payment ID
+      // from the push operation. Firebase's push returns a reference with a key.
+      const updatedPayments = [newPayment, ...selectedRecord.payments] // newPayment already has the ID
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
       setSelectedRecord(updatedRecord)
       resetPayment({ paymentAmount: 0, paymentType: "" })
@@ -609,16 +693,26 @@ export default function BillingPage() {
   // 3. Discharge Patient
   const handleDischarge = () => {
     if (!selectedRecord) return
-    router.push(`/discharge-summary/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+    const admitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    router.push(`/discharge-summary/${selectedRecord.patientId}/${selectedRecord.ipdId}/${admitDateKey}`)
   }
 
   // 4. Apply Discount
   const onSubmitDiscount: SubmitHandler<DiscountForm> = async (formData) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot apply discount.")
+      setLoading(false)
+      return
+    }
     try {
       const discountVal = Number(formData.discount)
-      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
+      )
       await update(recordRef, { discount: discountVal })
 
       toast.success("Discount applied successfully!")
@@ -641,6 +735,12 @@ export default function BillingPage() {
   const onSubmitDoctorVisit: SubmitHandler<DoctorVisitForm> = async (data) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot add consultant charge.")
+      setLoading(false)
+      return
+    }
     try {
       let doctorName = ""
 
@@ -680,7 +780,10 @@ export default function BillingPage() {
         createdAt: svc.createdAt || new Date().toLocaleString(),
       }))
 
-      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
+      )
       await update(recordRef, { services: sanitizedServices })
 
       toast.success(
@@ -709,9 +812,18 @@ export default function BillingPage() {
   const handleDeleteServiceItem = async (item: ServiceItem) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot delete service.")
+      setLoading(false)
+      return
+    }
     try {
       const updatedServices = selectedRecord.services.filter((svc) => svc !== item)
-      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
+      )
       await update(recordRef, { services: updatedServices })
 
       toast.success("Service deleted successfully!")
@@ -729,20 +841,26 @@ export default function BillingPage() {
   const handleDeletePayment = async (paymentId: string, paymentAmount: number) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot delete payment.")
+      setLoading(false)
+      return
+    }
     try {
       const paymentRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`, // Changed path
       )
       await remove(paymentRef)
 
       // Adjust deposit after deleting payment
       const updatedDeposit = selectedRecord.amount - paymentAmount
-      const billingRootRef = ref(
+      const recordRef = ref(
         db,
-        `patients/ipddetail/userbillinginfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
       )
-      await update(billingRootRef, { totalDeposit: updatedDeposit })
+      await update(recordRef, { totalDeposit: updatedDeposit })
 
       const updatedPayments = selectedRecord.payments.filter((p) => p.id !== paymentId)
       toast.success("Payment deleted successfully!")
@@ -760,11 +878,20 @@ export default function BillingPage() {
   const handleDeleteConsultantCharges = async (doctorName: string) => {
     if (!selectedRecord) return
     setLoading(true)
+    const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
+    if (!currentAdmitDateKey) {
+      toast.error("Admission date not found for record. Cannot delete consultant charges.")
+      setLoading(false)
+      return
+    }
     try {
       const updatedServices = selectedRecord.services.filter(
         (svc) => svc.type !== "doctorvisit" || svc.doctorName !== doctorName,
       )
-      const recordRef = ref(db, `patients/ipddetail/userinfoipd/${selectedRecord.patientId}/${selectedRecord.ipdId}`)
+      const recordRef = ref(
+        db,
+        `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
+      )
       await update(recordRef, { services: updatedServices })
 
       toast.success(`Consultant charges for Dr. ${doctorName} deleted successfully!`)
@@ -779,6 +906,12 @@ export default function BillingPage() {
   }
 
   const serviceItems = selectedRecord?.services.filter((s) => s.type === "service") || []
+
+  // Prepare doctor options for react-select
+  const doctorOptions = doctors.map((doc) => ({
+    value: doc.id,
+    label: `${doc.name} (${doc.specialist})`,
+  }))
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-cyan-50 to-teal-50">
@@ -1310,6 +1443,23 @@ export default function BillingPage() {
                                 )}
                               </div>
 
+                              {/* NEW: Quantity Field */}
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                                <input
+                                  type="number"
+                                  {...registerService("quantity")}
+                                  min="1"
+                                  placeholder="e.g., 1"
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsService.quantity ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                />
+                                {errorsService.quantity && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsService.quantity.message}</p>
+                                )}
+                              </div>
+
                               <button
                                 type="submit"
                                 disabled={loading}
@@ -1638,44 +1788,39 @@ export default function BillingPage() {
                                 <div>
                                   <label className="block text-sm font-medium text-gray-700 mb-1">
                                     <Search size={16} className="inline mr-1" />
-                                    Search & Select Doctor
+                                    Select Doctor
                                   </label>
-
-                                  {/* Doctor Search Input */}
-                                  <div className="relative mb-2">
-                                    <Search className="absolute top-3 left-3 text-gray-400 h-4 w-4" />
-                                    <input
-                                      type="text"
-                                      placeholder="Search doctors by name or specialty..."
-                                      value={doctorSearchTerm}
-                                      onChange={(e) => setDoctorSearchTerm(e.target.value)}
-                                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                                    />
-                                  </div>
-
-                                  {/* Doctor Dropdown */}
-                                  <select
-                                    {...registerVisit("doctorId")}
-                                    className={`w-full px-3 py-2 rounded-lg border ${
-                                      errorsVisit.doctorId ? "border-red-500" : "border-gray-300"
-                                    } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
-                                  >
-                                    <option value="">-- Select Doctor --</option>
-                                    {filteredDoctors.map((doc) => (
-                                      <option key={doc.id} value={doc.id}>
-                                        {doc.name} ({doc.specialist})
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <Controller
+                                    control={visitControl} // UPDATED: Use visitControl
+                                    name="doctorId"
+                                    render={({ field }) => (
+                                      <Select
+                                        {...field}
+                                        options={doctorOptions} // Use pre-mapped options
+                                        isClearable
+                                        placeholder="Search or select a doctor..."
+                                        onChange={(selectedOption) => {
+                                          field.onChange(selectedOption ? selectedOption.value : "")
+                                        }}
+                                        value={doctorOptions.find((option) => option.value === field.value) || null} // UPDATED: Correctly map field.value to option object
+                                        classNamePrefix="react-select"
+                                        styles={{
+                                          control: (base, state) => ({
+                                            ...base,
+                                            borderColor: errorsVisit.doctorId ? "rgb(239 68 68)" : base.borderColor,
+                                            boxShadow: state.isFocused ? "0 0 0 2px rgb(20 184 166)" : base.boxShadow,
+                                            "&:hover": {
+                                              borderColor: errorsVisit.doctorId
+                                                ? "rgb(239 68 68)"
+                                                : (base["&:hover"] as any)?.borderColor ?? "transparent",
+                                            },
+                                          }),
+                                        }}
+                                      />
+                                    )}
+                                  />
                                   {errorsVisit.doctorId && (
                                     <p className="text-red-500 text-xs mt-1">{errorsVisit.doctorId.message}</p>
-                                  )}
-
-                                  {/* Show filtered results count */}
-                                  {doctorSearchTerm && (
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      {filteredDoctors.length} doctor{filteredDoctors.length !== 1 ? "s" : ""} found
-                                    </p>
                                   )}
                                 </div>
                               ) : (

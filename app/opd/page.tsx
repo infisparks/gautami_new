@@ -32,9 +32,11 @@ function formatAMPM(date: Date): string {
 
 function generatePatientId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  return Array.from({ length: 10 })
-    .map(() => chars.charAt(Math.floor(Math.random() * chars.length)))
-    .join("")
+  let result = ""
+  for (let i = 0; i < 9; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return "GMH" + result
 }
 
 // WhatsApp message sending function
@@ -385,7 +387,12 @@ export default function Page() {
         const totalPaid = cash + online
 
         // push OPD record
-        const opdRef = push(ref(db, `patients/opddetail/${uhid}`))
+        const appointmentDateKey = data.date instanceof Date
+  ? data.date.toISOString().slice(0, 10)
+  : new Date(data.date).toISOString().slice(0, 10);
+
+// Save under: /patients/opddetail/yyyy-MM-dd/{uhid}/{appointmentId}
+const opdRef = push(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}`));
 
         // Store all modalities as a separate array in the database
         const modalitiesData = data.modalities.map((modality: ModalitySelection) => {
@@ -426,7 +433,7 @@ export default function Page() {
         // payment - store total charges without discount
         const opdId = opdRef.key
         if (opdId) {
-          await set(ref(db, `patients/opddetail/${uhid}/${opdId}/payment`), {
+          await set(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}/${opdId}/payment`), {
             cashAmount: cash,
             onlineAmount: online,
             paymentMethod: data.paymentMethod,

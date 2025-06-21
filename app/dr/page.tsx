@@ -1,5 +1,4 @@
 "use client"
-
 import React, { useEffect, useState, useRef, useMemo } from "react"
 import { db } from "@/lib/firebase"
 import { ref, query, orderByChild, onValue, startAt, endAt } from "firebase/database"
@@ -84,6 +83,7 @@ interface IPDAdmission {
   roomType: string
   status: string
   uhid: string
+  id?: string
 }
 
 interface MortalityReport {
@@ -231,27 +231,29 @@ export default function DailyPerformanceReport() {
       const data = snapshot.val()
 
       if (data) {
-        Object.entries(data).forEach(([patientId, appointments]: [string, any]) => {
-          Object.entries(appointments).forEach(([appointmentId, appt]: [string, any]) => {
-            // Check if appointment is for today
-            if (appt.date && isSameDay(parseISO(appt.date), today)) {
-              opdList.push({
-                amount: Number(appt.amount) || 0,
-                appointmentType: appt.appointmentType || "visithospital",
-                createdAt: appt.createdAt || "",
-                date: appt.date || "",
-                doctor: appt.doctor || "",
-                gender: appt.gender || "",
-                message: appt.message || "",
-                name: appt.name || "",
-                paymentMethod: appt.paymentMethod || "cash",
-                phone: appt.phone || "",
-                serviceName: appt.serviceName || "",
-                time: appt.time || "",
-                referredBy: appt.referredBy || appt.referBy || "", // Check both possible keys
+        Object.entries(data).forEach(([dateKey, patientsByDate]: [string, any]) => {
+          if (isSameDay(parseISO(dateKey), today)) {
+            // Filter by date key first
+            Object.entries(patientsByDate).forEach(([patientId, appointments]: [string, any]) => {
+              Object.entries(appointments).forEach(([appointmentId, appt]: [string, any]) => {
+                opdList.push({
+                  amount: Number(appt.payment?.totalPaid) || 0, // Assuming amount comes from payment.totalPaid
+                  appointmentType: appt.appointmentType || "visithospital",
+                  createdAt: appt.createdAt || "",
+                  date: appt.date || "",
+                  doctor: appt.doctor || "",
+                  gender: patientInfo[patientId]?.gender || "", // Get gender from patientInfo
+                  message: appt.message || "",
+                  name: appt.name || patientInfo[patientId]?.name || "", // Get name from patientInfo if not present
+                  paymentMethod: appt.payment?.paymentMethod || "cash", // Get payment method from payment
+                  phone: appt.phone || patientInfo[patientId]?.phone || "", // Get phone from patientInfo
+                  serviceName: appt.modalities?.[0]?.service || appt.modalities?.[0]?.type || "", // Get service name from modalities
+                  time: appt.time || "",
+                  referredBy: appt.referredBy || appt.referBy || "",
+                })
               })
-            }
-          })
+            })
+          }
         })
       }
 
@@ -275,31 +277,34 @@ export default function DailyPerformanceReport() {
       const data = snapshot.val()
 
       if (data) {
-        Object.entries(data).forEach(([patientId, admissions]: [string, any]) => {
-          Object.entries(admissions).forEach(([ipdId, ipd]: [string, any]) => {
-            // Check if admission is for today
-            if (ipd.admissionDate && isSameDay(parseISO(ipd.admissionDate), today)) {
-              ipdList.push({
-                admissionDate: ipd.admissionDate || "",
-                admissionSource: ipd.admissionSource || "",
-                admissionTime: ipd.admissionTime || "",
-                admissionType: ipd.admissionType || "",
-                bed: ipd.bed || "",
-                createdAt: ipd.createdAt || "",
-                dischargeDate: ipd.dischargeDate || "",
-                doctor: ipd.doctor || "",
-                name: ipd.name || "",
-                phone: ipd.phone || "",
-                referDoctor: ipd.referDoctor || ipd.referralDoctor || "", // Check both possible keys
-                relativeAddress: ipd.relativeAddress || "",
-                relativeName: ipd.relativeName || "",
-                relativePhone: ipd.relativePhone || "",
-                roomType: ipd.roomType || "",
-                status: ipd.status || "",
-                uhid: patientId,
+        Object.entries(data).forEach(([dateKey, patientsByDate]: [string, any]) => {
+          if (isSameDay(parseISO(dateKey), today)) {
+            // Filter by date key first
+            Object.entries(patientsByDate).forEach(([patientId, admissions]: [string, any]) => {
+              Object.entries(admissions).forEach(([ipdId, ipd]: [string, any]) => {
+                ipdList.push({
+                  id: ipdId, // Add id to the IPDRecord
+                  admissionDate: ipd.admissionDate || "",
+                  admissionSource: ipd.admissionSource || "",
+                  admissionTime: ipd.admissionTime || "",
+                  admissionType: ipd.admissionType || "",
+                  bed: ipd.bed || "",
+                  createdAt: ipd.createdAt || "",
+                  dischargeDate: ipd.dischargeDate || "",
+                  doctor: ipd.doctor || "",
+                  name: ipd.name || patientInfo[patientId]?.name || "", // Get name from patientInfo if not present
+                  phone: ipd.phone || patientInfo[patientId]?.phone || "", // Get phone from patientInfo
+                  referDoctor: ipd.referDoctor || ipd.referralDoctor || "",
+                  relativeAddress: ipd.relativeAddress || "",
+                  relativeName: ipd.relativeName || "",
+                  relativePhone: ipd.relativePhone || "",
+                  roomType: ipd.roomType || "",
+                  status: ipd.status || "",
+                  uhid: patientId,
+                })
               })
-            }
-          })
+            })
+          }
         })
       }
 
@@ -323,22 +328,24 @@ export default function DailyPerformanceReport() {
       const data = snapshot.val()
 
       if (data) {
-        Object.entries(data).forEach(([patientId, reports]: [string, any]) => {
-          Object.entries(reports).forEach(([mortalityId, report]: [string, any]) => {
-            // Check if death date is today
-            if (report.dateOfDeath && isSameDay(parseISO(report.dateOfDeath), today)) {
-              mortalityList.push({
-                admissionDate: report.admissionDate || "",
-                dateOfDeath: report.dateOfDeath || "",
-                medicalFindings: report.medicalFindings || "",
-                timeSpanDays: report.timeSpanDays || 0,
-                createdAt: report.createdAt || "",
-                enteredBy: report.enteredBy || "",
-                patientId,
-                patientName: report.patientName || "",
+        Object.entries(data).forEach(([dateKey, patientsByDate]: [string, any]) => {
+          if (isSameDay(parseISO(dateKey), today)) {
+            // Filter by date key first
+            Object.entries(patientsByDate).forEach(([patientId, reports]: [string, any]) => {
+              Object.entries(reports).forEach(([mortalityId, report]: [string, any]) => {
+                mortalityList.push({
+                  admissionDate: report.admissionDate || "",
+                  dateOfDeath: report.dateOfDeath || "",
+                  medicalFindings: report.medicalFindings || "",
+                  timeSpanDays: report.timeSpanDays || 0,
+                  createdAt: report.createdAt || "",
+                  enteredBy: report.enteredBy || "",
+                  patientId,
+                  patientName: report.patientName || patientInfo[patientId]?.name || "", // Get name from patientInfo if not present
+                })
               })
-            }
-          })
+            })
+          }
         })
       }
 

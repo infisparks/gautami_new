@@ -141,11 +141,12 @@ function formatAMPM(date: Date): string {
 function generatePatientId(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   let result = ""
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 9; i++) { // Only 7 random characters after 'GMH'
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
-  return result
+  return "GMH" + result
 }
+
 
 const PaymentModeOptions = [
   { value: "cash", label: "Cash" },
@@ -461,21 +462,18 @@ const IPDBookingPage: React.FC = () => {
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true)
     try {
-      // 1) Occupy the selected bed
+      // 1. Occupy the selected bed
       if (data.roomType?.value && data.bed?.value) {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
         await update(bedRef, { status: "Occupied" })
       }
-
-      // 2) Generate or use existing patient ID
+  
+      // 2. Generate or use existing patient ID
       let patientId: string
       const currentTime = new Date().toISOString()
-
+  
       if (selectedPatient) {
-        // If the user chose an existing patient
         patientId = selectedPatient.id
-
-        // Update patient info in patients/patientinfo/
         await update(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
           phone: data.phone,
@@ -485,10 +483,7 @@ const IPDBookingPage: React.FC = () => {
           updatedAt: currentTime,
         })
       } else {
-        // If the user is creating a brand-new patient
         patientId = generatePatientId()
-
-        // Save patient basic info to patients/patientinfo/
         await set(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
           phone: data.phone,
@@ -500,19 +495,17 @@ const IPDBookingPage: React.FC = () => {
           uhid: patientId,
         })
       }
-
-      // 3) Prepare IPD data (NO patient details, NO billing info, NO labels)
+  
+      // 3. Prepare split data
       const ipdData = {
-        
-          phone: data.phone,
+        phone: data.phone,
         uhid: patientId,
         name: data.name,
-        // Relative information
+        // Relative info
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
         relativeAddress: data.relativeAddress || "",
-
-        // IPD specific details (values only, no labels)
+        // IPD
         admissionDate: data.date.toISOString(),
         admissionTime: data.time,
         roomType: data.roomType?.value || "",
@@ -521,34 +514,42 @@ const IPDBookingPage: React.FC = () => {
         referDoctor: data.referDoctor || "",
         admissionType: data.admissionType?.value || "",
         admissionSource: data.admissionSource?.value || "",
-
-        // Metadata
         createdAt: currentTime,
         status: "active",
       }
-
-      // 4) Save IPD data under patients/ipddetail/userinfoipd/[uhid]/[ipdId]/
-      const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${patientId}`))
+  
+      // Date Key for the node
+      const dateKey = data.date instanceof Date
+        ? data.date.toISOString().substring(0, 10)
+        : String(data.date).substring(0, 10)
+  
+      // 1. Push to userinfoipd (returns new ipdId)
+      const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}`))
       const ipdId = ipdRef.key as string
-      await update(ipdRef, ipdData)
-
-      // 5) Save billing info under patients/ipddetail/userbillinginfoipd/[uhid]/[ipdId]/
+      await set(ipdRef, ipdData)
+  
+      // 2. If deposit, push to userbillinginfoipd
       if (data.deposit && data.deposit > 0) {
         const billingData = {
-          patientId: patientId,
+          patientId,
           uhid: patientId,
-          ipdId: ipdId,
+          ipdId,
           totalDeposit: data.deposit,
+          paymentMode: data.paymentMode?.value || "",
           createdAt: currentTime,
         }
-
-        // 5a) Update at path /userbillinginfoipd/[uhid]/[ipdId]
-        const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}`)
-        await update(billingRef, billingData)
-
-        // 5b) Add payment entry under that node
-        const paymentRef = push(ref(db, `patients/ipddetail/userbillinginfoipd/${patientId}/${ipdId}/payments`))
-        await update(paymentRef, {
+  
+        // Save billing info under userbillinginfoipd
+        await set(
+          ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`),
+          billingData
+        )
+  
+        // Add payment entry as a list under userbillinginfoipd/payments
+        const paymentRef = push(
+          ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}/payments`)
+        )
+        await set(paymentRef, {
           amount: data.deposit,
           date: currentTime,
           paymentType: data.paymentMode?.value || "",
@@ -556,20 +557,33 @@ const IPDBookingPage: React.FC = () => {
           createdAt: currentTime,
         })
       }
-
-      // 6) Send WhatsApp messages
+  
+      // 3. Add IPD to active list for quick lookup
+      const ipdActiveData = {
+        ipdId,
+        patientId,
+        name: data.name,
+        ward: data.roomType?.label || data.roomType?.value || "",
+        phone: data.phone,
+        advanceDeposit: data.deposit || 0,
+        admitDate: ipdData.admissionDate,
+        bed: data.bed?.label || "",
+      }
+      await set(ref(db, `patients/ipdactive/${ipdId}`), ipdActiveData)
+  
+      // 4. Send WhatsApp
       const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`
       const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
-
+  
       await sendWhatsAppMessage(data.phone, patientMessage)
       await sendWhatsAppMessage(data.relativePhone, relativeMessage)
-
+  
       toast.success("IPD Admission created successfully!", {
         position: "top-right",
         autoClose: 5000,
       })
-
-      // 7) Reset the form
+  
+      // 5. Reset Form
       reset({
         name: "",
         phone: "",
@@ -604,6 +618,7 @@ const IPDBookingPage: React.FC = () => {
       setLoading(false)
     }
   }
+  
 
   /* -----------------------------------------------------------------
      3F) Preview Handling
@@ -1506,4 +1521,4 @@ const IPDBookingPage: React.FC = () => {
   )
 }
 
-export default IPDBookingPage
+export default IPDBookingPage  

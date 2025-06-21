@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ref, onValue, update, get } from "firebase/database";
+import { ref, remove ,onValue, update, get } from "firebase/database";
 import { db } from "@/lib/firebase";
 import {
   ArrowLeft,
@@ -58,9 +58,10 @@ interface PatientRecord {
 }
 
 export default function DischargeSummaryPage() {
-  const { patientId, ipdId } = useParams() as {
+  const { patientId, ipdId, admitDateKey } = useParams() as {
     patientId: string;
     ipdId: string;
+    admitDateKey: string;
   };
   const router = useRouter();
 
@@ -99,7 +100,7 @@ export default function DischargeSummaryPage() {
     // a) listen to the core IPD node under “userinfoipd”
     const ipdRef = ref(
       db,
-      `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`
+      `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`
     );
     const unsub = onValue(ipdRef, async (snap) => {
       if (!snap.exists()) {
@@ -144,7 +145,7 @@ export default function DischargeSummaryPage() {
       const dischargeSnap = await get(
         ref(
           db,
-          `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/dischargesummery`
+          `patients/ipddetail/userdetailipd/${admitDateKey}/${patientId}/${ipdId}/dischargesummery`
         )
       );
       if (dischargeSnap.exists()) {
@@ -238,10 +239,7 @@ export default function DischargeSummaryPage() {
   /* ─── Step 5: “Complete Discharge” → set dischargeDate under userinfoipd, free bed, AND write summary again ─ */
   const finalDischarge = async () => {
     if (!patientRecord) return;
-    if (
-      !patientRecord.roomType ||
-      !patientRecord.bed
-    ) {
+    if (!patientRecord.roomType || !patientRecord.bed) {
       toast.error("Missing bed / ward information");
       return;
     }
@@ -252,28 +250,28 @@ export default function DischargeSummaryPage() {
         ...discharge,
         lastUpdated: when,
       };
-
-      // a) update the clinical node so that dischargeDate = now
+  
+      // a) update dischargeDate
       await update(
         ref(
           db,
-          `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`
+          `patients/ipddetail/userinfoipd/${admitDateKey}/${patientId}/${ipdId}`
         ),
         {
           dischargeDate: when,
         }
       );
-
-      // b) save the discharge summary text under the NEW node as well
+  
+      // b) save the discharge summary text
       await update(
         ref(
           db,
-          `patients/ipddetail/userdetailipd/${patientId}/${ipdId}/dischargesummery`
+          `patients/ipddetail/userdetailipd/${admitDateKey}/${patientId}/${ipdId}/dischargesummery`
         ),
         payload
       );
-
-      // c) free up the bed in “beds/...”
+  
+      // c) free up the bed
       await update(
         ref(
           db,
@@ -283,10 +281,13 @@ export default function DischargeSummaryPage() {
           status: "Available",
         }
       );
-
+  
+      // d) REMOVE from ipdactive!
+      await remove(ref(db, `patients/ipdactive/${ipdId}`));
+  
       toast.success("Patient discharged");
       setTimeout(() => {
-        router.push(`/billing/${patientId}/${ipdId}`);
+        router.push(`/billing/${patientId}/${ipdId}/${admitDateKey}`);
       }, 1500);
     } catch (e) {
       console.error(e);
@@ -295,6 +296,7 @@ export default function DischargeSummaryPage() {
       setLoading(false);
     }
   };
+  
 
   /* ─── Step 6: if we don’t yet have `patientRecord`, show spinner ───────────────────────────────── */
   if (!patientRecord) {
@@ -342,12 +344,12 @@ export default function DischargeSummaryPage() {
       {/* ─── Header ──────────────────────────────────────────────── */}
       <header className="bg-white border-b border-teal-100 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between">
-          <button
-            onClick={() => router.push(`/billing/${patientId}/${ipdId}`)}
-            className="flex items-center text-teal-600 hover:text-teal-800"
-          >
-            <ArrowLeft size={18} className="mr-2" /> Back to Billing
-          </button>
+        <button
+  onClick={() => router.push(`/billing/${patientId}/${ipdId}/${admitDateKey}`)}
+  className="flex items-center text-teal-600 hover:text-teal-800"
+>
+  <ArrowLeft size={18} className="mr-2" /> Back to Billing
+</button>
 
           <div className="flex items-center gap-4">
             {lastSaved && (

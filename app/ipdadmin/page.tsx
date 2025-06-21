@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
 import { ref, get } from "firebase/database"
-import { format, subDays, startOfDay, endOfDay, isSameDay } from "date-fns"
+import { format, subDays, startOfDay, endOfDay, isSameDay, addDays, parseISO } from "date-fns"
 import { Line, Doughnut } from "react-chartjs-2"
 import {
   Chart as ChartJS,
@@ -190,116 +190,102 @@ const IPDDashboardPage: React.FC = () => {
       console.log("Starting to fetch IPD patients...")
       const allPatients: IPDPatient[] = []
 
-      // Get all patient UHIDs from userinfoipd
-      const ipdInfoRef = ref(db, "patients/ipddetail/userinfoipd")
-      const uhidsSnapshot = await get(ipdInfoRef)
+      const { start, end } = getDateRange(filters.dateFilter)
+      const startDate = parseISO(start)
+      const endDate = parseISO(end)
 
-      if (!uhidsSnapshot.exists()) {
-        console.log("No IPD data found")
-        setIpdPatients([])
-        setLoading(false)
-        setRefreshing(false)
-        return
+      // Generate date keys for the range
+      const dateKeys: string[] = []
+      let currentDate = startOfDay(startDate)
+      while (currentDate <= endOfDay(endDate)) {
+        dateKeys.push(format(currentDate, "yyyy-MM-dd"))
+        currentDate = addDays(currentDate, 1)
       }
 
-      const uhidsData = uhidsSnapshot.val()
-      const uhids = Object.keys(uhidsData)
-      console.log("Found UHIDs:", uhids)
+      for (const dateKey of dateKeys) {
+        const ipdInfoDateRef = ref(db, `patients/ipddetail/userinfoipd/${dateKey}`)
+        const ipdBillingDateRef = ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}`)
 
-      // Fetch IPD records for each UHID
-      for (const uhid of uhids) {
-        const userIpdData = uhidsData[uhid]
+        const [infoSnapshot, billingSnapshot] = await Promise.all([get(ipdInfoDateRef), get(ipdBillingDateRef)])
 
-        if (userIpdData && typeof userIpdData === "object") {
-          for (const ipdId of Object.keys(userIpdData)) {
-            const ipdData = userIpdData[ipdId]
+        const infoDataForDate = infoSnapshot.exists() ? infoSnapshot.val() : {}
+        const billingDataForDate = billingSnapshot.exists() ? billingSnapshot.val() : {}
 
-            if (!ipdData || !ipdData.admissionDate) continue
+        for (const patientIdKey in infoDataForDate) {
+          if (Object.prototype.hasOwnProperty.call(infoDataForDate, patientIdKey)) {
+            const ipdEntriesForPatient = infoDataForDate[patientIdKey]
 
-            // Check date filter
-            const admissionDate = new Date(ipdData.admissionDate)
-            const dateRange = getDateRange(filters.dateFilter)
-            const startDate = new Date(dateRange.start)
-            const endDate = new Date(dateRange.end)
+            for (const ipdId of Object.keys(ipdEntriesForPatient)) {
+              const ipdData = ipdEntriesForPatient[ipdId]
+              const billingData = billingDataForDate[patientIdKey]?.[ipdId] || null
 
-            if (admissionDate < startDate || admissionDate > endDate) {
-              continue
-            }
+              if (!ipdData || !ipdData.admissionDate) continue
 
-            // Apply status filter
-            const patientStatus = ipdData.status || "active"
-            if (filters.status !== "all" && patientStatus !== filters.status) {
-              continue
-            }
+              // Apply status filter
+              const patientStatus = ipdData.status || "active"
+              if (filters.status !== "all" && patientStatus !== filters.status) {
+                continue
+              }
 
-            // Fetch billing info
-            const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${uhid}/${ipdId}`)
-            const billingSnapshot = await get(billingRef)
-            const billingData = billingSnapshot.exists() ? billingSnapshot.val() : null
+              // Process payments
+              const payments: IPDPayment[] = []
+              let totalDeposit = 0
 
-            // Process payments
-            const payments: IPDPayment[] = []
-            let totalDeposit = 0
-
-            if (billingData?.payments) {
-              Object.entries(billingData.payments).forEach(([paymentId, paymentData]: [string, any]) => {
-                // Only include cash and online payments
-                if (paymentData.paymentType === "cash" || paymentData.paymentType === "online") {
-                  const payment: IPDPayment = {
-                    id: paymentId,
-                    amount: Number(paymentData.amount) || 0,
-                    paymentType: paymentData.paymentType,
-                    type: paymentData.type || "deposit",
-                    date: paymentData.date,
-                    createdAt: paymentData.createdAt || paymentData.date,
+              if (billingData?.payments) {
+                Object.entries(billingData.payments).forEach(([paymentId, paymentData]: [string, any]) => {
+                  // Only include cash and online payments
+                  if (paymentData.paymentType === "cash" || paymentData.paymentType === "online") {
+                    const payment: IPDPayment = {
+                      id: paymentId,
+                      amount: Number(paymentData.amount) || 0,
+                      paymentType: paymentData.paymentType,
+                      type: paymentData.type || "deposit",
+                      date: paymentData.date,
+                      createdAt: paymentData.createdAt || paymentData.date,
+                    }
+                    payments.push(payment)
+                    totalDeposit += payment.amount
                   }
-                  payments.push(payment)
-                  totalDeposit += payment.amount
-                }
-              })
+                })
+              }
+
+              // Calculate service amounts
+              const services = billingData?.services || [] // Services are now under billingData
+              const totalServiceAmount = services.reduce(
+                (sum: number, service: IPDService) => sum + (Number(service.amount) || 0),
+                0,
+              )
+
+              // Create IPD patient object
+              const ipdPatient: IPDPatient = {
+                id: `${patientIdKey}_${ipdId}`,
+                uhid: ipdData.uhid ?? patientIdKey,
+                ipdId,
+                name: ipdData.name || "Unknown",
+                phone: ipdData.phone || "",
+                age: ipdData.age || "",
+                gender: ipdData.gender || "",
+                address: ipdData.address,
+                admissionDate: ipdData.admissionDate,
+                admissionTime: ipdData.admissionTime || "",
+                doctor: ipdData.doctor || "",
+                doctorId: ipdData.doctor || "",
+                roomType: ipdData.roomType || "",
+                roomNumber: ipdData.roomNumber,
+                status: patientStatus,
+                dischargeDate: ipdData.dischargeDate,
+                dischargeTime: ipdData.dischargeTime,
+                services,
+                totalAmount: totalServiceAmount,
+                totalDeposit,
+                payments,
+                remainingAmount: totalServiceAmount - totalDeposit,
+                createdAt: ipdData.createdAt || ipdData.admissionDate,
+                enteredBy: ipdData.enteredBy,
+              }
+
+              allPatients.push(ipdPatient)
             }
-
-            // Calculate service amounts
-            const services = ipdData.services || []
-            const totalServiceAmount = services.reduce(
-              (sum: number, service: IPDService) => sum + (Number(service.amount) || 0),
-              0,
-            )
-
-            // Get patient basic info
-            const patientInfoRef = ref(db, `patients/patientinfo/${uhid}`)
-            const patientInfoSnapshot = await get(patientInfoRef)
-            const patientInfo = patientInfoSnapshot.exists() ? patientInfoSnapshot.val() : {}
-
-            // Create IPD patient object
-            const ipdPatient: IPDPatient = {
-              id: `${uhid}_${ipdId}`,
-              uhid,
-              ipdId,
-              name: ipdData.name || patientInfo.name || "Unknown",
-              phone: ipdData.phone || patientInfo.phone || "",
-              age: ipdData.age || patientInfo.age || "",
-              gender: ipdData.gender || patientInfo.gender || "",
-              address: ipdData.address || patientInfo.address,
-              admissionDate: ipdData.admissionDate,
-              admissionTime: ipdData.admissionTime || "",
-              doctor: ipdData.doctor || "",
-              doctorId: ipdData.doctor || "",
-              roomType: ipdData.roomType || "",
-              roomNumber: ipdData.roomNumber,
-              status: patientStatus,
-              dischargeDate: ipdData.dischargeDate,
-              dischargeTime: ipdData.dischargeTime,
-              services,
-              totalAmount: totalServiceAmount,
-              totalDeposit,
-              payments,
-              remainingAmount: totalServiceAmount - totalDeposit,
-              createdAt: ipdData.createdAt || ipdData.admissionDate,
-              enteredBy: ipdData.enteredBy,
-            }
-
-            allPatients.push(ipdPatient)
           }
         }
       }

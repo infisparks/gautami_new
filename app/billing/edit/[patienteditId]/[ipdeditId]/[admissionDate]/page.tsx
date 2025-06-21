@@ -10,31 +10,15 @@ import Select from "react-select"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import { toast } from "react-toastify"
-import {
-  User,
-  Phone,
-  Clock,
-  Home,
-  Users,
-  Calendar,
-  Bed,
-  UserCheck,
-  Check,
-  AlertCircle,
-} from "lucide-react"
+import { format } from "date-fns"
+import { User, Phone, Clock, Home, Users, Calendar, Bed, UserCheck, Check, AlertCircle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 
 /* ---------------------------
    Types & Options
@@ -173,7 +157,11 @@ const datePickerWrapperStyles = {
    Edit IPD Record Component
 --------------------------- */
 export default function EditIPDPage() {
-  const { patienteditId, ipdeditId } = useParams()
+  const {
+    patienteditId,
+    ipdeditId,
+    admissionDate: admissionDateParam,
+  } = useParams() as { patienteditId: string; ipdeditId: string; admissionDate: string }
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null)
@@ -274,8 +262,8 @@ export default function EditIPDPage() {
      Fetch Existing IPD Record Data
   --------------------------- */
   useEffect(() => {
-    if (!patienteditId || !ipdeditId) return
-    const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patienteditId}/${ipdeditId}`)
+    if (!patienteditId || !ipdeditId || !admissionDateParam) return
+    const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`)
     const unsubscribe = onValue(ipdRef, (snapshot) => {
       if (!snapshot.exists()) {
         toast.error("IPD record not found.")
@@ -288,7 +276,7 @@ export default function EditIPDPage() {
       setValue("relativeName", data.relativeName)
       setValue("relativePhone", data.relativePhone)
       setValue("relativeAddress", data.relativeAddress)
-      setValue("date", new Date(data.admissionDate))
+      setValue("date", new Date(admissionDateParam)) // Initialize form date from URL param
       setValue("time", data.admissionTime)
       const srcMatch = AdmissionSourceOptions.find((s) => s.value === data.admissionSource)
       setValue("admissionSource", srcMatch || null)
@@ -305,14 +293,17 @@ export default function EditIPDPage() {
       setValue("referDoctor", data.referDoctor)
     })
     return () => unsubscribe()
-  }, [patienteditId, ipdeditId, setValue, doctors])
+  }, [patienteditId, ipdeditId, setValue, doctors, admissionDateParam])
 
   /* ---------------------------
      Fetch Existing Billing Data
   --------------------------- */
   useEffect(() => {
-    if (!patienteditId || !ipdeditId) return
-    const billingRef = ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}`)
+    if (!patienteditId || !ipdeditId || !admissionDateParam) return
+    const billingRef = ref(
+      db,
+      `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`,
+    )
     const unsubscribe = onValue(billingRef, (snapshot) => {
       if (!snapshot.exists()) {
         setOriginalBilling({ totalDeposit: 0 })
@@ -327,7 +318,7 @@ export default function EditIPDPage() {
       setValue("paymentMode", PaymentModeOptions[0])
     })
     return () => unsubscribe()
-  }, [patienteditId, ipdeditId, setValue])
+  }, [patienteditId, ipdeditId, setValue, admissionDateParam])
 
   /* ---------------------------
      Fetch Beds Based on Selected Room Type
@@ -428,8 +419,9 @@ export default function EditIPDPage() {
         newValue: upd.relativeAddress || "",
       })
     }
-    if (String(origI.admissionDate || "") !== toISO(upd.date)) {
-      changes.push({ field: "admissionDate", oldValue: origI.admissionDate, newValue: toISO(upd.date) })
+    // Compare formatted dates for admissionDate
+    if (format(new Date(origI.admissionDate), "yyyy-MM-dd") !== format(upd.date, "yyyy-MM-dd")) {
+      changes.push({ field: "admissionDate", oldValue: origI.admissionDate, newValue: format(upd.date, "yyyy-MM-dd") })
     }
     if (String(origI.admissionTime || "") !== String(upd.time || "")) {
       changes.push({ field: "admissionTime", oldValue: origI.admissionTime, newValue: upd.time })
@@ -510,12 +502,7 @@ export default function EditIPDPage() {
       }
 
       // 2) Handle bed status changes
-      if (
-        oldBedInfo &&
-        data.roomType?.value &&
-        data.bed?.value &&
-        data.bed.value !== oldBedInfo.bedId
-      ) {
+      if (oldBedInfo && data.roomType?.value && data.bed?.value && data.bed.value !== oldBedInfo.bedId) {
         const oldBedRef = ref(db, `beds/${oldBedInfo.roomType}/${oldBedInfo.bedId}`)
         await update(oldBedRef, { status: "Available" })
         const newBedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
@@ -530,7 +517,7 @@ export default function EditIPDPage() {
         relativeName: data.relativeName,
         relativePhone: data.relativePhone,
         relativeAddress: data.relativeAddress || "",
-        admissionDate: data.date.toISOString(),
+        admissionDate: format(data.date, "yyyy-MM-dd"), // Update the field, but the record's path remains fixed by admissionDateParam
         admissionTime: data.time,
         admissionSource: data.admissionSource?.value || "",
         admissionType: data.admissionType?.value || "",
@@ -542,8 +529,8 @@ export default function EditIPDPage() {
         lastModifiedBy: currentUserEmail || "unknown",
       }
       await update(
-        ref(db, `patients/ipddetail/userinfoipd/${patienteditId}/${ipdeditId}`),
-        ipdData
+        ref(db, `patients/ipddetail/userinfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`), // Use admissionDateParam from URL
+        ipdData,
       )
 
       // 4) Update billing if deposit changed
@@ -552,12 +539,12 @@ export default function EditIPDPage() {
       if (String(prevDeposit) !== String(newDeposit)) {
         // Update totalDeposit
         await update(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}`),
-          { totalDeposit: newDeposit }
+          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}`), // Use admissionDateParam from URL
+          { totalDeposit: newDeposit },
         )
         // Add a new payment entry
         const paymentRef = push(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${patienteditId}/${ipdeditId}/payments`)
+          ref(db, `patients/ipddetail/userbillinginfoipd/${admissionDateParam}/${patienteditId}/${ipdeditId}/payments`), // Use admissionDateParam from URL
         )
         await update(paymentRef, {
           amount: newDeposit - prevDeposit,
@@ -575,6 +562,7 @@ export default function EditIPDPage() {
         type: "edit",
         ipdId: ipdeditId,
         patientId: patienteditId,
+        admissionDate: admissionDateParam, // Add admissionDate to log for context
         patientName: data.name,
         changes,
         editedBy: currentUserEmail || "unknown",
@@ -688,12 +676,7 @@ export default function EditIPDPage() {
                     Address
                   </Label>
                   <div className="relative">
-                    <Input
-                      id="address"
-                      {...register("address")}
-                      className="pl-9"
-                      placeholder="Patient address"
-                    />
+                    <Input id="address" {...register("address")} className="pl-9" placeholder="Patient address" />
                     <Home className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
                 </div>
@@ -722,9 +705,7 @@ export default function EditIPDPage() {
                     />
                     <Users className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
-                  {errors.relativeName && (
-                    <p className="text-xs text-red-500">Relative name is required</p>
-                  )}
+                  {errors.relativeName && <p className="text-xs text-red-500">Relative name is required</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -740,20 +721,14 @@ export default function EditIPDPage() {
                     />
                     <Phone className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   </div>
-                  {errors.relativePhone && (
-                    <p className="text-xs text-red-500">Relative phone is required</p>
-                  )}
+                  {errors.relativePhone && <p className="text-xs text-red-500">Relative phone is required</p>}
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="relativeAddress" className="text-sm font-medium">
                     Relative Address
                   </Label>
-                  <Input
-                    id="relativeAddress"
-                    {...register("relativeAddress")}
-                    placeholder="Relative's address"
-                  />
+                  <Input id="relativeAddress" {...register("relativeAddress")} placeholder="Relative's address" />
                 </div>
               </div>
             </div>
@@ -827,9 +802,7 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.admissionSource && (
-                    <p className="text-xs text-red-500">Source is required</p>
-                  )}
+                  {errors.admissionSource && <p className="text-xs text-red-500">Source is required</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -850,9 +823,7 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.admissionType && (
-                    <p className="text-xs text-red-500">Type is required</p>
-                  )}
+                  {errors.admissionType && <p className="text-xs text-red-500">Type is required</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -877,9 +848,7 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.roomType && (
-                    <p className="text-xs text-red-500">Room is required</p>
-                  )}
+                  {errors.roomType && <p className="text-xs text-red-500">Room is required</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -960,9 +929,7 @@ export default function EditIPDPage() {
             {/* Billing Section */}
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Badge className="bg-amber-100 text-amber-800">
-                  Billing
-                </Badge>
+                <Badge className="bg-amber-100 text-amber-800">Billing</Badge>
                 <h2 className="text-lg font-semibold text-slate-800">Deposit & Payment Mode</h2>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -982,9 +949,7 @@ export default function EditIPDPage() {
                       }`}
                     />
                   </div>
-                  {errors.deposit && (
-                    <p className="text-xs text-red-500">{errors.deposit.message}</p>
-                  )}
+                  {errors.deposit && <p className="text-xs text-red-500">{errors.deposit.message}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -1005,9 +970,7 @@ export default function EditIPDPage() {
                       />
                     )}
                   />
-                  {errors.paymentMode && (
-                    <p className="text-xs text-red-500">{errors.paymentMode.message}</p>
-                  )}
+                  {errors.paymentMode && <p className="text-xs text-red-500">{errors.paymentMode.message}</p>}
                 </div>
               </div>
             </div>
@@ -1078,9 +1041,7 @@ export default function EditIPDPage() {
                           <Badge
                             variant={bed.status === "Available" ? "default" : "secondary"}
                             className={`${
-                              bed.status === "Available"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-amber-100 text-amber-800"
+                              bed.status === "Available" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
                             }`}
                           >
                             {bed.status}

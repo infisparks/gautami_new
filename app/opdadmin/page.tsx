@@ -4,7 +4,7 @@ import type React from "react"
 import { useState, useEffect, useMemo, useCallback } from "react"
 import { db } from "../../lib/firebase"
 import { ref, query, orderByChild, startAt, endAt, get, remove } from "firebase/database"
-import { format, isSameDay, subDays, startOfDay, endOfDay } from "date-fns"
+import { format, isSameDay, subDays, startOfDay, endOfDay ,eachDayOfInterval } from "date-fns"
 import { Line } from "react-chartjs-2"
 import {
   Chart as ChartJS,
@@ -28,6 +28,7 @@ import {
   IndianRupeeIcon,
   TrendingUp,
 } from "lucide-react"
+
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -143,87 +144,86 @@ const AdminDashboardPage: React.FC = () => {
     }
   }, [])
 
-  // Fetch OPD appointments from new data structure
+  
   const fetchOPDAppointments = useCallback(
     async (filter: DateFilter) => {
-      const isRefresh = !loading
-      if (isRefresh) setRefreshing(true)
-
+      const isRefresh = !loading;
+      if (isRefresh) setRefreshing(true);
+  
       try {
-        const dateRange = getDateRange(filter)
-        const allAppointments: IOPDEntry[] = []
-
-        // Get all patient IDs from the new structure
-        const opdDetailRef = ref(db, "patients/opddetail")
-        const patientsSnapshot = await get(opdDetailRef)
-
-        if (!patientsSnapshot.exists()) {
-          setOpdAppointments([])
-          return
+        const allAppointments: IOPDEntry[] = [];
+        let dateKeys: string[] = [];
+  
+        if (filter === "today") {
+          const todayKey = format(new Date(), "yyyy-MM-dd");
+          dateKeys = [todayKey];
+        } else if (filter === "7days") {
+          const today = new Date();
+          const sevenDaysAgo = subDays(today, 6);
+          const days = eachDayOfInterval({ start: sevenDaysAgo, end: today });
+          dateKeys = days.map((d) => format(d, "yyyy-MM-dd"));
         }
-
-        const patientsData = patientsSnapshot.val()
-        const patientIds = Object.keys(patientsData)
-
-        // Fetch appointments for each patient within date range
-        for (const patientId of patientIds) {
-          const patientOpdRef = ref(db, `patients/opddetail/${patientId}`)
-          const appointmentQuery = query(
-            patientOpdRef,
-            orderByChild("date"),
-            startAt(dateRange.start),
-            endAt(dateRange.end),
-          )
-
-          const snapshot = await get(appointmentQuery)
-          if (snapshot.exists()) {
-            const appointmentsData = snapshot.val()
-            Object.keys(appointmentsData).forEach((appointmentId) => {
-              const appointment = appointmentsData[appointmentId]
-
-              allAppointments.push({
-                id: appointmentId,
-                patientId,
-                name: appointment.name || "Unknown",
-                phone: appointment.phone || "",
-                appointmentType: appointment.appointmentType || "visithospital",
-                createdAt: appointment.createdAt,
-                date: appointment.date,
-                enteredBy: appointment.enteredBy || "",
-                message: appointment.message || "",
-                modalities: appointment.modalities || [],
-                opdType: appointment.opdType || "",
-                payment: appointment.payment || {
-                  cashAmount: 0,
-                  createdAt: "",
-                  discount: 0,
-                  onlineAmount: 0,
-                  paymentMethod: "cash",
-                  totalCharges: 0,
-                  totalPaid: 0,
-                },
-                referredBy: appointment.referredBy || "",
-                study: appointment.study || "",
-                time: appointment.time || "",
-                visitType: appointment.visitType || "",
-              })
-            })
+  
+        // For each dateKey, fetch the date node, then flatten all appointments
+        for (const dateKey of dateKeys) {
+          const dateRef = ref(db, `patients/opddetail/${dateKey}`);
+          const dateSnap = await get(dateRef);
+  
+          const data = dateSnap.val();
+          if (data && typeof data === "object") {
+            Object.entries(data).forEach(([patientId, appointments]) => {
+              // appointments is possibly an object { [appointmentId]: apptData }
+              if (appointments && typeof appointments === "object") {
+                Object.entries(appointments as Record<string, any>).forEach(([appointmentId, appt]) => {
+                  if (appt && typeof appt === "object") {
+                    allAppointments.push({
+                      id: appointmentId,
+                      patientId,
+                      name: appt.name || "Unknown",
+                      phone: appt.phone || "",
+                      appointmentType: appt.appointmentType || "visithospital",
+                      createdAt: appt.createdAt,
+                      date: appt.date,
+                      enteredBy: appt.enteredBy || "",
+                      message: appt.message || "",
+                      modalities: appt.modalities || [],
+                      opdType: appt.opdType || "",
+                      payment: appt.payment || {
+                        cashAmount: 0,
+                        createdAt: "",
+                        discount: 0,
+                        onlineAmount: 0,
+                        paymentMethod: "cash",
+                        totalCharges: 0,
+                        totalPaid: 0,
+                      },
+                      referredBy: appt.referredBy || "",
+                      study: appt.study || "",
+                      time: appt.time || "",
+                      visitType: appt.visitType || "",
+                    });
+                  }
+                });
+              }
+            });
           }
         }
-
+  
         // Sort by creation date (newest first)
-        allAppointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        setOpdAppointments(allAppointments)
+        allAppointments.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setOpdAppointments(allAppointments);
       } catch (error) {
-        console.error("Error fetching OPD appointments:", error)
-        toast.error("Failed to load appointments")
+        console.error("Error fetching OPD appointments:", error);
+        toast.error("Failed to load appointments");
+        setOpdAppointments([]);
       } finally {
-        setLoading(false)
-        if (isRefresh) setRefreshing(false)
+        setLoading(false);
+        if (isRefresh) setRefreshing(false);
       }
     },
-    [getDateRange, loading],
-  )
+    [loading],
+  );
+  
 
   // Initial load and filter changes
   useEffect(() => {
