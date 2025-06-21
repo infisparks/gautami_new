@@ -205,89 +205,86 @@ export default function OptimizedPatientsPage() {
   }, [selectedTab])
 
   // Fetch latest 20 discharged IPD records ONLY when going to the discharge tab
-  const loadDischargedPatients = useCallback(
-    async () => {
-      setIsLoading(true)
-      setDischargedDataSize(0)
-      try {
-        // Fetch userinfoipd (just for discharged)
-        const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
-        const snap = await get(ipdRef)
+  const loadDischargedPatients = useCallback(async () => {
+    setIsLoading(true)
+    setDischargedDataSize(0)
+    try {
+      // Fetch userinfoipd (just for discharged)
+      const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
+      const snap = await get(ipdRef)
 
-        const dischargedArr: {
-          patientId: string
-          ipdId: string
-          ipdData: any
-          dischargeDate: string
-          dateKey: string
-        }[] = []
-        let sizeUserInfoIpd = 0
+      const dischargedArr: {
+        patientId: string
+        ipdId: string
+        ipdData: any
+        dischargeDate: string
+        dateKey: string
+      }[] = []
+      let sizeUserInfoIpd = 0
 
-        if (snap.exists()) {
-          const allDates = snap.val()
-          const rawDataUserInfoIpd: any[] = []
-          Object.keys(allDates).forEach(dateKey => {
-            const datePatients = allDates[dateKey]
-            Object.keys(datePatients).forEach(patientId => {
-              const patientIpds = datePatients[patientId]
-              Object.keys(patientIpds).forEach(ipdId => {
-                const ipdData = patientIpds[ipdId]
-                if (ipdData && ipdData.dischargeDate) {
-                  dischargedArr.push({
-                    patientId,
-                    ipdId,
-                    ipdData,
-                    dischargeDate: ipdData.dischargeDate,
-                    dateKey,
-                  })
-                  rawDataUserInfoIpd.push(ipdData)
-                }
-              })
+      if (snap.exists()) {
+        const allDates = snap.val()
+        const rawDataUserInfoIpd: any[] = []
+        Object.keys(allDates).forEach((dateKey) => {
+          const datePatients = allDates[dateKey]
+          Object.keys(datePatients).forEach((patientId) => {
+            const patientIpds = datePatients[patientId]
+            Object.keys(patientIpds).forEach((ipdId) => {
+              const ipdData = patientIpds[ipdId]
+              if (ipdData && ipdData.dischargeDate) {
+                dischargedArr.push({
+                  patientId,
+                  ipdId,
+                  ipdData,
+                  dischargeDate: ipdData.dischargeDate,
+                  dateKey,
+                })
+                rawDataUserInfoIpd.push(ipdData)
+              }
             })
           })
+        })
 
-          // Calculate size of userinfoipd discharged
-          sizeUserInfoIpd = JSON.stringify(rawDataUserInfoIpd).length
+        // Calculate size of userinfoipd discharged
+        sizeUserInfoIpd = JSON.stringify(rawDataUserInfoIpd).length
 
-          // Sort by dischargeDate desc, take latest 20
-          dischargedArr.sort((a, b) => {
-            return new Date(b.dischargeDate).getTime() - new Date(a.dischargeDate).getTime()
-          })
-          const top20 = dischargedArr.slice(0, ITEMS_PER_PAGE)
+        // Sort by dischargeDate desc, take latest 20
+        dischargedArr.sort((a, b) => {
+          return new Date(b.dischargeDate).getTime() - new Date(a.dischargeDate).getTime()
+        })
+        const top20 = dischargedArr.slice(0, ITEMS_PER_PAGE)
 
-          // Fetch billing for each record
-          let sizeBilling = 0
-          const billingSnapshots = await Promise.all(
-            top20.map(({ dateKey, patientId, ipdId }) =>
-              get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`))
-            )
-          )
-          const billingDataArr: any[] = []
-          const dischargedRecords: BillingRecord[] = top20.map((entry, idx) => {
-            const billingData = billingSnapshots[idx].exists() ? billingSnapshots[idx].val() : {}
-            billingDataArr.push(billingData)
-            return combineRecordData(entry.patientId, entry.ipdId, entry.ipdData, billingData)
-          })
+        // Fetch billing for each record
+        let sizeBilling = 0
+        const billingSnapshots = await Promise.all(
+          top20.map(({ dateKey, patientId, ipdId }) =>
+            get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`)),
+          ),
+        )
+        const billingDataArr: any[] = []
+        const dischargedRecords: BillingRecord[] = top20.map((entry, idx) => {
+          const billingData = billingSnapshots[idx].exists() ? billingSnapshots[idx].val() : {}
+          billingDataArr.push(billingData)
+          return combineRecordData(entry.patientId, entry.ipdId, entry.ipdData, billingData)
+        })
 
-          // Calculate total downloaded size
-          sizeBilling = JSON.stringify(billingDataArr).length
-          setDischargedDataSize(sizeUserInfoIpd + sizeBilling)
-          setDischargedRecords(dischargedRecords)
-        } else {
-          setDischargedDataSize(0)
-          setDischargedRecords([])
-        }
-      } catch (err) {
+        // Calculate total downloaded size
+        sizeBilling = JSON.stringify(billingDataArr).length
+        setDischargedDataSize(sizeUserInfoIpd + sizeBilling)
+        setDischargedRecords(dischargedRecords)
+      } else {
         setDischargedDataSize(0)
         setDischargedRecords([])
-        console.error("Error loading discharged patients:", err)
-      } finally {
-        setIsLoading(false)
-        setHasLoadedDischarged(true)
       }
-    },
-    [combineRecordData]
-  )
+    } catch (err) {
+      setDischargedDataSize(0)
+      setDischargedRecords([])
+      console.error("Error loading discharged patients:", err)
+    } finally {
+      setIsLoading(false)
+      setHasLoadedDischarged(true)
+    }
+  }, [combineRecordData])
 
   // Only fetch when going to discharge tab and NOT already loaded
   useEffect(() => {
@@ -307,9 +304,7 @@ export default function OptimizedPatientsPage() {
     }
     const term = searchTerm.trim().toLowerCase()
     if (selectedWard !== "All") {
-      records = records.filter(
-        (rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase(),
-      )
+      records = records.filter((rec) => rec.roomType && rec.roomType.toLowerCase() === selectedWard.toLowerCase())
     }
     if (term) {
       records = records.filter(
@@ -327,7 +322,7 @@ export default function OptimizedPatientsPage() {
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
     router.push(`/billing/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
-  
+
   const handleEditRecord = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
@@ -355,7 +350,7 @@ export default function OptimizedPatientsPage() {
 
   // Summary stats
   const totalPatients = filteredRecords.length
-  const totalDeposits = filteredRecords.reduce((sum, record) => sum + (record.amount || 0), 0)
+  const totalDeposits = filteredRecords.reduce((sum, record) => sum + Number(record.amount || 0), 0)
 
   // Manual reload for discharge
   function reloadDischargeTab() {
