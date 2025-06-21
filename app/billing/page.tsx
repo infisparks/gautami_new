@@ -43,6 +43,7 @@ export interface BillingRecord {
   patientId: string
   ipdId: string
   name: string
+  uhid?: string 
   mobileNumber: string
   address?: string
   age?: string | number
@@ -158,6 +159,7 @@ export default function OptimizedPatientsPage() {
           {
             patientId: data.patientId,
             ipdId: data.ipdId,
+            uhid: data.uhid,
             name: data.name || "",
             mobileNumber: data.phone || "",
             roomType: data.ward || "",
@@ -550,8 +552,8 @@ function renderPatientsTable(
               <td className="px-4 py-3 text-slate-700">{index + 1}</td>
               <td className="px-4 py-3">
                 <div className="font-medium text-slate-800">{record.name}</div>
-                <div className="text-xs text-slate-500">ID: {record.ipdId}</div>
-              </td>
+                <div className="text-xs text-slate-500">UHID: {record.uhid || record.patientId}</div>
+                              </td>
               <td className="px-4 py-3 text-slate-700">{record.mobileNumber}</td>
               <td className="px-4 py-3 font-medium text-slate-800">₹{record.amount.toLocaleString()}</td>
               <td className="px-4 py-3">

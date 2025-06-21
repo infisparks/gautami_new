@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useForm, Controller } from "react-hook-form"
-import { ref, onValue, update, push, set } from "firebase/database"
+import { ref, onValue, update, push, set, get } from "firebase/database" // Added 'get'
 import { db, auth } from "@/lib/firebase"
 import { onAuthStateChanged } from "firebase/auth"
 import Select from "react-select"
@@ -99,11 +99,12 @@ const AdmissionSourceOptions = [
   { value: "opd", label: "OPD" },
   { value: "casualty", label: "Casualty" },
   { value: "referral", label: "Referral" },
+  { value: "ipd", label: "IPD" }, // ADDED: 'ipd' option
 ]
 
 const RoomTypeOptions = [
   { value: "casualty", label: "Casualty" },
-  { value: "deluxe", label: "Deluxe" },
+  { value: "delux", label: "Delux" }, // Corrected spelling from 'deluxe' to 'delux' based on snippet
   { value: "female", label: "Female Ward" },
   { value: "icu", label: "ICU" },
   { value: "male", label: "Male Ward" },
@@ -173,6 +174,10 @@ export default function EditIPDPage() {
   const [originalIPD, setOriginalIPD] = useState<IPDRecord | null>(null)
   const [originalBilling, setOriginalBilling] = useState<BillingRecord | null>(null)
   const [oldBedInfo, setOldBedInfo] = useState<{ roomType: string; bedId: string } | null>(null)
+
+  // State to hold the raw roomType and bedId from the fetched IPD record
+  const [fetchedRoomType, setFetchedRoomType] = useState<string | null>(null)
+  const [fetchedBedId, setFetchedBedId] = useState<string | null>(null)
 
   const {
     control,
@@ -276,18 +281,21 @@ export default function EditIPDPage() {
       setValue("relativeName", data.relativeName)
       setValue("relativePhone", data.relativePhone)
       setValue("relativeAddress", data.relativeAddress)
-      setValue("date", new Date(admissionDateParam)) // Initialize form date from URL param
+      setValue("date", new Date(data.admissionDate)) // Use data.admissionDate for date object
       setValue("time", data.admissionTime)
+
+      // Set fetched roomType and bedId to state for later use
+      setFetchedRoomType(data.roomType)
+      setFetchedBedId(data.bed)
+
       const srcMatch = AdmissionSourceOptions.find((s) => s.value === data.admissionSource)
       setValue("admissionSource", srcMatch || null)
       const typeMatch = AdmissionTypeOptions.find((a) => a.value === data.admissionType)
       setValue("admissionType", typeMatch || null)
       const roomMatch = RoomTypeOptions.find((r) => r.value === data.roomType)
-      setValue("roomType", roomMatch || null)
+      setValue("roomType", roomMatch || null) // This will trigger bed fetching
       setOldBedInfo(data.bed ? { roomType: data.roomType, bedId: data.bed } : null)
-      if (data.bed) {
-        setValue("bed", { label: `Bed ${data.bed}`, value: data.bed })
-      }
+
       const docMatch = doctors.find((d) => d.value === data.doctor)
       setValue("doctor", docMatch || null)
       setValue("referDoctor", data.referDoctor)
@@ -322,6 +330,7 @@ export default function EditIPDPage() {
 
   /* ---------------------------
      Fetch Beds Based on Selected Room Type
+     AND set the initial bed value once beds are loaded
   --------------------------- */
   const selectedRoomType = watch("roomType")
   useEffect(() => {
@@ -331,7 +340,7 @@ export default function EditIPDPage() {
       return
     }
     const bedsRef = ref(db, `beds/${selectedRoomType.value}`)
-    const unsubscribe = onValue(bedsRef, (snapshot) => {
+    const unsubscribe = onValue(bedsRef, async (snapshot) => {
       if (!snapshot.exists()) {
         setBeds([])
         setValue("bed", null)
@@ -349,13 +358,21 @@ export default function EditIPDPage() {
           value: k,
         }))
       setBeds(bedList)
-      const currentBed = watch("bed")
-      if (currentBed && !bedList.find((b) => b.value === currentBed.value)) {
+
+      // Set the bed value if fetchedRoomType and fetchedBedId match the current roomType
+      if (fetchedRoomType === selectedRoomType.value && fetchedBedId) {
+        const currentBedData = await get(ref(db, `beds/${fetchedRoomType}/${fetchedBedId}`))
+        if (currentBedData.exists()) {
+          const bedNumber = currentBedData.val().bedNumber
+          setValue("bed", { label: `Bed ${bedNumber}`, value: fetchedBedId })
+        }
+      } else {
+        // If room type changed or no bed was fetched, clear the bed selection
         setValue("bed", null)
       }
     })
     return () => unsubscribe()
-  }, [selectedRoomType, setValue, oldBedInfo, watch])
+  }, [selectedRoomType, setValue, oldBedInfo, fetchedRoomType, fetchedBedId]) // Added fetchedRoomType, fetchedBedId
 
   /* ---------------------------
      Beds Popup – List all beds in the selected room type
@@ -843,7 +860,7 @@ export default function EditIPDPage() {
                         classNamePrefix="react-select"
                         onChange={(val) => {
                           field.onChange(val)
-                          setValue("bed", null)
+                          setValue("bed", null) // Clear bed when room type changes
                         }}
                       />
                     )}

@@ -27,6 +27,7 @@ import {
   Clipboard,
   Building,
   UserCheck,
+  Search,
 } from "lucide-react"
 
 import { ToastContainer, toast } from "react-toastify"
@@ -46,6 +47,7 @@ export interface IPDFormInput {
   gender: { label: string; value: string } | null
   age: number
   address?: string
+  uhid?: string // ADDED: UHID field
 
   // Relative
   relativeName: string
@@ -137,16 +139,17 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`
 }
 
+// Rename generatePatientId to generateNewUHID
 /** Generate a random 10-char alphanumeric ID */
-function generatePatientId(): string {
+function generateNewUHID(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   let result = ""
-  for (let i = 0; i < 9; i++) { // Only 7 random characters after 'GMH'
+  for (let i = 0; i < 9; i++) {
+    // Only 7 random characters after 'GMH'
     result += chars.charAt(Math.floor(Math.random() * chars.length))
   }
   return "GMH" + result
 }
-
 
 const PaymentModeOptions = [
   { value: "cash", label: "Cash" },
@@ -214,6 +217,11 @@ const IPDBookingPage: React.FC = () => {
   // All bed data for the "View Bed Availability" popup
   const [allBedData, setAllBedData] = useState<any>({})
   const [showBedPopup, setShowBedPopup] = useState(false)
+
+  // Add new states for UHID display and search
+  const [displayUHID, setDisplayUHID] = useState<string>("")
+  const [uhidSearchTerm, setUhidSearchTerm] = useState<string>("")
+  const [uhidSuggestions, setUhidSuggestions] = useState<PatientSuggestion[]>([])
 
   /* -----------------------------------------------------------------
      3A) Fetching data: Doctors, Patients, All Beds
@@ -301,6 +309,50 @@ const IPDBookingPage: React.FC = () => {
     }
   }, [patientSuggestions.length, phoneSuggestions.length])
 
+  // Add useEffect to manage displayUHID based on selectedPatient
+  useEffect(() => {
+    if (selectedPatient) {
+      setDisplayUHID(selectedPatient.data.uhid || "")
+    } else {
+      setDisplayUHID(generateNewUHID())
+    }
+  }, [selectedPatient])
+
+  // Add useEffect for UHID search suggestions
+  useEffect(() => {
+    const filterPatientSuggestionsByUHID = (uhid: string) => {
+      if (uhid.length < 2) {
+        if (uhidSuggestions.length > 0) setUhidSuggestions([])
+        return
+      }
+      const lower = uhid.toLowerCase()
+      const matched = combinedPatients.filter((p) => p.data.uhid && p.data.uhid.toLowerCase().includes(lower))
+      const suggestions: PatientSuggestion[] = matched.map((p) => ({
+        label: `${p.name} - ${p.data.uhid || ""}`,
+        value: p.id,
+        source: p.source,
+      }))
+      if (
+        suggestions.length !== uhidSuggestions.length ||
+        suggestions.some((s, i) => s.value !== uhidSuggestions[i]?.value)
+      ) {
+        setUhidSuggestions(suggestions)
+      }
+    }
+
+    if (uhidSearchTerm) {
+      filterPatientSuggestionsByUHID(uhidSearchTerm)
+    } else {
+      setUhidSuggestions([])
+    }
+  }, [uhidSearchTerm, combinedPatients, uhidSuggestions.length])
+
+  // Add handleUhidSearchChange
+  const handleUhidSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value
+    setUhidSearchTerm(val)
+  }
+
   /* -----------------------------------------------------------------
      3B) Patient auto-suggest logic for Name
   ------------------------------------------------------------------ */
@@ -380,6 +432,7 @@ const IPDBookingPage: React.FC = () => {
     setValue("phone", val)
   }
 
+  // Update handleSelectPatient to also clear UHID search suggestions
   const handleSelectPatient = (patientId: string) => {
     const found = combinedPatients.find((p) => p.id === patientId)
     if (!found) return
@@ -396,9 +449,16 @@ const IPDBookingPage: React.FC = () => {
         const match = GenderOptions.find((g) => g.value.toLowerCase() === rec.gender?.toLowerCase())
         setValue("gender", match || null)
       }
+      // Set UHID if available
+      if (rec.uhid) {
+        setValue("uhid", rec.uhid)
+        setDisplayUHID(rec.uhid)
+      }
     }
     setPatientSuggestions([])
     setPhoneSuggestions([])
+    setUhidSuggestions([]) // ADDED: Clear UHID suggestions
+    setUhidSearchTerm("") // ADDED: Clear UHID search term
     toast.info(`Patient ${found.name} selected from ${found.source.toUpperCase()}!`)
   }
 
@@ -456,9 +516,7 @@ const IPDBookingPage: React.FC = () => {
     }
   }
 
-  /* -----------------------------------------------------------------
-     3E) Submission Logic - UPDATED STRUCTURE
-  ------------------------------------------------------------------ */
+  // Update onSubmit logic to handle UHID
   const onSubmit: SubmitHandler<IPDFormInput> = async (data) => {
     setLoading(true)
     try {
@@ -467,13 +525,15 @@ const IPDBookingPage: React.FC = () => {
         const bedRef = ref(db, `beds/${data.roomType.value}/${data.bed.value}`)
         await update(bedRef, { status: "Occupied" })
       }
-  
-      // 2. Generate or use existing patient ID
+
+      // 2. Generate or use existing patient ID (UHID)
       let patientId: string
+      let patientUHID: string
       const currentTime = new Date().toISOString()
-  
+
       if (selectedPatient) {
         patientId = selectedPatient.id
+        patientUHID = selectedPatient.data.uhid || patientId // Use existing UHID
         await update(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
           phone: data.phone,
@@ -481,9 +541,11 @@ const IPDBookingPage: React.FC = () => {
           age: data.age,
           address: data.address || "",
           updatedAt: currentTime,
+          uhid: patientUHID, // Ensure UHID is updated/preserved
         })
       } else {
-        patientId = generatePatientId()
+        patientId = displayUHID // Use the auto-generated UHID
+        patientUHID = displayUHID
         await set(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
           phone: data.phone,
@@ -492,14 +554,14 @@ const IPDBookingPage: React.FC = () => {
           address: data.address || "",
           createdAt: currentTime,
           updatedAt: currentTime,
-          uhid: patientId,
+          uhid: patientUHID, // Set UHID for new patient
         })
       }
-  
+
       // 3. Prepare split data
       const ipdData = {
         phone: data.phone,
-        uhid: patientId,
+        uhid: patientUHID, // Use the determined UHID
         name: data.name,
         // Relative info
         relativeName: data.relativeName,
@@ -517,37 +579,33 @@ const IPDBookingPage: React.FC = () => {
         createdAt: currentTime,
         status: "active",
       }
-  
+
       // Date Key for the node
-      const dateKey = data.date instanceof Date
-        ? data.date.toISOString().substring(0, 10)
-        : String(data.date).substring(0, 10)
-  
+      const dateKey =
+        data.date instanceof Date ? data.date.toISOString().substring(0, 10) : String(data.date).substring(0, 10)
+
       // 1. Push to userinfoipd (returns new ipdId)
       const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}`))
       const ipdId = ipdRef.key as string
       await set(ipdRef, ipdData)
-  
+
       // 2. If deposit, push to userbillinginfoipd
       if (data.deposit && data.deposit > 0) {
         const billingData = {
           patientId,
-          uhid: patientId,
+          uhid: patientUHID, // Use the determined UHID
           ipdId,
           totalDeposit: data.deposit,
           paymentMode: data.paymentMode?.value || "",
           createdAt: currentTime,
         }
-  
+
         // Save billing info under userbillinginfoipd
-        await set(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`),
-          billingData
-        )
-  
+        await set(ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}`), billingData)
+
         // Add payment entry as a list under userbillinginfoipd/payments
         const paymentRef = push(
-          ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}/payments`)
+          ref(db, `patients/ipddetail/userbillinginfoipd/${dateKey}/${patientId}/${ipdId}/payments`),
         )
         await set(paymentRef, {
           amount: data.deposit,
@@ -557,7 +615,7 @@ const IPDBookingPage: React.FC = () => {
           createdAt: currentTime,
         })
       }
-  
+
       // 3. Add IPD to active list for quick lookup
       const ipdActiveData = {
         ipdId,
@@ -568,21 +626,22 @@ const IPDBookingPage: React.FC = () => {
         advanceDeposit: data.deposit || 0,
         admitDate: ipdData.admissionDate,
         bed: data.bed?.label || "",
+        uhid: patientUHID, // Add UHID to active list
       }
       await set(ref(db, `patients/ipdactive/${ipdId}`), ipdActiveData)
-  
+
       // 4. Send WhatsApp
-      const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Thank you for choosing our hospital.`
-      const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
-  
+      const patientMessage = `MedZeal Official: Dear ${data.name}, your IPD admission appointment is confirmed. Your bed: ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"} has been allocated. Your UHID is ${patientUHID}. Thank you for choosing our hospital.`
+      const relativeMessage = `MedZeal Official: Dear ${data.relativeName}, this is to inform you that the IPD admission for ${data.name} (UHID: ${patientUHID}) has been scheduled. The allocated bed is ${data.bed?.label || "N/A"} in ${data.roomType?.label || "N/A"}. Please contact us for further details.`
+
       await sendWhatsAppMessage(data.phone, patientMessage)
       await sendWhatsAppMessage(data.relativePhone, relativeMessage)
-  
+
       toast.success("IPD Admission created successfully!", {
         position: "top-right",
         autoClose: 5000,
       })
-  
+
       // 5. Reset Form
       reset({
         name: "",
@@ -608,6 +667,8 @@ const IPDBookingPage: React.FC = () => {
       setPatientPhoneInput("")
       setSelectedPatient(null)
       setPreviewData(null)
+      setUhidSearchTerm("") // ADDED: Reset UHID search term
+      setDisplayUHID(generateNewUHID()) // ADDED: Generate new UHID for next booking
     } catch (err) {
       console.error("Error in IPD booking:", err)
       toast.error("Error: Failed to book IPD admission.", {
@@ -618,13 +679,11 @@ const IPDBookingPage: React.FC = () => {
       setLoading(false)
     }
   }
-  
 
-  /* -----------------------------------------------------------------
-     3F) Preview Handling
-  ------------------------------------------------------------------ */
+  // Update handlePreview to include UHID
   const handlePreview = () => {
-    setPreviewData(watch())
+    const currentFormData = watch()
+    setPreviewData({ ...currentFormData, uhid: selectedPatient?.data.uhid || displayUHID })
   }
 
   // Custom styles for react-select
@@ -685,7 +744,7 @@ const IPDBookingPage: React.FC = () => {
 
           <form onSubmit={handleSubmit(onSubmit)} className="p-6 pb-20">
             <div className="space-y-8">
-              {/* Section: Patient Information */}
+              {/* Add UHID display and search fields in the Patient Information section */}
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                 <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
                   <User className="mr-2 h-5 w-5" />
@@ -693,6 +752,78 @@ const IPDBookingPage: React.FC = () => {
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* UHID Display (Non-editable) */}
+                  <div className="relative">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Universal Health ID (UHID)</label>
+                    <div className="relative">
+                      <UserCheck className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        value={displayUHID}
+                        readOnly
+                        className="w-full pl-10 pr-4 py-3 border rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                      />
+                    </div>
+                    {!selectedPatient && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        If you register now, your UHID will be: <span className="font-semibold">{displayUHID}</span>
+                      </p>
+                    )}
+                  </div>
+
+                  {/* UHID Search (Optional) */}
+                  <div className="relative" data-dropdown="patient-uhid">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Search by Existing UHID (Optional)
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
+                      <input
+                        type="text"
+                        value={uhidSearchTerm}
+                        onChange={handleUhidSearchChange}
+                        placeholder="Enter existing UHID"
+                        className="w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 border-gray-300 transition duration-200"
+                      />
+                      {uhidSearchTerm.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setUhidSearchTerm("")
+                            setUhidSuggestions([])
+                          }}
+                          className="absolute top-3 right-3 text-gray-400 hover:text-gray-600"
+                        >
+                          <XCircle className="h-5 w-5" />
+                        </button>
+                      )}
+                    </div>
+                    {uhidSuggestions.length > 0 && !selectedPatient && (
+                      <ul className="absolute z-10 bg-white border border-gray-300 w-full mt-1 max-h-40 overflow-auto rounded-lg shadow-lg">
+                        {uhidSuggestions.map((sug) => (
+                          <li
+                            key={sug.value}
+                            onClick={() => handleSelectPatient(sug.value)}
+                            className="px-4 py-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center border-b border-gray-100 last:border-b-0"
+                          >
+                            <div className="flex items-center">
+                              <UserRound className="h-5 w-5 mr-2 text-gray-400" />
+                              <span>{sug.label}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <span
+                                className={`text-xs px-2 py-1 rounded-full ${sug.source === "gautami" ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}`}
+                              >
+                                {sug.source === "gautami" ? "Gautami" : "other"}
+                              </span>
+                              <ChevronRight className="h-4 w-4 ml-2 text-gray-400" />
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
                   {/* Patient Name + Suggestions */}
                   <div className="relative" data-dropdown="patient-name">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
@@ -1287,8 +1418,13 @@ const IPDBookingPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4">
+              {/* Add UHID to preview modal */}
               <div className="space-y-2">
                 <h4 className="font-medium text-gray-500 text-sm">Patient Information</h4>
+                <p className="flex justify-between">
+                  <span className="text-gray-600">UHID:</span>
+                  <span className="font-medium">{previewData.uhid || "N/A"}</span>
+                </p>
                 <p className="flex justify-between">
                   <span className="text-gray-600">Name:</span>
                   <span className="font-medium">{previewData.name}</span>
@@ -1521,4 +1657,4 @@ const IPDBookingPage: React.FC = () => {
   )
 }
 
-export default IPDBookingPage  
+export default IPDBookingPage
