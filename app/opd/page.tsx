@@ -150,8 +150,11 @@ export default function Page() {
   const [onCallAppointments, setOnCallAppointments] = useState<OnCallAppointment[]>([])
   const [patientSuggestions, setPatientSuggestions] = useState<PatientRecord[]>([])
   const [phoneSuggestions, setPhoneSuggestions] = useState<PatientRecord[]>([])
+  const [uhidSearchInput, setUhidSearchInput] = useState("") // New state for UHID search input
+  const [uhidSuggestions, setUhidSuggestions] = useState<PatientRecord[]>([]) // New state for UHID suggestions
   const [showNameSuggestions, setShowNameSuggestions] = useState(false)
   const [showPhoneSuggestions, setShowPhoneSuggestions] = useState(false)
+  const [showUhidSuggestions, setShowUhidSuggestions] = useState(false) // New state for UHID suggestion visibility
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSubmitted, setIsSubmitted] = useState(false)
@@ -206,7 +209,7 @@ export default function Page() {
     const patientsRef = ref(db, "patients/patientinfo")
     return onValue(patientsRef, (snap) => {
       const data = snap.val() || {}
-      setGautamiPatients(Object.keys(data).map((key) => ({ id: key, ...data[key] })))
+      setGautamiPatients(Object.keys(data).map((key) => ({ id: key, ...data[key], uhid: key }))) // Ensure UHID is part of PatientRecord
     })
   }, [])
 
@@ -220,7 +223,7 @@ export default function Page() {
     })
   }, [])
 
-  // Suggestions logic
+  // Suggestions logic for Name
   const watchedName = watch("name")
   useEffect(() => {
     if (watchedName.length >= 2 && (!selectedPatient || watchedName !== selectedPatient.name)) {
@@ -233,6 +236,7 @@ export default function Page() {
     }
   }, [watchedName, gautamiPatients, selectedPatient])
 
+  // Suggestions logic for Phone
   const watchedPhone = watch("phone")
   useEffect(() => {
     if (watchedPhone.length >= 2 && (!selectedPatient || watchedPhone !== selectedPatient.phone)) {
@@ -244,6 +248,18 @@ export default function Page() {
     }
   }, [watchedPhone, gautamiPatients, selectedPatient])
 
+  // Suggestions logic for UHID
+  useEffect(() => {
+    if (uhidSearchInput.length >= 2 && (!selectedPatient || uhidSearchInput !== selectedPatient.uhid)) {
+      const lower = uhidSearchInput.toLowerCase()
+      const matches = gautamiPatients.filter((p) => p.uhid?.toLowerCase().includes(lower))
+      setUhidSuggestions(matches)
+      setShowUhidSuggestions(matches.length > 0)
+    } else {
+      setShowUhidSuggestions(false)
+    }
+  }, [uhidSearchInput, gautamiPatients, selectedPatient])
+
   const handlePatientSelect = (patient: PatientRecord) => {
     setSelectedPatient(patient)
     setValue("name", patient.name)
@@ -251,18 +267,29 @@ export default function Page() {
     setValue("age", patient.age)
     setValue("gender", patient.gender || "")
     setValue("address", patient.address)
+    setUhidSearchInput(patient.uhid || "") // Set UHID search input to selected patient's UHID
     setShowNameSuggestions(false)
     setShowPhoneSuggestions(false)
+    setShowUhidSuggestions(false) // Hide UHID suggestions
   }
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue("name", e.target.value)
     setSelectedPatient(null)
+    setUhidSearchInput("") // Clear UHID search when name changes
   }
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue("phone", e.target.value)
     setSelectedPatient(null)
+    setUhidSearchInput("") // Clear UHID search when phone changes
+  }
+
+  const handleUhidChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUhidSearchInput(e.target.value)
+    setSelectedPatient(null) // Clear selected patient when UHID input changes
+    setValue("name", "") // Clear name and phone to avoid confusion
+    setValue("phone", "")
   }
 
   // Calculate total charges from all modalities
@@ -473,6 +500,7 @@ export default function Page() {
           referredBy: "",
         })
         setSelectedPatient(null)
+        setUhidSearchInput("") // Clear UHID search input on form reset
       }, 3000)
     } catch (err) {
       console.error(err)
@@ -535,6 +563,7 @@ export default function Page() {
       referredBy: "",
     })
     setSelectedPatient(null)
+    setUhidSearchInput("") // Clear UHID search input on form reset
     setActiveTab("booking")
   }
 
@@ -608,14 +637,19 @@ export default function Page() {
                     doctors={doctors}
                     patientSuggestions={patientSuggestions}
                     phoneSuggestions={phoneSuggestions}
+                    uhidSearchInput={uhidSearchInput} // Pass UHID search input
+                    uhidSuggestions={uhidSuggestions} // Pass UHID suggestions
                     showNameSuggestions={showNameSuggestions}
                     showPhoneSuggestions={showPhoneSuggestions}
+                    showUhidSuggestions={showUhidSuggestions} // Pass UHID suggestion visibility
                     selectedPatient={selectedPatient}
                     onPatientSelect={handlePatientSelect}
                     onNameChange={handleNameChange}
                     onPhoneChange={handlePhoneChange}
+                    onUhidChange={handleUhidChange} // Pass UHID change handler
                     setShowNameSuggestions={setShowNameSuggestions}
                     setShowPhoneSuggestions={setShowPhoneSuggestions}
+                    setShowUhidSuggestions={setShowUhidSuggestions} // Pass UHID suggestion visibility setter
                   />
 
                   <div className="flex justify-end pt-6 border-t bg-gray-50 -mx-6 px-6 -mb-6 pb-6">

@@ -18,6 +18,7 @@ import {
   FileText,
   Hospital,
   PhoneCall,
+  Search,
 } from "lucide-react"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
@@ -38,14 +39,19 @@ interface PatientFormProps {
   doctors: Doctor[]
   patientSuggestions: PatientRecord[]
   phoneSuggestions: PatientRecord[]
+  uhidSearchInput: string // New prop for UHID search input value
+  uhidSuggestions: PatientRecord[] // New prop for UHID suggestions
   showNameSuggestions: boolean
   showPhoneSuggestions: boolean
+  showUhidSuggestions: boolean // New prop for UHID suggestion visibility
   selectedPatient: PatientRecord | null
   onPatientSelect: (patient: PatientRecord) => void
   onNameChange: (e: React.ChangeEvent<HTMLInputElement>) => void
   onPhoneChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onUhidChange: (e: React.ChangeEvent<HTMLInputElement>) => void // New prop for UHID change handler
   setShowNameSuggestions: (show: boolean) => void
   setShowPhoneSuggestions: (show: boolean) => void
+  setShowUhidSuggestions: (show: boolean) => void // New prop for UHID suggestion visibility setter
 }
 
 function formatAMPM(date: Date): string {
@@ -63,14 +69,19 @@ export function PatientForm({
   doctors,
   patientSuggestions,
   phoneSuggestions,
+  uhidSearchInput, // Destructure new prop
+  uhidSuggestions, // Destructure new prop
   showNameSuggestions,
   showPhoneSuggestions,
+  showUhidSuggestions, // Destructure new prop
   selectedPatient,
   onPatientSelect,
   onNameChange,
   onPhoneChange,
+  onUhidChange, // Destructure new prop
   setShowNameSuggestions,
   setShowPhoneSuggestions,
+  setShowUhidSuggestions, // Destructure new prop
 }: PatientFormProps) {
   const {
     register,
@@ -82,8 +93,10 @@ export function PatientForm({
 
   const nameInputRef = useRef<HTMLInputElement | null>(null)
   const phoneInputRef = useRef<HTMLInputElement | null>(null)
+  const uhidInputRef = useRef<HTMLInputElement | null>(null) // New ref for UHID input
   const nameSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
   const phoneSuggestionBoxRef = useRef<HTMLDivElement | null>(null)
+  const uhidSuggestionBoxRef = useRef<HTMLDivElement | null>(null) // New ref for UHID suggestion box
 
   const watchedModalities = watch("modalities") || []
   const watchedPaymentMethod = watch("paymentMethod")
@@ -149,7 +162,7 @@ export function PatientForm({
     watch,
   ])
 
-  // Hide suggestions on outside click
+  // Hide suggestions on outside click for Name
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -166,6 +179,7 @@ export function PatientForm({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [showNameSuggestions, setShowNameSuggestions])
 
+  // Hide suggestions on outside click for Phone
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -181,6 +195,23 @@ export function PatientForm({
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [showPhoneSuggestions, setShowPhoneSuggestions])
+
+  // Hide suggestions on outside click for UHID
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        showUhidSuggestions &&
+        uhidSuggestionBoxRef.current &&
+        !uhidSuggestionBoxRef.current.contains(event.target as Node) &&
+        uhidInputRef.current &&
+        !uhidInputRef.current.contains(event.target as Node)
+      ) {
+        setShowUhidSuggestions(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [showUhidSuggestions, setShowUhidSuggestions])
 
   // Fixed calculation: Final amount = Cash + Online (total amount paid)
   const calculateTotalAmount = () => {
@@ -315,6 +346,52 @@ export function PatientForm({
                 )}
               </div>
               {errors.phone && <p className="text-sm text-red-500">{errors.phone.message}</p>}
+            </div>
+
+            {/* UHID Search - New Field */}
+            <div className="space-y-2">
+              <Label htmlFor="uhid" className="text-sm font-medium">
+                Search by UHID (Optional)
+              </Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                <Input
+                  id="uhid"
+                  type="text"
+                  value={uhidSearchInput}
+                  onChange={onUhidChange}
+                  placeholder="Enter UHID"
+                  className="pl-10"
+                  autoComplete="off"
+                  ref={uhidInputRef}
+                />
+                {showUhidSuggestions && uhidSuggestions.length > 0 && (
+                  <div
+                    ref={uhidSuggestionBoxRef}
+                    className="absolute z-10 bg-white border border-gray-200 rounded-md w-full mt-1 max-h-48 overflow-auto shadow-lg"
+                  >
+                    {uhidSuggestions.map((suggestion) => (
+                      <div
+                        key={suggestion.id}
+                        onClick={() => onPatientSelect(suggestion)}
+                        className="flex items-center justify-between px-3 py-2 hover:bg-blue-50 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Avatar className="h-6 w-6">
+                            <AvatarFallback className="text-xs bg-blue-100 text-blue-700">
+                              {suggestion.uhid?.substring(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="font-medium">{suggestion.uhid}</span>
+                        </div>
+                        <Badge variant="default" className="text-xs">
+                          Existing
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Age */}
