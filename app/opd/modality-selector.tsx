@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useMemo } from "react"
-import { Plus, Edit2, Check, DollarSign, Trash2, IndianRupeeIcon } from "lucide-react" // Added IndianRupeeIcon
+import { Plus, Edit2, Check, DollarSign, Trash2, IndianRupeeIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -40,7 +40,7 @@ interface ModalitySelectorProps {
 
 export function ModalitySelector({ modalities, doctors, onChange }: ModalitySelectorProps) {
   const [editingCharges, setEditingCharges] = useState<Record<string, boolean>>({})
-  const [tempCharges, setTempCharges] = useState<Record<string, number>>({})
+  const [tempCharges, setTempCharges] = useState<Record<string, string>>({}) // Changed to string to allow empty input
 
   // Add modality function
   const addModality = (type: ModalitySelection["type"]) => {
@@ -108,7 +108,7 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
             // Special handling for custom service charges
             if (updated.type === "custom" && updates.charges !== undefined) {
               updated.charges = updates.charges
-            } else if (!editingCharges[id] && !updates.charges && updated.type === "consultation") {
+            } else if (!editingCharges[id] && updates.charges === undefined && updated.type === "consultation") {
               // Only calculate charges if not manually edited and it's a consultation
               updated.charges = calculateDoctorCharges(updated)
             }
@@ -142,14 +142,20 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
   // Start editing charges
   const startEditingCharges = (id: string, currentCharges: number) => {
     setEditingCharges({ ...editingCharges, [id]: true })
-    setTempCharges({ ...tempCharges, [id]: currentCharges })
+    setTempCharges({ ...tempCharges, [id]: currentCharges.toString() }) // Convert to string for input
   }
 
   // Save edited charges
   const saveEditedCharges = (id: string) => {
-    updateModality(id, { charges: tempCharges[id] || 0 })
+    updateModality(id, { charges: Number(tempCharges[id]) || 0 }) // Convert back to number
     setEditingCharges({ ...editingCharges, [id]: false })
   }
+
+  // Handle scroll event to prevent default behavior on number inputs
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLInputElement>) => {
+    e.currentTarget.blur(); // Remove focus to stop scroll
+    e.preventDefault(); // Prevent default scroll behavior
+  }, []);
 
   // Calculate total charges
   const getTotalCharges = useCallback(() => {
@@ -273,14 +279,15 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           <div className="flex">
                             <Input
                               type="number"
-                              className="h-9 pr-8"
+                              className="h-9 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" // Remove scroll mouse
                               value={tempCharges[modality.id]}
                               onChange={(e) =>
                                 setTempCharges({
                                   ...tempCharges,
-                                  [modality.id]: Number(e.target.value),
+                                  [modality.id]: e.target.value,
                                 })
                               }
+                              onWheel={handleWheel} // Add onWheel handler
                             />
                             <Button
                               type="button"
@@ -294,7 +301,12 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           </div>
                         ) : (
                           <div className="flex">
-                            <Input value={`₹${modality.charges}`} readOnly className="h-9 pr-8" />
+                            <Input
+                              value={modality.charges === 0 ? "" : `₹${modality.charges}`} // Display empty if 0
+                              readOnly
+                              className="h-9 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" // Remove scroll mouse
+                              onWheel={handleWheel} // Add onWheel handler
+                            />
                             <Button
                               type="button"
                               size="sm"
@@ -329,9 +341,10 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                         <Input
                           type="number"
                           placeholder="Enter amount"
-                          value={modality.charges}
-                          onChange={(e) => updateModality(modality.id, { charges: Number(e.target.value) })}
-                          className="h-9 pr-8"
+                          value={modality.charges === 0 ? "" : modality.charges} // Display empty if 0
+                          onChange={(e) => updateModality(modality.id, { charges: Number(e.target.value) || 0 })}
+                          className="h-9 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" // Remove scroll mouse
+                          onWheel={handleWheel} // Add onWheel handler
                         />
                         <IndianRupeeIcon className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                       </div>
@@ -383,14 +396,15 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           <div className="flex">
                             <Input
                               type="number"
-                              className="h-9 pr-8"
+                              className="h-9 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" // Remove scroll mouse
                               value={tempCharges[modality.id]}
                               onChange={(e) =>
                                 setTempCharges({
                                   ...tempCharges,
-                                  [modality.id]: Number(e.target.value),
+                                  [modality.id]: e.target.value,
                                 })
                               }
+                              onWheel={handleWheel} // Add onWheel handler
                             />
                             <Button
                               type="button"
@@ -404,7 +418,12 @@ export function ModalitySelector({ modalities, doctors, onChange }: ModalitySele
                           </div>
                         ) : (
                           <div className="flex">
-                            <Input value={`₹${modality.charges}`} readOnly className="h-9 pr-8" />
+                            <Input
+                              value={modality.charges === 0 ? "" : `₹${modality.charges}`} // Display empty if 0
+                              readOnly
+                              className="h-9 pr-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" // Remove scroll mouse
+                              onWheel={handleWheel} // Add onWheel handler
+                            />
                             <Button
                               type="button"
                               size="sm"
