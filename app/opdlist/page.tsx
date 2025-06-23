@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { EditButton } from "./edit-button" // Updated import path
+import { EditButton } from "./edit-button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Calendar, RefreshCw, Eye, ArrowUpDown, X, Filter } from "lucide-react"
@@ -29,7 +29,7 @@ function humanFileSize(bytes: number) {
 
 interface Appointment {
   id: string
-  patientId: string
+  patientId: string // This is the UHID
   name: string
   phone: string
   date: string
@@ -54,25 +54,26 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
   Object.entries(snap).forEach(([patientId, apps]) => {
     if (typeof apps === "object" && apps !== null) {
       Object.entries(apps as Record<string, any>).forEach(([apptId, data]) => {
-        if (filterFn(data)) {
-          result.push({
-            id: apptId,
-            patientId,
-            name: data.name || "",
-            phone: data.phone || "",
-            date: data.date || "",
-            time: data.time || "",
-            doctor: data.doctor || "",
-            appointmentType: data.appointmentType || "visithospital",
-            modalities: data.modalities || [],
-            createdAt: data.createdAt || "",
-            payment: data.payment || {
-              totalCharges: 0,
-              totalPaid: 0,
-              discount: 0,
-              paymentMethod: "cash",
-            },
-          })
+        const appointmentData = {
+          id: apptId,
+          patientId: patientId, // Capture patientId as UHID
+          name: data.name || "",
+          phone: data.phone || "",
+          date: data.date || "",
+          time: data.time || "",
+          doctor: data.doctor || "",
+          appointmentType: data.appointmentType || "visithospital",
+          modalities: data.modalities || [],
+          createdAt: data.createdAt || "",
+          payment: data.payment || {
+            totalCharges: 0,
+            totalPaid: 0,
+            discount: 0,
+            paymentMethod: "cash",
+          },
+        };
+        if (filterFn(appointmentData)) {
+          result.push(appointmentData);
         }
       })
     }
@@ -82,7 +83,7 @@ const flattenAppointments = (snap: Record<string, any> | null | undefined, filte
 
 export default function ManageOPDPage() {
   const router = useRouter()
-  const [tab, setTab] = useState<"today" | "last7days">("today") // Changed tab value
+  const [tab, setTab] = useState<"today" | "last7days">("today")
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
@@ -100,11 +101,11 @@ export default function ManageOPDPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const todayKey = getTodayDateKey() // eg: 2024-06-21
+      const todayKey = getTodayDateKey()
       const opdRef = ref(db, `patients/opddetail/${todayKey}`)
       const snap = await get(query(opdRef))
       const data = snap.val() as Record<string, any> | null
-      const result = flattenAppointments(data, () => true) // No filter, already by date
+      const result = flattenAppointments(data, () => true)
       setAppointments(result)
       setDownloadedCount(result.length)
       setDownloadedBytes(byteSize(JSON.stringify(data || {})))
@@ -125,7 +126,7 @@ export default function ManageOPDPage() {
     try {
       const today = new Date()
       const sixDaysAgo = new Date()
-      sixDaysAgo.setDate(today.getDate() - 6) // Today + 6 days prior = 7 days total
+      sixDaysAgo.setDate(today.getDate() - 6)
 
       const days = eachDayOfInterval({ start: sixDaysAgo, end: today })
 
@@ -170,7 +171,7 @@ export default function ManageOPDPage() {
 
     const today = new Date()
     const ninetyDaysAgo = new Date()
-    ninetyDaysAgo.setDate(today.getDate() - 89) // Today + 89 days prior = 90 days total
+    ninetyDaysAgo.setDate(today.getDate() - 89)
 
     const daysToFetch = eachDayOfInterval({ start: ninetyDaysAgo, end: today })
 
@@ -189,7 +190,10 @@ export default function ManageOPDPage() {
       if (data) {
         const filtered = flattenAppointments(
           data,
-          (a) => (a.name || "").toLowerCase().includes(t) || (a.phone || "").includes(t),
+          (a) =>
+            (a.name || "").toLowerCase().includes(t) ||
+            (a.phone || "").includes(t) ||
+            (a.patientId || "").toLowerCase().includes(t) // Added search by patientId (UHID)
         )
         results.push(...filtered)
         totalBytes += byteSize(JSON.stringify(data))
@@ -246,10 +250,12 @@ export default function ManageOPDPage() {
       const db = new Date(b.date).getTime()
       return direction === "asc" ? da - db : db - da
     }
-    const va = (a as any)[key]
-    const vb = (b as any)[key]
-    if (typeof va === "string" && typeof vb === "string")
-      return direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va)
+    // Handle sorting for patientId, name, phone
+    if (key === "name" || key === "phone" || key === "patientId") {
+      const va = (a as any)[key] || "";
+      const vb = (b as any)[key] || "";
+      return direction === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+    }
     return 0
   })
 
@@ -302,7 +308,7 @@ export default function ManageOPDPage() {
           <Tabs value={tab} onValueChange={(v) => setTab(v as "today" | "last7days")} className="w-full mb-4">
             <TabsList className="bg-slate-100">
               <TabsTrigger value="today">Today</TabsTrigger>
-              <TabsTrigger value="last7days">Last 7 Days</TabsTrigger> {/* Changed tab text */}
+              <TabsTrigger value="last7days">Last 7 Days</TabsTrigger>
             </TabsList>
           </Tabs>
           <Card className="mb-6 border border-slate-200 shadow-sm">
@@ -315,7 +321,7 @@ export default function ManageOPDPage() {
             <CardContent className="pb-4">
               <div className="flex items-center gap-4 flex-wrap">
                 <Input
-                  placeholder="Type at least 6 letters/digits to search by name or phone..."
+                  placeholder="Type at least 6 letters/digits to search by name, phone, or UHID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="max-w-md"
@@ -368,6 +374,17 @@ export default function ManageOPDPage() {
                             Patient <ArrowUpDown className="h-3 w-3" />
                           </Button>
                         </TableHead>
+                        <TableHead>
+                          <Button
+                            variant="ghost"
+                            onClick={() =>
+                              setSortConfig({ key: "patientId", direction: sortConfig.direction === "asc" ? "desc" : "asc" })
+                            }
+                            className="flex items-center gap-1 p-0 h-auto font-medium"
+                          >
+                            UHID <ArrowUpDown className="h-3 w-3" />
+                          </Button>
+                        </TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Type</TableHead>
                         <TableHead className="text-right">Amount</TableHead>
@@ -380,6 +397,9 @@ export default function ManageOPDPage() {
                           <TableCell className="font-medium">
                             {app.name}
                             <div className="text-xs text-gray-500">{app.phone}</div>
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-600 font-mono">
+                            {app.patientId}
                           </TableCell>
                           <TableCell>{format(new Date(app.date), "dd/MM/yyyy")}</TableCell>
                           <TableCell>
