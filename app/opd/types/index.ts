@@ -6,6 +6,7 @@ export interface IFormInput {
   address?: string
   date: Date
   time: string
+  uhid?: string 
   message?: string
   paymentMethod: "cash" | "online" | "mixed"
   cashAmount?: number

@@ -18,6 +18,7 @@ import type { IFormInput, PatientRecord, Doctor, ModalitySelection, OnCallAppoin
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { generateNextUHID } from "@/components/uhid-generator" // Import the new UHID generator
 
 function formatAMPM(date: Date): string {
   const rawHours = date.getHours()
@@ -30,14 +31,7 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutesStr} ${ampm}`
 }
 
-function generatePatientId(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  let result = ""
-  for (let i = 0; i < 9; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return "GMH" + result
-}
+// Removed the old generatePatientId function
 
 // WhatsApp message sending function
 async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
@@ -132,15 +126,11 @@ Your *Appointment* has been successfully booked!
 • Type: Hospital Visit
 ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 
-
-
 💰 *Payment Summary:*
 • Total Charges: ₹${totalCharges}
 ${discount > 0 ? `• Discount: ₹${discount}` : ""}
 • Amount Paid: ₹${totalPaid}
 • Payment Method: ${data.paymentMethod?.charAt(0).toUpperCase() + data.paymentMethod?.slice(1)}
-
-
 
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 
@@ -322,7 +312,7 @@ export default function Page() {
     setIsSubmitting(true)
     try {
       // Determine UHID
-      const uhid = selectedPatient?.id || generatePatientId()
+      const uhid = selectedPatient?.id || (await generateNextUHID())
 
       if (!selectedPatient) {
         // new patient
@@ -387,12 +377,13 @@ export default function Page() {
         const totalPaid = cash + online
 
         // push OPD record
-        const appointmentDateKey = data.date instanceof Date
-  ? data.date.toISOString().slice(0, 10)
-  : new Date(data.date).toISOString().slice(0, 10);
+        const appointmentDateKey =
+          data.date instanceof Date
+            ? data.date.toISOString().slice(0, 10)
+            : new Date(data.date).toISOString().slice(0, 10)
 
-// Save under: /patients/opddetail/yyyy-MM-dd/{uhid}/{appointmentId}
-const opdRef = push(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}`));
+        // Save under: /patients/opddetail/yyyy-MM-dd/{uhid}/{appointmentId}
+        const opdRef = push(ref(db, `patients/opddetail/${appointmentDateKey}/${uhid}`))
 
         // Store all modalities as a separate array in the database
         const modalitiesData = data.modalities.map((modality: ModalitySelection) => {

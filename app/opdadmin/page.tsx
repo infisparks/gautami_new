@@ -648,7 +648,7 @@ const AdminDashboardPage: React.FC = () => {
                       ))}
                     </tbody>
                   </table>
-                  {filteredAppointments.length > 20 && (
+                  {filteredAppointments.length > 30 && (
                     <div className="text-center py-4 text-gray-500">
                       Showing first 20 of {filteredAppointments.length} appointments
                     </div>

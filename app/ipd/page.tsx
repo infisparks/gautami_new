@@ -29,16 +29,18 @@ import {
   UserCheck,
   Search,
 } from "lucide-react"
+import { generateNextUHID } from "../../components/uhid-generator"
 
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import DatePicker from "react-datepicker"
 import "react-datepicker/dist/react-datepicker.css"
 import Select from "react-select"
-import IPDSignaturePDF from "./ipdsignaturepdf" // If you're using a PDF component
+import IPDSignaturePDF from "./ipdsignaturepdf"
+import { generateAndDownloadEnglishLetterhead } from "./letterhead-utils" // If you're using a PDF component
 
 /* ---------------------------------------------------------------------
-  1) Types & Interfaces
+1) Types & Interfaces
 ------------------------------------------------------------------------ */
 export interface IPDFormInput {
   // Basic Patient
@@ -97,7 +99,7 @@ interface PatientSuggestion {
 }
 
 /* ---------------------------------------------------------------------
-  2) Constants & Utility Functions
+2) Constants & Utility Functions
 ------------------------------------------------------------------------ */
 const GenderOptions = [
   { value: "male", label: "Male" },
@@ -139,25 +141,23 @@ function formatAMPM(date: Date): string {
   return `${hours}:${minutes} ${ampm}`
 }
 
-// Rename generatePatientId to generateNewUHID
-/** Generate a random 10-char alphanumeric ID */
-function generateNewUHID(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-  let result = ""
-  for (let i = 0; i < 9; i++) {
-    // Only 7 random characters after 'GMH'
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return "GMH" + result
-}
-
 const PaymentModeOptions = [
   { value: "cash", label: "Cash" },
   { value: "online", label: "Online" },
 ]
 
+function getMumbaiDateKey(date: Date): string {
+  // Adjust to IST (UTC+5:30)
+  const IST_OFFSET = 5.5 * 60 * 60 * 1000 // 19800000 ms
+  const istDate = new Date(date.getTime() + IST_OFFSET)
+  const yyyy = istDate.getUTCFullYear()
+  const mm = String(istDate.getUTCMonth() + 1).padStart(2, "0")
+  const dd = String(istDate.getUTCDate()).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}`
+}
+
 /* ---------------------------------------------------------------------
-  3) Main IPD Component
+3) Main IPD Component
 ------------------------------------------------------------------------ */
 const IPDBookingPage: React.FC = () => {
   const {
@@ -224,8 +224,8 @@ const IPDBookingPage: React.FC = () => {
   const [uhidSuggestions, setUhidSuggestions] = useState<PatientSuggestion[]>([])
 
   /* -----------------------------------------------------------------
-     3A) Fetching data: Doctors, Patients, All Beds
-  ------------------------------------------------------------------ */
+   3A) Fetching data: Doctors, Patients, All Beds
+------------------------------------------------------------------ */
   // Doctors
   useEffect(() => {
     const doctorsRef = ref(db, "doctors")
@@ -314,7 +314,8 @@ const IPDBookingPage: React.FC = () => {
     if (selectedPatient) {
       setDisplayUHID(selectedPatient.data.uhid || "")
     } else {
-      setDisplayUHID(generateNewUHID())
+      // UHID will be generated on submission for new patients
+      setDisplayUHID("")
     }
   }, [selectedPatient])
 
@@ -354,8 +355,8 @@ const IPDBookingPage: React.FC = () => {
   }
 
   /* -----------------------------------------------------------------
-     3B) Patient auto-suggest logic for Name
-  ------------------------------------------------------------------ */
+   3B) Patient auto-suggest logic for Name
+------------------------------------------------------------------ */
   function filterPatientSuggestions(name: string) {
     if (name.length < 2) {
       if (patientSuggestions.length > 0) setPatientSuggestions([])
@@ -394,8 +395,8 @@ const IPDBookingPage: React.FC = () => {
   }
 
   /* -----------------------------------------------------------------
-     3B2) Patient auto-suggest logic for Phone
-  ------------------------------------------------------------------ */
+   3B2) Patient auto-suggest logic for Phone
+------------------------------------------------------------------ */
   function filterPatientSuggestionsByPhone(phone: string) {
     if (phone.length < 2) {
       if (phoneSuggestions.length > 0) setPhoneSuggestions([])
@@ -463,8 +464,8 @@ const IPDBookingPage: React.FC = () => {
   }
 
   /* -----------------------------------------------------------------
-     3C) Beds fetching logic
-  ------------------------------------------------------------------ */
+   3C) Beds fetching logic
+------------------------------------------------------------------ */
   useEffect(() => {
     if (!selectedRoomType?.value) {
       setBeds([])
@@ -494,8 +495,8 @@ const IPDBookingPage: React.FC = () => {
   }, [selectedRoomType, setValue])
 
   /* -----------------------------------------------------------------
-     3D) WhatsApp message sender function
-  ------------------------------------------------------------------ */
+   3D) WhatsApp message sender function
+------------------------------------------------------------------ */
   const sendWhatsAppMessage = async (number: string, message: string) => {
     const payload = {
       token: "99583991572",
@@ -544,8 +545,8 @@ const IPDBookingPage: React.FC = () => {
           uhid: patientUHID, // Ensure UHID is updated/preserved
         })
       } else {
-        patientId = displayUHID // Use the auto-generated UHID
-        patientUHID = displayUHID
+        patientUHID = await generateNextUHID() // Generate new UHID here
+        patientId = patientUHID // Use UHID as patientId for new patients
         await set(ref(db, `patients/patientinfo/${patientId}`), {
           name: data.name,
           phone: data.phone,
@@ -581,8 +582,7 @@ const IPDBookingPage: React.FC = () => {
       }
 
       // Date Key for the node
-      const dateKey =
-        data.date instanceof Date ? data.date.toISOString().substring(0, 10) : String(data.date).substring(0, 10)
+      const dateKey = getMumbaiDateKey(data.date instanceof Date ? data.date : new Date(data.date))
 
       // 1. Push to userinfoipd (returns new ipdId)
       const ipdRef = push(ref(db, `patients/ipddetail/userinfoipd/${dateKey}/${patientId}`))
@@ -642,7 +642,10 @@ const IPDBookingPage: React.FC = () => {
         autoClose: 5000,
       })
 
-      // 5. Reset Form
+      // 5. Auto-download Letterhead
+      generateAndDownloadEnglishLetterhead(data, patientUHID)
+
+      // 6. Reset Form
       reset({
         name: "",
         phone: "",
@@ -668,7 +671,7 @@ const IPDBookingPage: React.FC = () => {
       setSelectedPatient(null)
       setPreviewData(null)
       setUhidSearchTerm("") // ADDED: Reset UHID search term
-      setDisplayUHID(generateNewUHID()) // ADDED: Generate new UHID for next booking
+      setDisplayUHID("") // Reset displayUHID to empty for next booking
     } catch (err) {
       console.error("Error in IPD booking:", err)
       toast.error("Error: Failed to book IPD admission.", {
@@ -713,13 +716,13 @@ const IPDBookingPage: React.FC = () => {
 
   // Custom styles for DatePicker
   const datePickerWrapperClass = `
-    w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 
-    ${errors.date ? "border-red-500" : "border-gray-300"} transition duration-200
-  `
+  w-full pl-10 pr-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 
+  ${errors.date ? "border-red-500" : "border-gray-300"} transition duration-200
+`
 
   /* -----------------------------------------------------------------
-     3G) Render
-  ------------------------------------------------------------------ */
+   3G) Render
+------------------------------------------------------------------ */
   return (
     <>
       <Head>
@@ -766,7 +769,7 @@ const IPDBookingPage: React.FC = () => {
                     </div>
                     {!selectedPatient && (
                       <p className="text-xs text-gray-500 mt-1">
-                        If you register now, your UHID will be: <span className="font-semibold">{displayUHID}</span>
+                        Universal Health ID will be generated upon successful registration.
                       </p>
                     )}
                   </div>
