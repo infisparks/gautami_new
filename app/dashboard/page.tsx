@@ -89,7 +89,7 @@ interface IPDService {
 interface IPDPayment {
   amount: number
   paymentType: "cash" | "online"
-  type: "deposit" | "advance"
+  type: "advance" | "refund"
   date: string
 }
 
@@ -107,7 +107,8 @@ interface IPDAppointment {
   status: string
   services: IPDService[]
   totalAmount: number
-  totalDeposit: number
+  totalDeposit: number // This will now be the net deposit (advances - refunds)
+  totalRefunds: number // NEW: Total refunds for this specific IPD record
   payments: IPDPayment[]
   createdAt: string
   remainingAmount?: number
@@ -239,9 +240,9 @@ const DashboardPage: React.FC = () => {
             uhid: data.uhid,
             name: data.name,
             phone: data.phone,
-            age: data.age,
-            address: data.address,
-            gender: data.gender,
+            age: 0,
+            address: "",
+            gender: "",
           }
 
           setPatientCache((prev) => ({ ...prev, [patientId]: patientInfo }))
@@ -359,27 +360,29 @@ const DashboardPage: React.FC = () => {
                   const billingData = billingDataByPatient[patientId]?.[ipdId] || {}
 
                   const payments: IPDPayment[] = []
-                  let totalDeposit = 0
+                  let netDeposit = 0 // Renamed for clarity: this is the net amount after advances and refunds
+                  let ipdTotalRefunds = 0 // Track refunds for this specific IPD record
 
                   if (billingData?.payments) {
                     Object.values(billingData.payments).forEach((paymentRaw: any) => {
-                      const payment = paymentRaw as any
-                      payments.push({
-                        amount: Number(payment.amount),
-                        paymentType: payment.paymentType,
-                        type: payment.type,
-                        date: payment.date,
-                      })
-                      totalDeposit += Number(payment.amount)
+                      const payment = paymentRaw as IPDPayment
+                      payments.push(payment)
+                      if (payment.type === "advance") {
+                        netDeposit += Number(payment.amount)
+                      } else if (payment.type === "refund") {
+                        netDeposit -= Number(payment.amount)
+                        ipdTotalRefunds += Number(payment.amount)
+                      }
                     })
                   }
 
-                  const totalServiceAmount = (ipdData.services || []).reduce(
+                  // MODIFIED: Fetch services from billingData
+                  const totalServiceAmount = (billingData.services || []).reduce(
                     (sum: number, serviceRaw: any) => sum + (serviceRaw.amount || 0),
                     0,
                   )
 
-                  const remainingAmount = totalServiceAmount - totalDeposit
+                  const remainingAmount = totalServiceAmount - netDeposit
 
                   if (patientInfo) {
                     tempIpdList.push({
@@ -394,11 +397,12 @@ const DashboardPage: React.FC = () => {
                       doctorId: ipdData.doctor,
                       roomType: ipdData.roomType,
                       status: ipdData.status,
-                      services: ipdData.services || [],
+                      services: billingData.services || [], // MODIFIED: Use services from billingData
                       totalAmount: totalServiceAmount,
-                      totalDeposit,
+                      totalDeposit: netDeposit, // Use the calculated net deposit
+                      totalRefunds: ipdTotalRefunds, // Add the new totalRefunds field
                       payments,
-                      remainingAmount,
+                      remainingAmount: totalServiceAmount - netDeposit, // Remaining amount based on net deposit
                       createdAt: ipdData.createdAt,
                     })
                   }
@@ -452,7 +456,8 @@ const DashboardPage: React.FC = () => {
   // Updated statistics calculation for new OPD structure
   const statistics = useMemo(() => {
     const totalOpdAmount = opdAppointments.reduce((sum, app) => sum + (app.payment.totalPaid || 0), 0)
-    const totalIpdAmount = ipdAppointments.reduce((sum, app) => sum + app.totalDeposit, 0)
+    const totalIpdNetDeposit = ipdAppointments.reduce((sum, app) => sum + app.totalDeposit, 0)
+    const overallIpdRefunds = ipdAppointments.reduce((sum, app) => sum + app.totalRefunds, 0) // Sum of all refunds
 
     const opdCash = opdAppointments.reduce((sum, app) => {
       return sum + (app.payment.cashAmount || 0)
@@ -463,24 +468,31 @@ const DashboardPage: React.FC = () => {
     }, 0)
 
     const ipdCash = ipdAppointments.reduce((sum, app) => {
-      return sum + app.payments.filter((p) => p.paymentType === "cash").reduce((s, p) => s + p.amount, 0)
+      return (
+        sum +
+        app.payments.filter((p) => p.paymentType === "cash" && p.type === "advance").reduce((s, p) => s + p.amount, 0)
+      )
     }, 0)
 
     const ipdOnline = ipdAppointments.reduce((sum, app) => {
-      return sum + app.payments.filter((p) => p.paymentType === "online").reduce((s, p) => s + p.amount, 0)
+      return (
+        sum +
+        app.payments.filter((p) => p.paymentType === "online" && p.type === "advance").reduce((s, p) => s + p.amount, 0)
+      )
     }, 0)
 
     return {
       totalOpdCount: opdAppointments.length,
       totalOpdAmount,
       totalIpdCount: ipdAppointments.length,
-      totalIpdAmount,
+      totalIpdAmount: totalIpdNetDeposit, // Use the net deposit here
+      overallIpdRefunds, // NEW: Add overall IPD refunds to statistics
       totalOtCount: otAppointments.length,
       opdCash,
       opdOnline,
       ipdCash,
       ipdOnline,
-      totalRevenue: totalOpdAmount + totalIpdAmount,
+      totalRevenue: totalOpdAmount + totalIpdNetDeposit, // Total revenue is OPD + net IPD
     }
   }, [opdAppointments, ipdAppointments, otAppointments])
 
@@ -841,11 +853,19 @@ const DashboardPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Revenue</span>
+                  <span className="text-sm text-gray-600">Net Deposit</span>
                   <span className="text-lg font-semibold text-orange-600">
                     {formatCurrency(statistics.totalIpdAmount)}
                   </span>
                 </div>
+                {statistics.overallIpdRefunds > 0 && ( // NEW: Display total refunds if greater than 0
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-sm text-gray-600">Total Refunds</span>
+                    <span className="text-lg font-semibold text-blue-600">
+                      {formatCurrency(statistics.overallIpdRefunds)}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* OT Statistics */}
@@ -924,7 +944,7 @@ const DashboardPage: React.FC = () => {
                         <span className="font-semibold text-orange-600">{formatCurrency(statistics.ipdOnline)}</span>
                       </div>
                       <div className="flex justify-between items-center pt-2 border-t border-orange-200">
-                        <span className="text-orange-700 font-medium">Total IPD</span>
+                        <span className="text-orange-700 font-medium">Total IPD (Net Deposit)</span>
                         <span className="font-bold text-orange-700">{formatCurrency(statistics.totalIpdAmount)}</span>
                       </div>
                     </div>
@@ -1406,7 +1426,7 @@ const DashboardPage: React.FC = () => {
                       </>
                     )}
 
-                    {/* IPD Specific Details (unchanged) */}
+                    {/* IPD Specific Details */}
                     {selectedAppointment.type === "IPD" && (
                       <>
                         {/* Services */}
@@ -1508,6 +1528,55 @@ const DashboardPage: React.FC = () => {
                             </div>
                           </div>
                         )}
+
+                        {/* NEW: Financial Summary */}
+                        <div className="bg-gradient-to-r from-blue-50 to-sky-50 rounded-lg p-6">
+                          <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
+                            <DollarSign className="mr-2 h-5 w-5" />
+                            Financial Summary
+                          </h3>
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-600">Total Services:</span>
+                              <span className="font-semibold text-blue-700">
+                                {formatCurrency(selectedAppointment.totalAmount)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-gray-600">Total Net Payments:</span>
+                              <span className="font-semibold text-green-700">
+                                {formatCurrency(selectedAppointment.totalDeposit)}
+                              </span>
+                            </div>
+                            {selectedAppointment.totalRefunds > 0 && (
+                              <div className="flex justify-between items-center">
+                                <span className="text-gray-600">Total Refunds Issued:</span>
+                                <span className="font-semibold text-red-600">
+                                  {formatCurrency(selectedAppointment.totalRefunds)}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex justify-between items-center pt-3 border-t border-blue-200">
+                              <span className="text-blue-800 font-bold text-lg">Net Balance:</span>
+                              <span
+                                className={`font-bold text-xl ${
+                                  selectedAppointment.totalAmount - selectedAppointment.totalDeposit > 0
+                                    ? "text-red-600"
+                                    : selectedAppointment.totalAmount - selectedAppointment.totalDeposit < 0
+                                      ? "text-green-600"
+                                      : "text-gray-800"
+                                }`}
+                              >
+                                {formatCurrency(selectedAppointment.totalAmount - selectedAppointment.totalDeposit)}
+                                {selectedAppointment.totalAmount - selectedAppointment.totalDeposit > 0
+                                  ? " (Due)"
+                                  : selectedAppointment.totalAmount - selectedAppointment.totalDeposit < 0
+                                    ? " (Refundable)"
+                                    : ""}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </>
                     )}
 

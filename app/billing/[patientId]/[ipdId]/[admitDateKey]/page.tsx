@@ -59,7 +59,7 @@ interface Payment {
   id?: string // Changed to optional string to match Firebase key behavior
   amount: number
   paymentType: string
-  type?: string
+  type: "advance" | "refund"
   date: string
 }
 
@@ -72,6 +72,7 @@ interface AdditionalServiceForm {
 interface PaymentForm {
   paymentAmount: number
   paymentType: string
+  type: string
 }
 
 interface DiscountForm {
@@ -136,6 +137,7 @@ const paymentSchema = yup
       .positive("Must be positive")
       .required("Amount is required"),
     paymentType: yup.string().required("Payment Type is required"),
+    type: yup.string().required("Type is required"),
   })
   .required()
 
@@ -225,7 +227,7 @@ export default function BillingPage() {
     reset: resetPayment,
   } = useForm<PaymentForm>({
     resolver: yupResolver(paymentSchema),
-    defaultValues: { paymentAmount: 0, paymentType: "" },
+    defaultValues: { paymentAmount: 0, paymentType: "cash", type: "advance" },
   })
 
   // Discount Form
@@ -506,7 +508,14 @@ export default function BillingPage() {
   const consultantChargeTotal = consultantChargeItems.reduce((sum, s) => sum + s.amount, 0)
   const discountVal = selectedRecord?.discount || 0
   const totalBill = hospitalServiceTotal + consultantChargeTotal - discountVal
-  const dueAmount = selectedRecord ? Math.max(totalBill - selectedRecord.amount, 0) : 0
+
+  // Calculate total refunds
+  const totalRefunds = selectedRecord
+    ? selectedRecord.payments.filter((p) => p.type === "refund").reduce((sum, p) => sum + p.amount, 0)
+    : 0
+
+  // Calculate balance (can be positive for due, negative for refund)
+  const balanceAmount = totalBill - (selectedRecord?.amount || 0)
 
   // Calculate discount percentage for display
   const discountPercentage =
@@ -555,12 +564,20 @@ export default function BillingPage() {
     patientName: string,
     paymentAmount: number,
     updatedDeposit: number,
+    paymentType: "advance" | "refund",
   ) => {
     const apiUrl = "https://wa.medblisss.com/send-text"
+    let message = ""
+    if (paymentType === "advance") {
+      message = `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`
+    } else {
+      message = `Dear ${patientName}, a refund of Rs ${paymentAmount.toLocaleString()} has been processed to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}.`
+    }
+
     const payload = {
       token: "99583991572",
       number: `91${patientMobile}`,
-      message: `Dear ${patientName}, your payment of Rs ${paymentAmount.toLocaleString()} has been successfully added to your account. Your updated total deposit is Rs ${updatedDeposit.toLocaleString()}. Thank you for choosing our service.`,
+      message: message,
     }
 
     try {
@@ -653,14 +670,19 @@ export default function BillingPage() {
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
         paymentType: formData.paymentType,
-        type: "advance",
+        type: formData.type as "advance" | "refund",
         date: new Date().toISOString(),
         id: newPaymentRef.key!, // Asserting key is string, as Firebase push keys are never null
       }
       await update(newPaymentRef, newPayment)
 
       // Update deposit total directly under the ipdId node
-      const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
+      let updatedDeposit = Number(selectedRecord.amount)
+      if (newPayment.type === "advance") {
+        updatedDeposit += newPayment.amount
+      } else if (newPayment.type === "refund") {
+        updatedDeposit -= newPayment.amount
+      }
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
@@ -671,8 +693,9 @@ export default function BillingPage() {
       await sendPaymentNotification(
         selectedRecord.mobileNumber,
         selectedRecord.name,
-        Number(formData.paymentAmount),
+        newPayment.amount,
         updatedDeposit,
+        newPayment.type,
       )
 
       toast.success("Payment recorded successfully!")
@@ -681,7 +704,7 @@ export default function BillingPage() {
       const updatedPayments = [newPayment, ...selectedRecord.payments] // newPayment already has the ID
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
       setSelectedRecord(updatedRecord)
-      resetPayment({ paymentAmount: 0, paymentType: "" })
+      resetPayment({ paymentAmount: 0, paymentType: "cash", type: "advance" })
     } catch (error) {
       console.error("Error recording payment:", error)
       toast.error("Failed to record payment. Please try again.")
@@ -838,7 +861,7 @@ export default function BillingPage() {
   }
 
   // Delete a payment
-  const handleDeletePayment = async (paymentId: string, paymentAmount: number) => {
+  const handleDeletePayment = async (paymentId: string, paymentAmount: number, paymentType: "advance" | "refund") => {
     if (!selectedRecord) return
     setLoading(true)
     const currentAdmitDateKey = getAdmitDateKey(selectedRecord.admitDate)
@@ -855,7 +878,13 @@ export default function BillingPage() {
       await remove(paymentRef)
 
       // Adjust deposit after deleting payment
-      const updatedDeposit = selectedRecord.amount - paymentAmount
+      let updatedDeposit = selectedRecord.amount
+      if (paymentType === "advance") {
+        updatedDeposit -= paymentAmount
+      } else if (paymentType === "refund") {
+        updatedDeposit += paymentAmount
+      }
+
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
@@ -1031,10 +1060,26 @@ export default function BillingPage() {
                           <span className="text-gray-600">Deposit Amount:</span>
                           <span className="font-medium">₹{selectedRecord.amount.toLocaleString()}</span>
                         </div>
-                        {dueAmount > 0 && (
+                        {totalRefunds > 0 && (
+                          <div className="flex justify-between text-blue-600">
+                            <span className="text-gray-600">Total Refunds:</span>
+                            <span className="font-medium">₹{totalRefunds.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {balanceAmount > 0 ? (
                           <div className="flex justify-between text-red-600 font-bold">
                             <span>Due Amount:</span>
-                            <span>₹{dueAmount.toLocaleString()}</span>
+                            <span>₹{balanceAmount.toLocaleString()}</span>
+                          </div>
+                        ) : balanceAmount < 0 ? (
+                          <div className="flex justify-between text-blue-600 font-bold">
+                            <span>Total Deposit Amount:</span>
+                            <span>₹{Math.abs(balanceAmount).toLocaleString()}</span>
+                          </div>
+                        ) : (
+                          <div className="flex justify-between text-green-600 font-bold">
+                            <span>Balance:</span>
+                            <span>✓ Fully Paid</span>
                           </div>
                         )}
                       </div>
@@ -1043,7 +1088,7 @@ export default function BillingPage() {
                       {!selectedRecord.dischargeDate && (
                         <button
                           onClick={() => setIsDiscountModalOpen(true)}
-                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-all shadow-sm transform hover:scale-[1.02]"
+                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm"
                         >
                           <Percent size={16} className="mr-2" />
                           {discountVal > 0 ? "Update Discount" : "Add Discount"}
@@ -1548,14 +1593,24 @@ export default function BillingPage() {
                                 ₹{selectedRecord.amount.toLocaleString()}
                               </p>
                             </div>
-                            <div className={`${dueAmount > 0 ? "bg-red-50" : "bg-green-50"} rounded-lg p-4`}>
-                              <p className={`text-sm ${dueAmount > 0 ? "text-red-600" : "text-green-600"}`}>
-                                {dueAmount > 0 ? "Due Amount" : "Fully Paid"}
-                              </p>
-                              <p className={`text-2xl font-bold ${dueAmount > 0 ? "text-red-800" : "text-green-800"}`}>
-                                {dueAmount > 0 ? `₹${dueAmount.toLocaleString()}` : "✓"}
-                              </p>
-                            </div>
+                            {balanceAmount > 0 ? (
+                              <div className="bg-red-50 rounded-lg p-4">
+                                <p className="text-sm text-red-600">Due Amount</p>
+                                <p className="text-2xl font-bold text-red-800">₹{balanceAmount.toLocaleString()}</p>
+                              </div>
+                            ) : balanceAmount < 0 ? (
+                              <div className="bg-blue-50 rounded-lg p-4">
+                                <p className="text-sm text-blue-600">Total Amount After Refund</p>
+                                <p className="text-2xl font-bold text-blue-800">
+                                  ₹{Math.abs(balanceAmount).toLocaleString()}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="bg-green-50 rounded-lg p-4">
+                                <p className="text-sm text-green-600">Fully Paid</p>
+                                <p className="text-2xl font-bold text-green-800">✓</p>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -1609,7 +1664,9 @@ export default function BillingPage() {
                                     <td className="px-4 py-3 text-sm text-center">
                                       {!selectedRecord.dischargeDate && (
                                         <button
-                                          onClick={() => payment.id && handleDeletePayment(payment.id, payment.amount)}
+                                          onClick={() =>
+                                            payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                          }
                                           className="text-red-500 hover:text-red-700 transition-colors"
                                           title="Delete payment"
                                         >
@@ -1653,6 +1710,7 @@ export default function BillingPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
                                 <select
                                   {...registerPayment("paymentType")}
+                                  defaultValue="cash"
                                   className={`w-full px-3 py-2 rounded-lg border ${
                                     errorsPayment.paymentType ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
@@ -1664,6 +1722,21 @@ export default function BillingPage() {
                                 </select>
                                 {errorsPayment.paymentType && (
                                   <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
+                                )}
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                                <select
+                                  {...registerPayment("type")}
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsPayment.type ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                >
+                                  <option value="advance">Advance</option>
+                                  <option value="refund">Refund</option>
+                                </select>
+                                {errorsPayment.type && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
                                 )}
                               </div>
                               <button
@@ -1812,7 +1885,7 @@ export default function BillingPage() {
                                             "&:hover": {
                                               borderColor: errorsVisit.doctorId
                                                 ? "rgb(239 68 68)"
-                                                : (base["&:hover"] as any)?.borderColor ?? "transparent",
+                                                : ((base["&:hover"] as any)?.borderColor ?? "transparent"),
                                             },
                                           }),
                                         }}
@@ -1968,6 +2041,9 @@ export default function BillingPage() {
                             Payment Type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Type
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
                           </th>
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1983,13 +2059,16 @@ export default function BillingPage() {
                               {payment.amount.toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.type || "advance"}</td>
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
                             <td className="px-4 py-3 text-sm text-center">
                               {!selectedRecord.dischargeDate && (
                                 <button
-                                  onClick={() => payment.id && handleDeletePayment(payment.id, payment.amount)}
+                                  onClick={() =>
+                                    payment.id && handleDeletePayment(payment.id, payment.amount, payment.type)
+                                  }
                                   className="text-red-500 hover:text-red-700 transition-colors"
                                   title="Delete payment"
                                 >

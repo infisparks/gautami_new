@@ -74,6 +74,8 @@ const bedSchema: ObjectSchema<BedFormInput> = yup
     { value: "suit", label: "Suite" },        // corrected from "suit" to "suite"
     { value: "female", label: "Female" },
     { value: "delux", label: "Delux" },
+    { value: "jade", label: "Jade" },
+    { value: "citrine", label: "Citrine" },
     { value: "male", label: "Male" },
     { value: "nicu", label: "NICU" },
   ];

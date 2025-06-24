@@ -46,7 +46,7 @@ interface IPDPayment {
   id: string
   amount: number
   paymentType: "cash" | "online"
-  type: "deposit" | "advance"
+  type: "deposit" | "advance" | "refund" // Added 'refund' type
   date: string
   createdAt: string
 }
@@ -71,7 +71,8 @@ interface IPDPatient {
   dischargeTime?: string
   services: IPDService[]
   totalAmount: number
-  totalDeposit: number
+  totalDeposit: number // This will now be the net deposit (advances - refunds)
+  totalRefunds: number // NEW: Total refunds for this specific IPD record
   payments: IPDPayment[]
   remainingAmount: number
   createdAt: string
@@ -227,24 +228,28 @@ const IPDDashboardPage: React.FC = () => {
                 continue
               }
 
-              // Process payments
+              // Process payments and refunds
               const payments: IPDPayment[] = []
-              let totalDeposit = 0
+              let netDeposit = 0 // This will be total advances/deposits minus refunds
+              let totalRefunds = 0 // Track total refunds for this IPD record
 
               if (billingData?.payments) {
                 Object.entries(billingData.payments).forEach(([paymentId, paymentData]: [string, any]) => {
-                  // Only include cash and online payments
-                  if (paymentData.paymentType === "cash" || paymentData.paymentType === "online") {
-                    const payment: IPDPayment = {
-                      id: paymentId,
-                      amount: Number(paymentData.amount) || 0,
-                      paymentType: paymentData.paymentType,
-                      type: paymentData.type || "deposit",
-                      date: paymentData.date,
-                      createdAt: paymentData.createdAt || paymentData.date,
-                    }
-                    payments.push(payment)
-                    totalDeposit += payment.amount
+                  const payment: IPDPayment = {
+                    id: paymentId,
+                    amount: Number(paymentData.amount) || 0,
+                    paymentType: paymentData.paymentType,
+                    type: paymentData.type || "deposit", // Ensure 'type' can be 'refund'
+                    date: paymentData.date,
+                    createdAt: paymentData.createdAt || paymentData.date,
+                  }
+                  payments.push(payment)
+
+                  if (payment.type === "refund") {
+                    netDeposit -= payment.amount // Subtract refunds from net deposit
+                    totalRefunds += payment.amount // Accumulate total refunds
+                  } else {
+                    netDeposit += payment.amount // Add deposits/advances
                   }
                 })
               }
@@ -277,9 +282,10 @@ const IPDDashboardPage: React.FC = () => {
                 dischargeTime: ipdData.dischargeTime,
                 services,
                 totalAmount: totalServiceAmount,
-                totalDeposit,
+                totalDeposit: netDeposit, // Use netDeposit here
+                totalRefunds, // Add totalRefunds
                 payments,
-                remainingAmount: totalServiceAmount - totalDeposit,
+                remainingAmount: totalServiceAmount - netDeposit, // Calculate remaining based on netDeposit
                 createdAt: ipdData.createdAt || ipdData.admissionDate,
                 enteredBy: ipdData.enteredBy,
               }
@@ -333,18 +339,32 @@ const IPDDashboardPage: React.FC = () => {
     const activePatients = ipdPatients.filter((p) => p.status === "active")
     const dischargedPatients = ipdPatients.filter((p) => p.status === "discharged")
 
-    const totalRevenue = ipdPatients.reduce((sum, p) => sum + p.totalDeposit, 0)
+    const totalRevenue = ipdPatients.reduce((sum, p) => sum + p.totalDeposit, 0) // totalDeposit is now netDeposit
     const pendingAmount = ipdPatients.reduce((sum, p) => sum + Math.max(0, p.remainingAmount), 0)
+    const overallRefunds = ipdPatients.reduce((sum, p) => sum + p.totalRefunds, 0) // Sum of all refunds
 
     const paymentsByMethod = {
       cash: 0,
       online: 0,
+      cashRefunds: 0,
+      onlineRefunds: 0,
     }
 
     ipdPatients.forEach((patient) => {
       patient.payments.forEach((payment) => {
-        if (payment.paymentType === "cash" || payment.paymentType === "online") {
-          paymentsByMethod[payment.paymentType] += payment.amount
+        if (payment.type === "refund") {
+          if (payment.paymentType === "cash") {
+            paymentsByMethod.cashRefunds += payment.amount
+          } else if (payment.paymentType === "online") {
+            paymentsByMethod.onlineRefunds += payment.amount
+          }
+        } else {
+          // deposit or advance
+          if (payment.paymentType === "cash") {
+            paymentsByMethod.cash += payment.amount
+          } else if (payment.paymentType === "online") {
+            paymentsByMethod.online += payment.amount
+          }
         }
       })
     })
@@ -364,6 +384,7 @@ const IPDDashboardPage: React.FC = () => {
       dischargedCount: dischargedPatients.length,
       totalRevenue,
       pendingAmount,
+      overallRefunds, // NEW
       paymentsByMethod,
       last7Days: last7Days.map((day) => format(day, "MMM dd")),
       dailyAdmissions,
@@ -521,13 +542,13 @@ const IPDDashboardPage: React.FC = () => {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+                <CardTitle className="text-sm font-medium">Total Net Revenue</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{formatCurrency(stats.totalRevenue)}</div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  {filters.dateFilter === "today" ? "Today's collections" : "Period collections"}
+                  {filters.dateFilter === "today" ? "Today's net collections" : "Period net collections"}
                 </p>
               </CardContent>
             </Card>
@@ -545,15 +566,28 @@ const IPDDashboardPage: React.FC = () => {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Payment Methods</CardTitle>
+                <CardTitle className="text-sm font-medium">Payment Breakdown</CardTitle>
                 <Banknote className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(stats.paymentsByMethod.cash)}</div>
-                <div className="flex gap-2 mt-2">
-                  <Badge variant="outline" className="bg-blue-50 text-blue-700 hover:bg-blue-100">
-                    Online: {formatCurrency(stats.paymentsByMethod.online)}
-                  </Badge>
+                <div className="text-xl font-bold text-gray-900">
+                  {formatCurrency(stats.paymentsByMethod.cash + stats.paymentsByMethod.online)}
+                </div>
+                <div className="flex flex-col gap-1 mt-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Cash (Net):</span>
+                    <span className="font-semibold">{formatCurrency(stats.paymentsByMethod.cash)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Online (Net):</span>
+                    <span className="font-semibold">{formatCurrency(stats.paymentsByMethod.online)}</span>
+                  </div>
+                  {stats.overallRefunds > 0 && (
+                    <div className="flex justify-between text-red-600">
+                      <span className="font-semibold">Total Refunds:</span>
+                      <span className="font-bold">{formatCurrency(stats.overallRefunds)}</span>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -601,7 +635,7 @@ const IPDDashboardPage: React.FC = () => {
             {/* Payment Method Chart */}
             <Card>
               <CardHeader>
-                <CardTitle>Payment Method Distribution</CardTitle>
+                <CardTitle>Payment Method Distribution (Net)</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col items-center">
                 <div className="w-64 h-64">
@@ -626,13 +660,13 @@ const IPDDashboardPage: React.FC = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-4 mt-4 w-full">
                   <div className="bg-green-50 p-3 rounded-lg border border-green-200">
-                    <div className="text-sm text-green-700">Cash</div>
+                    <div className="text-sm text-green-700">Cash (Net)</div>
                     <div className="text-lg font-bold text-green-600">
                       {formatCurrency(stats.paymentsByMethod.cash)}
                     </div>
                   </div>
                   <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                    <div className="text-sm text-blue-700">Online</div>
+                    <div className="text-sm text-blue-700">Online (Net)</div>
                     <div className="text-lg font-bold text-blue-600">
                       {formatCurrency(stats.paymentsByMethod.online)}
                     </div>
@@ -737,10 +771,15 @@ const IPDDashboardPage: React.FC = () => {
                           </TableCell>
                           <TableCell>
                             <div>
-                              <div className="font-medium">{formatCurrency(patient.totalDeposit)}</div>
+                              <div className="font-medium">Net: {formatCurrency(patient.totalDeposit)}</div>
                               {patient.remainingAmount > 0 && (
                                 <div className="text-sm text-red-500">
                                   Pending: {formatCurrency(patient.remainingAmount)}
+                                </div>
+                              )}
+                              {patient.totalRefunds > 0 && (
+                                <div className="text-xs text-blue-600">
+                                  Refunds: {formatCurrency(patient.totalRefunds)}
                                 </div>
                               )}
                             </div>
@@ -888,13 +927,21 @@ const IPDDashboardPage: React.FC = () => {
                           <span className="font-medium">{formatCurrency(selectedPatient.totalAmount)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Total Paid:</span>
+                          <span className="text-gray-600">Total Net Paid:</span>
                           <span className="font-medium text-green-600">
                             {formatCurrency(selectedPatient.totalDeposit)}
                           </span>
                         </div>
+                        {selectedPatient.totalRefunds > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Total Refunds Issued:</span>
+                            <span className="font-medium text-blue-600">
+                              {formatCurrency(selectedPatient.totalRefunds)}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Remaining:</span>
+                          <span className="text-gray-600">Remaining Balance:</span>
                           <span
                             className={`font-medium ${
                               selectedPatient.remainingAmount > 0 ? "text-red-600" : "text-green-600"
@@ -987,7 +1034,7 @@ const IPDDashboardPage: React.FC = () => {
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="p-3 bg-white rounded-lg shadow-sm">
-                          <div className="text-sm text-gray-600">Total Paid</div>
+                          <div className="text-sm text-gray-600">Total Net Paid</div>
                           <div className="text-xl font-bold text-green-600">
                             {formatCurrency(selectedPatient.totalDeposit)}
                           </div>
@@ -999,13 +1046,28 @@ const IPDDashboardPage: React.FC = () => {
                           </div>
                         </div>
                         <div className="p-3 bg-white rounded-lg shadow-sm">
-                          <div className="text-sm text-gray-600">Remaining Balance</div>
+                          <div className="text-sm text-gray-600">Total Refunds Issued</div>
+                          <div className="text-xl font-bold text-blue-600">
+                            {formatCurrency(selectedPatient.totalRefunds)}
+                          </div>
+                        </div>
+                        <div className="p-3 bg-white rounded-lg shadow-sm col-span-full">
+                          <div className="text-sm text-gray-600">Net Balance</div>
                           <div
                             className={`text-xl font-bold ${
-                              selectedPatient.remainingAmount > 0 ? "text-red-600" : "text-green-600"
+                              selectedPatient.totalAmount - selectedPatient.totalDeposit > 0
+                                ? "text-red-600"
+                                : selectedPatient.totalAmount - selectedPatient.totalDeposit < 0
+                                  ? "text-green-600"
+                                  : "text-gray-800"
                             }`}
                           >
-                            {formatCurrency(selectedPatient.remainingAmount)}
+                            {formatCurrency(selectedPatient.totalAmount - selectedPatient.totalDeposit)}
+                            {selectedPatient.totalAmount - selectedPatient.totalDeposit > 0
+                              ? " (Due)"
+                              : selectedPatient.totalAmount - selectedPatient.totalDeposit < 0
+                                ? " (Refundable)"
+                                : ""}
                           </div>
                         </div>
                       </div>

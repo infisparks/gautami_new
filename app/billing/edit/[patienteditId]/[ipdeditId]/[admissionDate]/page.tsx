@@ -104,12 +104,11 @@ const AdmissionSourceOptions = [
 
 const RoomTypeOptions = [
   { value: "casualty", label: "Casualty" },
-  { value: "delux", label: "Delux" }, // Corrected spelling from 'deluxe' to 'delux' based on snippet
+  { value: "citrine", label: "Citrine" },
+  { value: "jade", label: "Jade" },
   { value: "female", label: "Female Ward" },
   { value: "icu", label: "ICU" },
   { value: "male", label: "Male Ward" },
-  { value: "nicu", label: "NICU" },
-  { value: "suit", label: "Suit" },
 ]
 
 const PaymentModeOptions = [
