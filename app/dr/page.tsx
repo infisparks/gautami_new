@@ -8,12 +8,8 @@ import { format, isSameDay, parseISO } from "date-fns"
 import { motion } from "framer-motion"
 import {
   FaBed,
-  FaUserInjured,
   FaHospital,
-  FaArrowUp,
   FaDownload,
-  FaUserMd,
-  FaPhoneAlt,
   FaChartLine,
 } from "react-icons/fa"
 import { jsPDF } from "jspdf"
@@ -50,19 +46,6 @@ interface OPDAppointment {
   serviceName?: string
   time: string
   referredBy?: string
-}
-
-interface OnCallAppointment {
-  age: string
-  appointmentType: string
-  createdAt: string
-  date: string
-  doctor?: string
-  gender: string
-  name: string
-  phone: string
-  serviceName?: string
-  time: string
 }
 
 interface IPDAdmission {
@@ -112,9 +95,7 @@ export default function DailyPerformanceReport() {
   // States for data
   const [doctors, setDoctors] = useState<Doctor[]>([])
   const [beds, setBeds] = useState<Record<string, Record<string, Bed>>>({})
-  const [onCallAppointments, setOnCallAppointments] = useState<OnCallAppointment[]>([])
   const [opdAppointments, setOpdAppointments] = useState<OPDAppointment[]>([])
-  const [ipdAdmissions, setIpdAdmissions] = useState<IPDAdmission[]>([])
   const [mortalityReports, setMortalityReports] = useState<MortalityReport[]>([])
   const [patientInfo, setPatientInfo] = useState<Record<string, PatientInfo>>({})
 
@@ -123,10 +104,7 @@ export default function DailyPerformanceReport() {
 
   const [metrics, setMetrics] = useState({
     totalOPD: 0,
-    totalOnCall: 0,
-    totalIPDAdmissions: 0,
-    totalIPDDischarges: 0,
-    totalIPDReferrals: 0,
+    totalCasualty: 0, // Added casualty count
     totalMortality: 0,
     totalBeds: 0,
     bedsOccupied: 0,
@@ -173,48 +151,6 @@ export default function DailyPerformanceReport() {
     return () => unsubscribe()
   }, [])
 
-  // =================== Fetch OnCall Appointments ===================
-  useEffect(() => {
-    // Get today's date in ISO format for query
-    const today = new Date()
-    const todayStr = format(today, "yyyy-MM-dd")
-
-    const onCallRef = ref(db, "oncall")
-    // Use query to filter by date to reduce data download
-    const onCallQuery = query(
-      onCallRef,
-      orderByChild("date"),
-      startAt(todayStr + "T00:00:00"),
-      endAt(todayStr + "T23:59:59"),
-    )
-
-    const unsubscribe = onValue(onCallQuery, (snapshot) => {
-      const data = snapshot.val()
-      const onCallList: OnCallAppointment[] = []
-
-      if (data) {
-        Object.values(data).forEach((appointmentData: any) => {
-          onCallList.push({
-            age: appointmentData.age || "",
-            appointmentType: appointmentData.appointmentType || "oncall",
-            createdAt: appointmentData.createdAt || "",
-            date: appointmentData.date || "",
-            doctor: appointmentData.doctor || "",
-            gender: appointmentData.gender || "",
-            name: appointmentData.name || "",
-            phone: appointmentData.phone || "",
-            serviceName: appointmentData.serviceName || "",
-            time: appointmentData.time || "",
-          })
-        })
-      }
-
-      setOnCallAppointments(onCallList)
-    })
-
-    return () => unsubscribe()
-  }, [])
-
   // =================== Fetch OPD Appointments ===================
   useEffect(() => {
     // Get today's date in ISO format for query
@@ -226,7 +162,6 @@ export default function DailyPerformanceReport() {
     // Using the new structure: patients/opddetail/{patientId}/{appointmentId}
     const opdRef = ref(db, "patients/opddetail")
 
-    // We'll use a more efficient approach by querying with date index
     const unsubscribe = onValue(opdRef, (snapshot) => {
       const data = snapshot.val()
 
@@ -261,58 +196,8 @@ export default function DailyPerformanceReport() {
     })
 
     return () => unsubscribe()
-  }, [])
+  }, [patientInfo]) // Depend on patientInfo to ensure accurate patient names/genders
 
-  // =================== Fetch IPD Admissions ===================
-  useEffect(() => {
-    // Get today's date for filtering
-    const today = new Date()
-
-    const ipdList: IPDAdmission[] = []
-
-    // Using the new structure: patients/ipddetail/userinfoipd/{patientId}/{ipdId}
-    const ipdRef = ref(db, "patients/ipddetail/userinfoipd")
-
-    const unsubscribe = onValue(ipdRef, (snapshot) => {
-      const data = snapshot.val()
-
-      if (data) {
-        Object.entries(data).forEach(([dateKey, patientsByDate]: [string, any]) => {
-          if (isSameDay(parseISO(dateKey), today)) {
-            // Filter by date key first
-            Object.entries(patientsByDate).forEach(([patientId, admissions]: [string, any]) => {
-              Object.entries(admissions).forEach(([ipdId, ipd]: [string, any]) => {
-                ipdList.push({
-                  id: ipdId, // Add id to the IPDRecord
-                  admissionDate: ipd.admissionDate || "",
-                  admissionSource: ipd.admissionSource || "",
-                  admissionTime: ipd.admissionTime || "",
-                  admissionType: ipd.admissionType || "",
-                  bed: ipd.bed || "",
-                  createdAt: ipd.createdAt || "",
-                  dischargeDate: ipd.dischargeDate || "",
-                  doctor: ipd.doctor || "",
-                  name: ipd.name || patientInfo[patientId]?.name || "", // Get name from patientInfo if not present
-                  phone: ipd.phone || patientInfo[patientId]?.phone || "", // Get phone from patientInfo
-                  referDoctor: ipd.referDoctor || ipd.referralDoctor || "",
-                  relativeAddress: ipd.relativeAddress || "",
-                  relativeName: ipd.relativeName || "",
-                  relativePhone: ipd.relativePhone || "",
-                  roomType: ipd.roomType || "",
-                  status: ipd.status || "",
-                  uhid: patientId,
-                })
-              })
-            })
-          }
-        })
-      }
-
-      setIpdAdmissions(ipdList)
-    })
-
-    return () => unsubscribe()
-  }, [])
 
   // =================== Fetch Mortality Reports ===================
   useEffect(() => {
@@ -354,7 +239,7 @@ export default function DailyPerformanceReport() {
     })
 
     return () => unsubscribe()
-  }, [])
+  }, [patientInfo]) // Depend on patientInfo to ensure accurate patient names
 
   // =================== Fetch Patient Info ===================
   useEffect(() => {
@@ -370,22 +255,9 @@ export default function DailyPerformanceReport() {
 
   // =================== Calculate Today's Metrics ===================
   useEffect(() => {
-    const today = new Date()
-
-    // OPD and OnCall appointments today
-    const totalOPD = opdAppointments.length
-    const totalOnCall = onCallAppointments.length
-
-    // IPD metrics
-    const totalIPDAdmissions = ipdAdmissions.length
-
-    // For discharges, we check the dischargeDate field
-    const totalIPDDischarges = ipdAdmissions.filter(
-      (ipd) => ipd.dischargeDate && isSameDay(parseISO(ipd.dischargeDate), today),
-    ).length
-
-    // For referrals, check the referDoctor field
-    const totalIPDReferrals = ipdAdmissions.filter((ipd) => ipd.referDoctor).length
+    // OPD and Casualty appointments today
+    const totalOPD = opdAppointments.filter(appt => appt.appointmentType !== 'casulity').length;
+    const totalCasualty = opdAppointments.filter(appt => appt.appointmentType === 'casulity').length;
 
     // Mortality today
     const totalMortality = mortalityReports.length
@@ -408,16 +280,13 @@ export default function DailyPerformanceReport() {
 
     setMetrics({
       totalOPD,
-      totalOnCall,
-      totalIPDAdmissions,
-      totalIPDDischarges,
-      totalIPDReferrals,
+      totalCasualty,
       totalMortality,
       totalBeds,
       bedsOccupied,
       bedsAvailable,
     })
-  }, [opdAppointments, onCallAppointments, ipdAdmissions, mortalityReports, beds])
+  }, [opdAppointments, mortalityReports, beds])
 
   // =================== Derived Data ===================
   const bedDetails = useMemo(() => {
@@ -448,9 +317,6 @@ export default function DailyPerformanceReport() {
     return mortalityReports
   }, [mortalityReports])
 
-  const todayIPDReferrals = useMemo(() => {
-    return ipdAdmissions.filter((ipd) => ipd.referDoctor)
-  }, [ipdAdmissions])
 
   // =================== Download DPR (Multi-page) ===================
   const handleDownloadReport = async () => {
@@ -523,7 +389,7 @@ export default function DailyPerformanceReport() {
             <div className="mb-10">
               <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
                 <FaChartLine className="mr-2 text-teal-500" />
-                Todays Summary
+                Today's Summary
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* OPD */}
@@ -544,59 +410,24 @@ export default function DailyPerformanceReport() {
                   </div>
                 </motion.div>
 
-                {/* OnCall */}
+                {/* Casualty */}
                 <motion.div
-                  className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-md p-6 border-l-4 border-blue-500"
+                  className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl shadow-md p-6 border-l-4 border-red-500"
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.5 }}
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">OnCall Requests</p>
-                      <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalOnCall}</p>
+                      <p className="text-xs text-gray-500 uppercase tracking-wider">Casualty</p>
+                      <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalCasualty}</p>
                     </div>
-                    <div className="bg-blue-200 p-3 rounded-full">
-                      <FaPhoneAlt className="text-blue-600 text-xl" />
-                    </div>
-                  </div>
-                </motion.div>
-
-                {/* IPD Admissions */}
-                <motion.div
-                  className="bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl shadow-md p-6 border-l-4 border-purple-500"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6 }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">IPD Admissions</p>
-                      <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalIPDAdmissions}</p>
-                    </div>
-                    <div className="bg-purple-200 p-3 rounded-full">
-                      <FaUserInjured className="text-purple-600 text-xl" />
+                    <div className="bg-red-200 p-3 rounded-full">
+                      <FaHospital className="text-red-600 text-xl" />
                     </div>
                   </div>
                 </motion.div>
 
-                {/* IPD Referrals */}
-                <motion.div
-                  className="bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl shadow-md p-6 border-l-4 border-indigo-500"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.7 }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">IPD Referrals</p>
-                      <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalIPDReferrals}</p>
-                    </div>
-                    <div className="bg-indigo-200 p-3 rounded-full">
-                      <FaArrowUp className="text-indigo-600 text-xl" />
-                    </div>
-                  </div>
-                </motion.div>
 
                 {/* Mortality */}
                 <motion.div
@@ -611,25 +442,7 @@ export default function DailyPerformanceReport() {
                       <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalMortality}</p>
                     </div>
                     <div className="bg-red-200 p-3 rounded-full">
-                      <FaUserMd className="text-red-600 text-xl" />
-                    </div>
-                  </div>
-                </motion.div>
-
-                {/* IPD Discharges */}
-                <motion.div
-                  className="bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl shadow-md p-6 border-l-4 border-amber-500"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6 }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">IPD Discharges</p>
-                      <p className="text-3xl font-bold text-gray-800 mt-1">{metrics.totalIPDDischarges}</p>
-                    </div>
-                    <div className="bg-amber-200 p-3 rounded-full">
-                      <FaUserMd className="text-amber-600 text-xl" />
+                      <FaHospital className="text-red-600 text-xl" />
                     </div>
                   </div>
                 </motion.div>
@@ -667,10 +480,10 @@ export default function DailyPerformanceReport() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gradient-to-r from-teal-100 to-blue-100 text-gray-700">
-                      <th className="px-4 py-3 text-left font-semibold rounded-tl-lg">Ward</th>
-                      <th className="px-4 py-3 text-left font-semibold">Bed Number</th>
-                      <th className="px-4 py-3 text-left font-semibold">Type</th>
-                      <th className="px-4 py-3 text-left font-semibold rounded-tr-lg">Status</th>
+                      <th className="px-3 py-2 text-left font-semibold rounded-tl-lg" style={{ width: '25%' }}>Ward</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ width: '25%' }}>Bed Number</th>
+                      <th className="px-3 py-2 text-left font-semibold" style={{ width: '25%' }}>Type</th>
+                      <th className="px-3 py-2 text-left font-semibold rounded-tr-lg" style={{ width: '25%' }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -679,13 +492,12 @@ export default function DailyPerformanceReport() {
                         key={index}
                         className={`border-b ${index % 2 === 0 ? "bg-gray-50" : "bg-white"} hover:bg-gray-100 transition-colors`}
                       >
-                        <td className="px-4 py-3 capitalize">{bed.ward.replace(/_/g, " ")}</td>
-                        <td className="px-4 py-3">{bed.bedNumber || bed.bedKey}</td>
-                        <td className="px-4 py-3 capitalize">{bed.type || "Standard"}</td>
+                        <td className="px-3 py-2 capitalize">{bed.ward.replace(/_/g, " ")}</td>
+                        <td className="px-3 py-2">{bed.bedNumber || bed.bedKey}</td>
+                        <td className="px-3 py-2 capitalize">{bed.type || "Standard"}</td>
                         <td
-                          className={`px-4 py-3 capitalize font-medium ${
-                            bed.status.toLowerCase() === "occupied" ? "text-red-600" : "text-green-600"
-                          }`}
+                          className={`px-3 py-2 capitalize font-medium ${bed.status.toLowerCase() === "occupied" ? "text-red-600" : "text-green-600"
+                            }`}
                         >
                           {bed.status}
                         </td>
@@ -699,8 +511,8 @@ export default function DailyPerformanceReport() {
             {/* Mortality Reports Today */}
             <div className="bg-white rounded-xl shadow-md p-6 mb-8">
               <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                <FaUserMd className="mr-2 text-red-500" />
-                Todays Mortality Reports
+                <FaHospital className="mr-2 text-red-500" />
+                Today's Mortality Reports
               </h2>
               {todayMortalityReports.length === 0 ? (
                 <div className="bg-red-50 p-6 rounded-lg text-center">
@@ -711,11 +523,11 @@ export default function DailyPerformanceReport() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gradient-to-r from-red-100 to-pink-100 text-gray-700">
-                        <th className="px-4 py-3 text-left font-semibold rounded-tl-lg">Patient Name</th>
-                        <th className="px-4 py-3 text-left font-semibold">Admission Date</th>
-                        <th className="px-4 py-3 text-left font-semibold">Date of Death</th>
-                        <th className="px-4 py-3 text-left font-semibold">Days in Hospital</th>
-                        <th className="px-4 py-3 text-left font-semibold rounded-tr-lg">Medical Findings</th>
+                        <th className="px-3 py-2 text-left font-semibold rounded-tl-lg" style={{ width: '25%' }}>Patient Name</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ width: '25%' }}>Admission Date</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ width: '25%' }}>Date of Death</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ width: '15%' }}>Days in Hospital</th>
+                        <th className="px-3 py-2 text-left font-semibold rounded-tr-lg" style={{ width: 'auto' }}>Medical Findings</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -724,52 +536,11 @@ export default function DailyPerformanceReport() {
                           key={index}
                           className={`border-b ${index % 2 === 0 ? "bg-gray-50" : "bg-white"} hover:bg-gray-100 transition-colors`}
                         >
-                          <td className="px-4 py-3 font-medium">{report.patientName}</td>
-                          <td className="px-4 py-3">{format(parseISO(report.admissionDate), "MMM dd, yyyy")}</td>
-                          <td className="px-4 py-3">{format(parseISO(report.dateOfDeath), "MMM dd, yyyy")}</td>
-                          <td className="px-4 py-3">{report.timeSpanDays}</td>
-                          <td className="px-4 py-3 truncate max-w-xs">{report.medicalFindings}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* IPD Referrals */}
-            <div className="bg-white rounded-xl shadow-md p-6 mb-8">
-              <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                <FaArrowUp className="mr-2 text-indigo-500" />
-                Todays IPD Referrals
-              </h2>
-              {todayIPDReferrals.length === 0 ? (
-                <div className="bg-indigo-50 p-6 rounded-lg text-center">
-                  <p className="text-gray-600">No IPD referrals for today.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gradient-to-r from-indigo-100 to-purple-100 text-gray-700">
-                        <th className="px-4 py-3 text-left font-semibold rounded-tl-lg">Patient Name</th>
-                        <th className="px-4 py-3 text-left font-semibold">Room Type</th>
-                        <th className="px-4 py-3 text-left font-semibold">Referred By</th>
-                        <th className="px-4 py-3 text-left font-semibold rounded-tr-lg">Admission Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {todayIPDReferrals.map((ipd, index) => (
-                        <tr
-                          key={index}
-                          className={`border-b ${index % 2 === 0 ? "bg-gray-50" : "bg-white"} hover:bg-gray-100 transition-colors`}
-                        >
-                          <td className="px-4 py-3 font-medium">{ipd.name}</td>
-                          <td className="px-4 py-3 capitalize">{ipd.roomType.replace(/_/g, " ")}</td>
-                          <td className="px-4 py-3">
-                            {ipd.referDoctor ? getDoctorName(ipd.referDoctor) : "Not specified"}
-                          </td>
-                          <td className="px-4 py-3">{ipd.admissionTime}</td>
+                          <td className="px-3 py-2 font-medium">{report.patientName}</td>
+                          <td className="px-3 py-2">{format(parseISO(report.admissionDate), "MMM dd, yyyy")}</td>
+                          <td className="px-3 py-2">{format(parseISO(report.dateOfDeath), "MMM dd, yyyy")}</td>
+                          <td className="px-3 py-2">{report.timeSpanDays}</td>
+                          <td className="px-3 py-2 truncate max-w-xs">{report.medicalFindings}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -786,7 +557,6 @@ export default function DailyPerformanceReport() {
             metrics={metrics}
             bedDetails={bedDetails}
             mortalityReports={todayMortalityReports}
-            ipdReferrals={todayIPDReferrals}
             doctors={doctors}
           />
         </div>
@@ -800,10 +570,7 @@ export default function DailyPerformanceReport() {
 interface DPRMultiPageProps {
   metrics: {
     totalOPD: number
-    totalOnCall: number
-    totalIPDAdmissions: number
-    totalIPDDischarges: number
-    totalIPDReferrals: number
+    totalCasualty: number
     totalMortality: number
     totalBeds: number
     bedsOccupied: number
@@ -817,11 +584,10 @@ interface DPRMultiPageProps {
     type: string
   }>
   mortalityReports: MortalityReport[]
-  ipdReferrals: IPDAdmission[]
   doctors: Doctor[]
 }
 
-function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doctors }: DPRMultiPageProps) {
+function DPRMultiPage({ metrics, bedDetails, mortalityReports, doctors }: DPRMultiPageProps) {
   const [pages, setPages] = useState<React.ReactNode[]>([])
 
   // Function to get doctor name by ID
@@ -834,10 +600,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
   const pairedMetrics = useMemo(() => {
     const metricsArray = [
       { label: "Total OPD Today", value: metrics.totalOPD },
-      { label: "Total OnCall Today", value: metrics.totalOnCall },
-      { label: "IPD Admissions", value: metrics.totalIPDAdmissions },
-      { label: "IPD Discharges", value: metrics.totalIPDDischarges },
-      { label: "IPD Referrals", value: metrics.totalIPDReferrals },
+      { label: "Total Casualty Today", value: metrics.totalCasualty },
       { label: "Mortality Today", value: metrics.totalMortality },
       { label: "Total Beds", value: metrics.totalBeds },
       { label: "Beds Occupied", value: metrics.bedsOccupied },
@@ -905,7 +668,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
     // 2. Metrics Table (~120px)
     const metricsContent = (
       <div key="metrics" style={{ marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "8px", color: "#0f766e" }}>Todays Metrics</h2>
+        <h2 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "8px", color: "#0f766e" }}>Today's Metrics</h2>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9px", border: "1px solid #e5e7eb" }}>
           <tbody>
             {pairedMetrics.map((pair, idx) => (
@@ -968,6 +731,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                   textAlign: "left",
                   verticalAlign: "middle",
                   color: "#0f766e",
+                  width: '25%'
                 }}
               >
                 Ward
@@ -979,6 +743,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                   textAlign: "left",
                   verticalAlign: "middle",
                   color: "#0f766e",
+                  width: '25%'
                 }}
               >
                 Bed Number
@@ -990,6 +755,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                   textAlign: "left",
                   verticalAlign: "middle",
                   color: "#0f766e",
+                  width: '25%'
                 }}
               >
                 Type
@@ -1001,6 +767,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                   textAlign: "left",
                   verticalAlign: "middle",
                   color: "#0f766e",
+                  width: '25%'
                 }}
               >
                 Status
@@ -1083,6 +850,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                     textAlign: "left",
                     verticalAlign: "middle",
                     color: "#b91c1c",
+                    width: '25%'
                   }}
                 >
                   Patient Name
@@ -1094,6 +862,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                     textAlign: "left",
                     verticalAlign: "middle",
                     color: "#b91c1c",
+                    width: '25%'
                   }}
                 >
                   Admission Date
@@ -1105,6 +874,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                     textAlign: "left",
                     verticalAlign: "middle",
                     color: "#b91c1c",
+                    width: '25%'
                   }}
                 >
                   Date of Death
@@ -1116,6 +886,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                     textAlign: "left",
                     verticalAlign: "middle",
                     color: "#b91c1c",
+                    width: '15%'
                   }}
                 >
                   Days in Hospital
@@ -1127,6 +898,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
                     textAlign: "left",
                     verticalAlign: "middle",
                     color: "#b91c1c",
+                    width: 'auto'
                   }}
                 >
                   Medical Findings
@@ -1168,110 +940,6 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
       (mortalityReports.length > 0 ? mortalityReports.length * mortalityRowHeight : 30) + mortalityHeaderH
     addToPage(mortalityContent, mortalityBodyH)
 
-    // 5. IPD Referrals
-    const referralsContent = (
-      <div key="referrals" style={{ marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "14px", fontWeight: "600", color: "#6366f1", marginBottom: "8px" }}>
-          IPD Referrals Today
-        </h2>
-        {ipdReferrals.length === 0 ? (
-          <p
-            style={{
-              fontSize: "9px",
-              color: "#555",
-              fontStyle: "italic",
-              textAlign: "center",
-              padding: "8px",
-              backgroundColor: "#e0e7ff",
-            }}
-          >
-            No IPD referrals for today.
-          </p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9px", border: "1px solid #e5e7eb" }}>
-            <thead>
-              <tr style={{ backgroundColor: "#e0e7ff" }}>
-                <th
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    padding: "6px",
-                    textAlign: "left",
-                    verticalAlign: "middle",
-                    color: "#4f46e5",
-                  }}
-                >
-                  Patient Name
-                </th>
-                <th
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    padding: "6px",
-                    textAlign: "left",
-                    verticalAlign: "middle",
-                    color: "#4f46e5",
-                  }}
-                >
-                  Room Type
-                </th>
-                <th
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    padding: "6px",
-                    textAlign: "left",
-                    verticalAlign: "middle",
-                    color: "#4f46e5",
-                  }}
-                >
-                  Referred By
-                </th>
-                <th
-                  style={{
-                    border: "1px solid #e5e7eb",
-                    padding: "6px",
-                    textAlign: "left",
-                    verticalAlign: "middle",
-                    color: "#4f46e5",
-                  }}
-                >
-                  Admission Time
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {ipdReferrals.map((ipd, index) => (
-                <tr key={index} style={{ backgroundColor: index % 2 === 0 ? "#f9fafb" : "#ffffff" }}>
-                  <td
-                    style={{ padding: "6px", verticalAlign: "middle", fontWeight: "600", border: "1px solid #e5e7eb" }}
-                  >
-                    {ipd.name}
-                  </td>
-                  <td
-                    style={{
-                      padding: "6px",
-                      verticalAlign: "middle",
-                      textTransform: "capitalize",
-                      border: "1px solid #e5e7eb",
-                    }}
-                  >
-                    {ipd.roomType.replace(/_/g, " ")}
-                  </td>
-                  <td style={{ padding: "6px", verticalAlign: "middle", border: "1px solid #e5e7eb" }}>
-                    {ipd.referDoctor ? getDoctorName(ipd.referDoctor) : "Not specified"}
-                  </td>
-                  <td style={{ padding: "6px", verticalAlign: "middle", border: "1px solid #e5e7eb" }}>
-                    {ipd.admissionTime}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    )
-    const referralHeaderH = 30
-    const referralRowHeight = 16
-    const referralBodyH = (ipdReferrals.length > 0 ? ipdReferrals.length * referralRowHeight : 30) + referralHeaderH
-    addToPage(referralsContent, referralBodyH)
 
     // 6. Footer (~30px)
     addToPage(
@@ -1313,7 +981,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, ipdReferrals, doc
     }
 
     setPages(contentPages)
-  }, [pairedMetrics, bedDetails, mortalityReports, ipdReferrals, doctors])
+  }, [pairedMetrics, bedDetails, mortalityReports, doctors])
 
   return (
     <>
