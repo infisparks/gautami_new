@@ -475,18 +475,22 @@ export default function InvoiceDownload({ record }: InvoiceDownloadProps) {
               <span>Deposit Amount:</span>
               <span>Rs. {deposit.toLocaleString()}</span>
             </p>
-            <p className={`flex justify-between w-full font-bold ${dueAmount < 0 ? "text-green-600" : "text-red-600"}`}>
-              <span>Due Amount:</span>
+            <p className={`flex justify-between w-full font-bold ${dueAmount < 0 ? "text-blue-600" : "text-red-600"}`}>
+              <span>{dueAmount < 0 ? "Refund Amount:" : "Due Amount:"}</span>
               <span>
-                {dueAmount < 0 ? "- Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
+                {dueAmount < 0 ? "Rs. " + Math.abs(dueAmount).toLocaleString() : "Rs. " + dueAmount.toLocaleString()}
               </span>
             </p>
             {dueAmount > 0 && (
-              <p className="mt-1 text-xs">
+              <p className="mt-1 text-xs ">
                 <strong>Due Amount in Words:</strong> {convertNumberToWords(dueAmount)} Rupees Only
               </p>
             )}
-          
+            {dueAmount < 0 && (
+              <p className="mt-1 text-xs text-black">
+                <strong>Refund Amount in Words:</strong> {convertNumberToWords(Math.abs(dueAmount))} Rupees Only
+              </p>
+            )}
           </div>
         </div>
       </div>

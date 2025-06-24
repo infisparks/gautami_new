@@ -56,10 +56,10 @@ interface ServiceItem {
 }
 
 interface Payment {
-  id?: string // Changed to optional string to match Firebase key behavior
+  id?: string
   amount: number
-  paymentType: string
-  type?: string
+  paymentMethod: string // Renamed from paymentType
+  transactionType: string // New field for "advance", "refund", "deposit"
   date: string
 }
 
@@ -71,7 +71,8 @@ interface AdditionalServiceForm {
 
 interface PaymentForm {
   paymentAmount: number
-  paymentType: string
+  paymentMethod: string // Renamed from paymentType
+  transactionType: string // New field
 }
 
 interface DiscountForm {
@@ -135,7 +136,8 @@ const paymentSchema = yup
       .typeError("Amount must be a number")
       .positive("Must be positive")
       .required("Amount is required"),
-    paymentType: yup.string().required("Payment Type is required"),
+    paymentMethod: yup.string().required("Payment Method is required"), // Renamed
+    transactionType: yup.string().required("Transaction Type is required"), // Added
   })
   .required()
 
@@ -225,7 +227,7 @@ export default function BillingPage() {
     reset: resetPayment,
   } = useForm<PaymentForm>({
     resolver: yupResolver(paymentSchema),
-    defaultValues: { paymentAmount: 0, paymentType: "" },
+    defaultValues: { paymentAmount: 0, paymentMethod: "", transactionType: "advance" },
   })
 
   // Discount Form
@@ -399,8 +401,8 @@ export default function BillingPage() {
               paymentsArray = Object.keys(billingData.payments).map((k) => ({
                 id: k,
                 amount: Number(billingData?.payments[k].amount) || 0,
-                paymentType: billingData?.payments[k].paymentType || "cash",
-                type: billingData?.payments[k].type || "advance",
+                paymentMethod: billingData?.payments[k].paymentMethod || "cash",
+                transactionType: billingData?.payments[k].transactionType || "advance",
                 date: billingData?.payments[k].date || new Date().toISOString(),
               }))
             }
@@ -652,15 +654,20 @@ export default function BillingPage() {
       )
       const newPayment: Payment = {
         amount: Number(formData.paymentAmount),
-        paymentType: formData.paymentType,
-        type: "advance",
+        paymentMethod: formData.paymentMethod, // Use new field
+        transactionType: formData.transactionType, // Use new field
         date: new Date().toISOString(),
-        id: newPaymentRef.key!, // Asserting key is string, as Firebase push keys are never null
+        id: newPaymentRef.key!,
       }
-      await update(newPaymentRef, newPayment)
 
       // Update deposit total directly under the ipdId node
-      const updatedDeposit = Number(selectedRecord.amount) + Number(formData.paymentAmount)
+      let updatedDeposit = Number(selectedRecord.amount)
+      if (formData.transactionType === "refund") {
+        updatedDeposit -= Number(formData.paymentAmount) // Subtract for refunds
+      } else {
+        updatedDeposit += Number(formData.paymentAmount) // Add for other transaction types
+      }
+
       const recordRef = ref(
         db,
         `patients/ipddetail/userbillinginfoipd/${currentAdmitDateKey}/${selectedRecord.patientId}/${selectedRecord.ipdId}`, // Changed path
@@ -681,7 +688,7 @@ export default function BillingPage() {
       const updatedPayments = [newPayment, ...selectedRecord.payments] // newPayment already has the ID
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
       setSelectedRecord(updatedRecord)
-      resetPayment({ paymentAmount: 0, paymentType: "" })
+      resetPayment({ paymentAmount: 0, paymentMethod: "", transactionType: "advance" })
     } catch (error) {
       console.error("Error recording payment:", error)
       toast.error("Failed to record payment. Please try again.")
@@ -1043,7 +1050,7 @@ export default function BillingPage() {
                       {!selectedRecord.dischargeDate && (
                         <button
                           onClick={() => setIsDiscountModalOpen(true)}
-                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-all shadow-sm transform hover:scale-[1.02]"
+                          className="mt-4 w-full flex items-center justify-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-lg transition-colors shadow-sm transform hover:scale-[1.02]"
                         >
                           <Percent size={16} className="mr-2" />
                           {discountVal > 0 ? "Update Discount" : "Add Discount"}
@@ -1109,11 +1116,9 @@ export default function BillingPage() {
                     <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                       <h3 className="text-lg font-semibold text-gray-800 mb-3">Quick Actions</h3>
                       <div className="space-y-3">
-                        <InvoiceDownload record={selectedRecord}>
-                          <button className="w-full flex items-center justify-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
-                            <Download size={16} className="mr-2" /> Download Invoice
-                          </button>
-                        </InvoiceDownload>
+                        <button className="w-full flex items-center justify-center px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                          <Download size={16} className="mr-2" /> Download Invoice
+                        </button>
 
                         {!selectedRecord.dischargeDate && (
                           <button
@@ -1576,7 +1581,7 @@ export default function BillingPage() {
                                     Amount (₹)
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                    Payment Type
+                                    Method
                                   </th>
                                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                     Type
@@ -1598,10 +1603,10 @@ export default function BillingPage() {
                                       {payment.amount.toLocaleString()}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                                      {payment.paymentType}
+                                      {payment.paymentMethod}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-900 capitalize">
-                                      {payment.type || "advance"}
+                                      {payment.transactionType || "N/A"}
                                     </td>
                                     <td className="px-4 py-3 text-sm text-gray-500">
                                       {new Date(payment.date).toLocaleString()}
@@ -1650,20 +1655,37 @@ export default function BillingPage() {
                                 )}
                               </div>
                               <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Type</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
                                 <select
-                                  {...registerPayment("paymentType")}
+                                  {...registerPayment("paymentMethod")}
                                   className={`w-full px-3 py-2 rounded-lg border ${
-                                    errorsPayment.paymentType ? "border-red-500" : "border-gray-300"
+                                    errorsPayment.paymentMethod ? "border-red-500" : "border-gray-300"
                                   } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
                                 >
-                                  <option value="">Select Payment Type</option>
+                                  <option value="">Select Payment Method</option>
                                   <option value="cash">Cash</option>
                                   <option value="online">Online</option>
                                   <option value="card">Card</option>
                                 </select>
-                                {errorsPayment.paymentType && (
-                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
+                                {errorsPayment.paymentMethod && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentMethod.message}</p>
+                                )}
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Type</label>
+                                <select
+                                  {...registerPayment("transactionType")}
+                                  defaultValue="advance" // Default to advance
+                                  className={`w-full px-3 py-2 rounded-lg border ${
+                                    errorsPayment.transactionType ? "border-red-500" : "border-gray-300"
+                                  } focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent`}
+                                >
+                                  <option value="advance">Advance</option>
+                                  <option value="deposit">Deposit</option>
+                                  <option value="refund">Refund</option>
+                                </select>
+                                {errorsPayment.transactionType && (
+                                  <p className="text-red-500 text-xs mt-1">{errorsPayment.transactionType.message}</p>
                                 )}
                               </div>
                               <button
@@ -1812,7 +1834,7 @@ export default function BillingPage() {
                                             "&:hover": {
                                               borderColor: errorsVisit.doctorId
                                                 ? "rgb(239 68 68)"
-                                                : (base["&:hover"] as any)?.borderColor ?? "transparent",
+                                                : ((base["&:hover"] as any)?.borderColor ?? "transparent"),
                                             },
                                           }),
                                         }}
@@ -1965,7 +1987,10 @@ export default function BillingPage() {
                             Amount (₹)
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Payment Type
+                            Method
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Type
                           </th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Date
@@ -1982,7 +2007,10 @@ export default function BillingPage() {
                             <td className="px-4 py-3 text-sm text-gray-900 text-right">
                               {payment.amount.toLocaleString()}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentType}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">{payment.paymentMethod}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900 capitalize">
+                              {payment.transactionType || "N/A"}
+                            </td>
                             <td className="px-4 py-3 text-sm text-gray-500">
                               {new Date(payment.date).toLocaleString()}
                             </td>
