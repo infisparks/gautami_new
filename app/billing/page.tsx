@@ -333,17 +333,17 @@ export default function OptimizedPatientsPage() {
   const handleManagePatient = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
-    router.push(`/manage/${record.patientId}/${record.ipdId}/${admitDateKey}`)
+    router.push(`/manage/${record.patientId}/${record.ipdId}`)
   }
   const handleDrugChart = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
-    router.push(`/drugchart/${record.patientId}/${record.ipdId}/${admitDateKey}`)
+    router.push(`/drugchart/${record.patientId}/${record.ipdId}`)
   }
   const handleOTForm = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
-    router.push(`/ot/${record.patientId}/${record.ipdId}/${admitDateKey}`)
+    router.push(`/ot/${record.patientId}/${record.ipdId}`)
   }
 
   // Get unique ward names from current records
