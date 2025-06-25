@@ -259,7 +259,7 @@ export default function DailyPerformanceReport() {
         dateKeysToFetch.push(yesterdayStr);
     }
 
-    let activeUnsubscribes: (() => void)[] = [];
+    const activeUnsubscribes: (() => void)[] = [];
     let completedFetches = 0;
 
     dateKeysToFetch.forEach(dateKey => {
@@ -437,7 +437,7 @@ export default function DailyPerformanceReport() {
             <div className="mb-10">
               <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
                 <FaChartLine className="mr-2 text-teal-500" />
-                Today's Summary
+                Todays Summary
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {/* OPD */}
@@ -514,7 +514,7 @@ export default function DailyPerformanceReport() {
             {/* Todays OT Records (Filtered by createdAt) */}
             <div className="bg-white rounded-xl shadow-md p-6 mb-8">
               <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                <FaProcedures className="mr-2 text-purple-500" /> Today's Operation Theater Records (Created)
+                <FaProcedures className="mr-2 text-purple-500" /> Todays Operation Theater Records (Created)
               </h2>
               {todayOtRecords.length === 0 ? (
                 <div className="bg-purple-50 p-6 rounded-lg text-center"> <p className="text-gray-600">No OT records created today.</p> </div>
@@ -547,7 +547,7 @@ export default function DailyPerformanceReport() {
             {/* Mortality Reports Today */}
             <div className="bg-white rounded-xl shadow-md p-6 mb-8">
               <h2 className="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                <FaHospital className="mr-2 text-red-500" /> Today's Mortality Reports
+                <FaHospital className="mr-2 text-red-500" /> Todays Mortality Reports
               </h2>
               {todayMortalityReports.length === 0 ? (
                 <div className="bg-red-50 p-6 rounded-lg text-center"> <p className="text-gray-600">No mortality reports for today.</p> </div>
@@ -674,7 +674,7 @@ function DPRMultiPage({ metrics, bedDetails, mortalityReports, otRecords, doctor
     // Metrics Table
     const metricsContent = (
       <div key="pdf-metrics" style={{ marginBottom: "16px" }}>
-        <h2 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "8px", color: "#0f766e" }}>Today's Metrics</h2>
+        <h2 style={{ fontSize: "14px", fontWeight: "600", marginBottom: "8px", color: "#0f766e" }}>Todays Metrics</h2>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "9px", border: "1px solid #e5e7eb" }}>
           <tbody>
             {pairedMetrics.map((pair, idx) => (
