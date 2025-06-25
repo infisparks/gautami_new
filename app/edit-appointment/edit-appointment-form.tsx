@@ -458,6 +458,7 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
+                        onWheel={e => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
@@ -479,6 +480,7 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
                           min: { value: 0, message: "Amount must be positive" },
                           valueAsNumber: true,
                         })}
+                        onWheel={e => e.currentTarget.blur()}
                       />
                     </div>
                     {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
@@ -501,6 +503,7 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
+                      onWheel={e => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.onlineAmount && <p className="text-sm text-red-500">{errors.onlineAmount.message}</p>}
@@ -522,6 +525,7 @@ export function EditAppointmentForm({ form, doctors, appointmentId, patientId }:
                         min: { value: 0, message: "Amount must be positive" },
                         valueAsNumber: true,
                       })}
+                      onWheel={e => e.currentTarget.blur()}
                     />
                   </div>
                   {errors.cashAmount && <p className="text-sm text-red-500">{errors.cashAmount.message}</p>}
