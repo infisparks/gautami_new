@@ -1073,7 +1073,7 @@ export default function BillingPage() {
                           </div>
                         ) : balanceAmount < 0 ? (
                           <div className="flex justify-between text-blue-600 font-bold">
-                            <span>Total Deposit Amount:</span>
+                            <span>We have to refund :</span>
                             <span>₹{Math.abs(balanceAmount).toLocaleString()}</span>
                           </div>
                         ) : (
@@ -1600,7 +1600,7 @@ export default function BillingPage() {
                               </div>
                             ) : balanceAmount < 0 ? (
                               <div className="bg-blue-50 rounded-lg p-4">
-                                <p className="text-sm text-blue-600">Total Amount After Refund</p>
+                                <p className="text-sm text-blue-600">Total Amount we have to Refund</p>
                                 <p className="text-2xl font-bold text-blue-800">
                                   ₹{Math.abs(balanceAmount).toLocaleString()}
                                 </p>

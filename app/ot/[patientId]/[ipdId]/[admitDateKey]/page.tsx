@@ -30,7 +30,7 @@ interface IPDInfo {
 }
 
 interface OTData {
-  date: string
+  date: string // This will now strictly match the admitDateKey from the URL
   time: string
   message: string
   createdAt: string
@@ -42,11 +42,16 @@ export default function OTPage() {
   const router = useRouter()
   const { toast } = useToast()
 
-  const patientId = params.patientId as string
-  const ipdId = params.ipdId as string
+  // Safely extract params, ensuring they are strings.
+  // If params are undefined (e.g., during initial render or bad URL), default to empty string.
+  const patientId = (params.patientId as string) || ""
+  const ipdId = (params.ipdId as string) || ""
+  // FIX: Change 'dateKey' to 'admitDateKey' to match your folder structure
+  const admitDateKey = (params.admitDateKey as string) || ""
 
   // Form state
-  const [date, setDate] = useState("")
+  // Initialize 'date' state directly from 'admitDateKey'. This ensures the input always reflects the URL date.
+  const [date, setDate] = useState(admitDateKey)
   const [time, setTime] = useState("")
   const [message, setMessage] = useState("")
 
@@ -60,149 +65,241 @@ export default function OTPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [hasExistingData, setHasExistingData] = useState(false)
 
-  // Set current date and time as default
+  // Effect to set initial time and synchronize 'date' with 'admitDateKey' if it changes
   useEffect(() => {
-    const now = new Date()
-    const currentDate = now.toISOString().split("T")[0]
-    const currentTime = now.toTimeString().slice(0, 5)
-
-    setDate(currentDate)
-    setTime(currentTime)
-  }, [])
+    // Only update the 'date' state if 'admitDateKey' is available and differs from current 'date' state.
+    if (admitDateKey && date !== admitDateKey) {
+      setDate(admitDateKey);
+    }
+    // Set initial time only once or if it's explicitly cleared
+    if (!time) {
+      const now = new Date();
+      const currentTime = now.toTimeString().slice(0, 5);
+      setTime(currentTime);
+    }
+  }, [admitDateKey]); // Depend on admitDateKey
 
   // Fetch all required data efficiently
   useEffect(() => {
     const fetchData = async () => {
-      if (!patientId || !ipdId) return
+      // Critical check: If any of the required URL parameters are missing,
+      // stop loading and display the error message.
+      if (!patientId || !ipdId || !admitDateKey) {
+        setIsLoading(false); // Stop loading immediately
+        // A toast is good, but the main UI will also display the detailed error
+        if (!admitDateKey) { // Specific toast for admitDateKey missing
+             toast({
+                title: "Error: Missing Date",
+                description: "The surgery date is missing from the URL. Please check the address.",
+                variant: "destructive",
+            });
+        }
+        return; // Exit the effect early
+      }
 
-      setIsLoading(true)
+      setIsLoading(true); // Start loading state
 
       try {
-        // Fetch patient basic info
-        const patientRef = ref(db, `patients/patientinfo/${patientId}`)
-        const patientSnapshot = await get(patientRef)
+        // --- Fetch Patient Basic Info ---
+        const patientRef = ref(db, `patients/patientinfo/${patientId}`);
+        const patientSnapshot = await get(patientRef);
 
         if (patientSnapshot.exists()) {
-          const patientData = patientSnapshot.val()
+          const patientData = patientSnapshot.val();
           setPatientInfo({
             name: patientData.name || "Unknown",
             phone: patientData.phone || "",
             age: patientData.age || "",
             gender: patientData.gender || "",
             address: patientData.address || "",
-          })
+          });
+        } else {
+          setPatientInfo(null); // Clear previous patient info if not found
+          toast({
+            title: "Info",
+            description: "Patient basic information not found for this ID.",
+            variant: "default",
+          });
         }
 
-        // Fetch IPD info
-        const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`)
-        const ipdSnapshot = await get(ipdRef)
+        // --- Fetch IPD Info ---
+        const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${patientId}/${ipdId}`);
+        const ipdSnapshot = await get(ipdRef);
 
         if (ipdSnapshot.exists()) {
-          const ipdData = ipdSnapshot.val()
+          const ipdData = ipdSnapshot.val();
           setIPDInfo({
             roomType: ipdData.roomType || "",
             bed: ipdData.bed || "",
             doctor: ipdData.doctor || "",
             admissionDate: ipdData.admissionDate || "",
             status: ipdData.status || "",
-          })
+          });
+        } else {
+          setIPDInfo(null); // Clear previous IPD info if not found
+          toast({
+            title: "Info",
+            description: "IPD details not found for this patient and admission.",
+            variant: "default",
+          });
         }
 
-        // Check for existing OT data
-        const otRef = ref(db, `patients/ot/otdetail/${patientId}/${ipdId}`)
-        const otSnapshot = await get(otRef)
+        // --- Check for Existing OT Data ---
+        // Use the admitDateKey directly in the Firebase path
+        const otRef = ref(db, `patients/ot/${admitDateKey}/${patientId}/${ipdId}`);
+        const otSnapshot = await get(otRef);
 
         if (otSnapshot.exists()) {
-          const otData = otSnapshot.val()
-          setExistingOTData(otData)
-          setHasExistingData(true)
+          const otData = otSnapshot.val();
+          setExistingOTData(otData);
+          setHasExistingData(true);
 
           // Auto-fill form with existing data
-          if (otData.date) setDate(otData.date)
-          if (otData.time) setTime(otData.time)
-          if (otData.message) setMessage(otData.message)
+          if (otData.date) setDate(otData.date); // This will align the form date with stored data
+          if (otData.time) setTime(otData.time);
+          if (otData.message) setMessage(otData.message);
+        } else {
+          // If no existing data for this specific admitDateKey, prepare for a new entry
+          setExistingOTData(null);
+          setHasExistingData(false);
+          // Set the form's date input to match the URL's admitDateKey for a new record
+          setDate(admitDateKey);
+          setMessage(""); // Clear message for a new entry
+          const now = new Date();
+          setTime(now.toTimeString().slice(0, 5)); // Set current time as default for new entry
         }
       } catch (error) {
-        console.error("Error fetching data:", error)
+        console.error("Error fetching data:", error);
         toast({
           title: "Error",
-          description: "Failed to load patient data",
+          description: `Failed to load data: ${error instanceof Error ? error.message : String(error)}`,
           variant: "destructive",
-        })
+        });
       } finally {
-        setIsLoading(false)
+        setIsLoading(false); // Always stop loading, whether successful or not
       }
-    }
+    };
 
-    fetchData()
-  }, [patientId, ipdId, toast])
+    fetchData();
+  }, [patientId, ipdId, admitDateKey]); // Depend on stable URL params
 
   const handleSave = async () => {
+    // Re-check admitDateKey validity before attempting to save
+    if (!admitDateKey) {
+        toast({
+            title: "Error",
+            description: "Cannot save: Surgery date information is missing from the URL.",
+            variant: "destructive",
+        });
+        return;
+    }
+
+    // Basic validation for form fields
     if (!date || !time) {
       toast({
         title: "Error",
-        description: "Date and time are required",
+        description: "Surgery Date and Time are required.",
         variant: "destructive",
-      })
-      return
+      });
+      return;
     }
 
-    setIsSaving(true)
+    // IMPORTANT: Warn if the form date differs from the URL admitDateKey.
+    // The data will be saved under the URL's admitDateKey, ensuring path consistency.
+    if (date !== admitDateKey) {
+        toast({
+            title: "Warning",
+            description: `The date selected in the form (${date}) differs from the URL's date (${admitDateKey}). The record will be saved under the URL's date.`,
+            variant: "default",
+        });
+        // If you want to prevent saving if dates don't match, you'd return here:
+        // return;
+    }
+
+    setIsSaving(true);
 
     try {
-      const otRef = ref(db, `patients/ot/otdetail/${patientId}/${ipdId}`)
+      // Use the admitDateKey from the URL as the key in the Firebase path
+      const otRef = ref(db, `patients/ot/${admitDateKey}/${patientId}/${ipdId}`);
 
       const otData: OTData = {
-        date,
+        date: admitDateKey, // ALWAYS store the date from the URL's admitDateKey to ensure data consistency with path
         time,
         message: message.trim(),
         createdAt: existingOTData?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      }
+      };
 
-      await set(otRef, otData)
+      await set(otRef, otData);
 
       toast({
         title: "Success",
         description: hasExistingData ? "OT record updated successfully" : "OT record saved successfully",
-      })
+      });
 
-      // Update local state
-      setExistingOTData(otData)
-      setHasExistingData(true)
+      // Update local state after successful save
+      setExistingOTData(otData);
+      setHasExistingData(true);
     } catch (error) {
-      console.error("Error saving OT record:", error)
+      console.error("Error saving OT record:", error);
       toast({
         title: "Error",
-        description: "Failed to save OT record. Please try again.",
+        description: `Failed to save OT record: ${error instanceof Error ? error.message : String(error)}. Please try again.`,
         variant: "destructive",
-      })
+      });
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return ""
-    return new Date(dateString).toLocaleDateString("en-IN", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    })
-  }
+    if (!dateString) return "";
+    try {
+      const dateObj = new Date(dateString);
+      if (isNaN(dateObj.getTime())) {
+          console.warn("Invalid date string for formatting:", dateString);
+          return dateString;
+      }
+      return dateObj.toLocaleDateString("en-IN", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch (e) {
+      console.error("Error formatting date:", dateString, e);
+      return dateString;
+    }
+  };
 
   const getBedNumber = (bedId: string) => {
-    // You can implement bed number lookup here if needed
-    // For now, just return the bed ID
-    return bedId || "Not Assigned"
-  }
+    return bedId || "Not Assigned";
+  };
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-slate-800"></div>
       </div>
-    )
+    );
+  }
+
+  // Display an explicit error message if critical URL parameters are missing
+  if (!patientId || !ipdId || !admitDateKey) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex flex-col items-center justify-center text-red-600 p-4">
+        <h2 className="text-2xl font-bold mb-4">URL Error: Missing Information</h2>
+        <p className="text-center text-lg mb-6">
+          The URL is incomplete. Please ensure you have navigated here with a valid Patient ID, IPD ID, and Surgery Date in the format:
+          <br /><code className="block mt-2 p-2 bg-slate-200 text-slate-800 rounded">/ot/[patientId]/[ipdId]/[YYYY-MM-DD]</code>
+        </p>
+        <p className="text-center mb-4">
+            Example: <code className="bg-slate-200 p-1 rounded">/ot/I00RF2CAFB/-OTDAPkEL6qMUMLqYe0Z/2025-06-20</code>
+        </p>
+        <Button onClick={() => router.back()} className="mt-6">
+          <ArrowLeft className="h-4 w-4 mr-2" /> Go Back
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -308,7 +405,7 @@ export default function OTPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              OT Record Details
+              OT Record Details for {formatDate(admitDateKey)}{" "}
             </CardTitle>
             {hasExistingData && existingOTData && (
               <div className="text-sm text-slate-500">
@@ -333,6 +430,8 @@ export default function OTPage() {
                   onChange={(e) => setDate(e.target.value)}
                   className="w-full"
                   required
+                  // Making it readOnly is a good idea here to enforce URL consistency
+                  readOnly={true} // Now it strictly matches the URL's admitDateKey
                 />
               </div>
 
@@ -372,7 +471,7 @@ export default function OTPage() {
               </Button>
               <Button
                 onClick={handleSave}
-                disabled={isSaving || !date || !time}
+                disabled={isSaving || !date || !time || !admitDateKey}
                 className="bg-blue-600 hover:bg-blue-700"
               >
                 {isSaving ? (
@@ -392,5 +491,5 @@ export default function OTPage() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

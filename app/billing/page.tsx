@@ -343,7 +343,7 @@ export default function OptimizedPatientsPage() {
   const handleOTForm = (e: React.MouseEvent, record: BillingRecord) => {
     e.stopPropagation()
     const admitDateKey = getAdmitDateKey(record.admissionDate || record.createdAt)
-    router.push(`/ot/${record.patientId}/${record.ipdId}`)
+    router.push(`/ot/${record.patientId}/${record.ipdId}/${admitDateKey}`)
   }
 
   // Get unique ward names from current records
