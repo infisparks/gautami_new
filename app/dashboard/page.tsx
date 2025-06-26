@@ -1,15 +1,20 @@
 "use client"
 
-import type React from "react"
-import { useEffect, useState, useMemo, useCallback } from "react"
+import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
 import { ref, get } from "firebase/database"
 import { format, differenceInDays, addDays } from "date-fns"
 import { Bar } from "react-chartjs-2"
-import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from "chart.js"
+import {
+  Chart as ChartJS,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+} from "chart.js"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
-// import ProtectedRoute from "@/components/ProtectedRoute" // Commented out as it's not provided
 import { Dialog } from "@headlessui/react"
 import {
   Search,
@@ -31,7 +36,6 @@ import {
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 // ----- Type Definitions -----
-
 interface Doctor {
   name: string
   opdCharge?: number
@@ -39,12 +43,11 @@ interface Doctor {
   specialist?: string
 }
 
-// Updated OPD interfaces for new structure
 interface IModality {
   charges: number
-  doctor?: string // This should be the doctor's name as stored in the modality
+  doctor?: string
   specialist?: string
-  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom" // Added custom
+  type: "consultation" | "casualty" | "xray" | "pathology" | "ipd" | "radiology" | "custom"
   visitType?: string
   service?: string
 }
@@ -64,7 +67,7 @@ interface OPDAppointment {
   patientId: string
   name: string
   phone: string
-  date: string // This property exists for OPD
+  date: string
   time: string
   appointmentType: string
   createdAt: string
@@ -76,7 +79,7 @@ interface OPDAppointment {
   referredBy: string
   study: string
   visitType: string
-  type: "OPD" // Added for union type discrimination
+  type: "OPD"
 }
 
 interface IPDService {
@@ -100,7 +103,7 @@ interface IPDAppointment {
   uhid: string
   name: string
   phone: string
-  admissionDate: string // This property exists for IPD
+  admissionDate: string
   admissionTime: string
   doctor: string
   doctorId: string
@@ -108,31 +111,27 @@ interface IPDAppointment {
   status: string
   services: IPDService[]
   totalAmount: number
-  totalDeposit: number // This will now be the net deposit (advances - refunds)
-  totalRefunds: number // NEW: Total refunds for this specific IPD record
+  totalDeposit: number
+  totalRefunds: number
   payments: IPDPayment[]
   createdAt: string
   remainingAmount?: number
   type: "IPD"
-  details?: any // Optional: for extra details in modal
-  // Added for union type discrimination
+  details?: any
 }
 
-// Updated OTAppointment interface to match OTData from DPR
 interface OTAppointment {
   id: string
   patientId: string
-  uhid: string // From patientInfo
-  name: string // From patientInfo
-  phone: string // From patientInfo
-  date: string // This property exists for OT
+  uhid: string
+  name: string
+  phone: string
+  date: string
   time: string
   message: string
   createdAt: string
-  ipdId: string // Added from OTData
-  type: "OT" // Added for union type discrimination
-  // patientName?: string; // Derived, not directly stored in OTAppointment
-  // patientGender?: string; // Derived, not directly stored in OTAppointment
+  ipdId: string
+  type: "OT"
 }
 
 type CombinedAppointment = OPDAppointment | IPDAppointment | OTAppointment
@@ -154,47 +153,43 @@ interface FilterState {
   endDate: string
 }
 
-// ----- Helper Functions -----
-
-const formatCurrency = (amount: number): string => {
-  return new Intl.NumberFormat("en-IN", {
+// ----- Helpers -----
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(amount)
-}
 
-// Update getThisWeekRange to fetch data for the last 7 days (including today)
 const getThisWeekRange = () => {
   const now = new Date()
-  const end = format(now, "yyyy-MM-dd")
-  const start = format(addDays(now, -6), "yyyy-MM-dd") // Today and 6 previous days = 7 days
-  return { start, end }
+  return {
+    start: format(addDays(now, -6), "yyyy-MM-dd"),
+    end: format(now, "yyyy-MM-dd"),
+  }
 }
 
-const getTodayDate = () => {
-  return new Date().toISOString().split("T")[0]
-}
+const getTodayDate = () => format(new Date(), "yyyy-MM-dd")
 
 const getMonthRange = (monthYear: string) => {
-  const [year, month] = monthYear.split("-")
-  const start = new Date(Number.parseInt(year), Number.parseInt(month) - 1, 1)
-  const end = new Date(Number.parseInt(year), Number.parseInt(month), 0)
+  if (!monthYear) return { start: "", end: "" }
+  const [year, month] = monthYear.split("-").map(Number)
+  const start = new Date(year, month - 1, 1)
+  const end = new Date(year, month, 0)
   return {
-    start: start.toISOString().split("T")[0],
-    end: end.toISOString().split("T")[0],
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
   }
 }
 
 // ----- Dashboard Component -----
-
 const DashboardPage: React.FC = () => {
+  // State
   const [opdAppointments, setOpdAppointments] = useState<OPDAppointment[]>([])
   const [ipdAppointments, setIpdAppointments] = useState<IPDAppointment[]>([])
   const [otAppointments, setOtAppointments] = useState<OTAppointment[]>([])
   const [doctors, setDoctors] = useState<{ [key: string]: Doctor }>({})
   const [patientCache, setPatientCache] = useState<{ [key: string]: PatientInfo }>({})
-
   const [filters, setFilters] = useState<FilterState>({
     searchQuery: "",
     filterType: "week",
@@ -202,18 +197,16 @@ const DashboardPage: React.FC = () => {
     startDate: "",
     endDate: "",
   })
-
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [selectedAppointment, setSelectedAppointment] = useState<CombinedAppointment | null>(null)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
   const [modalLoading, setModalLoading] = useState<boolean>(false)
 
-  // Get current date range based on filter type
+  // Compute current date range
   const currentDateRange = useMemo(() => {
     switch (filters.filterType) {
       case "today":
-        const today = getTodayDate()
-        return { start: today, end: today }
+        return { start: getTodayDate(), end: getTodayDate() }
       case "month":
         return getMonthRange(filters.selectedMonth)
       case "dateRange":
@@ -225,121 +218,93 @@ const DashboardPage: React.FC = () => {
 
   // Fetch doctors once
   useEffect(() => {
-    const doctorsRef = ref(db, "doctors")
-    get(doctorsRef).then((snapshot) => {
-      const data = snapshot.val()
-      if (data) {
-        setDoctors(data as { [key: string]: Doctor })
-      }
+    get(ref(db, "doctors")).then((snap) => {
+      if (snap.exists()) setDoctors(snap.val() as any)
     })
   }, [])
 
-  // Fetch patient info when needed
+  // Cache patient info
   const fetchPatientInfo = useCallback(
-    async (patientId: string): Promise<PatientInfo | null> => {
-      if (patientCache[patientId]) {
-        return patientCache[patientId]
-      }
-
+    async (id: string): Promise<PatientInfo | null> => {
+      if (patientCache[id]) return patientCache[id]
       try {
-        const patientRef = ref(db, `patients/patientinfo/${patientId}`)
-        const snapshot = await get(patientRef)
-        const data = snapshot.val()
-
-        if (data) {
-          const patientInfo: PatientInfo = {
-            uhid: data.uhid,
-            name: data.name,
-            phone: data.phone,
-            age: data.age || 0, // Added default 0 for age
-            address: data.address || "", // Added default empty string for address
-            gender: data.gender || "", // Added default empty string for gender
+        const snap = await get(ref(db, `patients/patientinfo/${id}`))
+        if (snap.exists()) {
+          const d = snap.val()
+          const info: PatientInfo = {
+            uhid: d.uhid,
+            name: d.name,
+            phone: d.phone,
+            age: d.age || 0,
+            address: d.address || "",
+            gender: d.gender || "",
           }
-
-          setPatientCache((prev) => ({ ...prev, [patientId]: patientInfo }))
-          return patientInfo
+          setPatientCache((prev) => ({ ...prev, [id]: info }))
+          return info
         }
-      } catch (error) {
-        console.error("Error fetching patient info:", error)
-      }
-
+      } catch {}
       return null
     },
-    [patientCache],
+    [patientCache]
   )
 
-  // Combined and parallelized data fetching for OPD, IPD, and OT
+  // Fetch appointments when date range changes
   useEffect(() => {
-    const fetchAppointmentsForRange = async () => {
-      const { start: startDate, end: endDate } = currentDateRange
-      if (!startDate || !endDate) {
+    const fetchAll = async () => {
+      const { start, end } = currentDateRange
+      if (!start || !end) {
+        setOpdAppointments([])
+        setIpdAppointments([])
+        setOtAppointments([])
         setIsLoading(false)
         return
       }
 
       setIsLoading(true)
-      setOpdAppointments([])
-      setIpdAppointments([])
-      setOtAppointments([])
+      const tempOpd: OPDAppointment[] = []
+      const tempIpd: IPDAppointment[] = []
+      const tempOt: OTAppointment[] = []
+      const tasks: Promise<void>[] = []
 
-      const allDailyFetches: Promise<void>[] = []
-      const tempOpdList: OPDAppointment[] = []
-      const tempIpdList: IPDAppointment[] = []
-      const tempOtList: OTAppointment[] = []
+      const dt = new Date(start)
+      const endDt = new Date(end)
 
-      const dateIterator = new Date(startDate)
-      const endDateObj = new Date(endDate)
-
-      while (dateIterator <= endDateObj) {
-        const dateStr = format(dateIterator, "yyyy-MM-dd")
-
-        allDailyFetches.push(
+      while (dt <= endDt) {
+        const dateStr = format(dt, "yyyy-MM-dd")
+        tasks.push(
           (async () => {
-            // Fetch all data for this specific date concurrently
-            const [opdSnap, ipdInfoSnap, billingInfoSnap, otSnap] = await Promise.all([
+            const [opSnap, ipdInfoSnap, billingSnap, otSnap] = await Promise.all([
               get(ref(db, `patients/opddetail/${dateStr}`)),
               get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}`)),
               get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}`)),
-              get(ref(db, `patients/ot/${dateStr}`)), // Changed OT path
+              get(ref(db, `patients/ot/${dateStr}`)),
             ])
 
-            // Process OPD data
-            if (opdSnap.exists()) {
-              const patientAppointmentsByDate = opdSnap.val()
-              for (const patientId in patientAppointmentsByDate) {
-                const appointmentsForPatient = patientAppointmentsByDate[patientId]
-                for (const appointmentId in appointmentsForPatient) {
-                  const appointmentData = appointmentsForPatient[appointmentId]
-                  let patientInfo: PatientInfo | null
-
-                  if (appointmentData.name && appointmentData.phone) {
-                    patientInfo = {
-                      name: appointmentData.name,
-                      phone: appointmentData.phone,
-                      uhid: appointmentData.patientId || patientId,
-                      age: 0,
-                      address: "",
-                      gender: "",
-                    }
-                  } else {
-                    patientInfo = await fetchPatientInfo(patientId) // This will use cache or fetch
-                  }
-
-                  if (patientInfo) {
-                    tempOpdList.push({
-                      id: `${patientId}_${appointmentId}`,
-                      patientId,
-                      name: patientInfo.name,
-                      phone: patientInfo.phone,
+            // OPD
+            if (opSnap.exists()) {
+              const data = opSnap.val()
+              for (const pid in data) {
+                for (const aid in data[pid]) {
+                  const ap = data[pid][aid]
+                  const info =
+                    ap.name && ap.phone
+                      ? { name: ap.name, phone: ap.phone, uhid: pid, age: 0, address: "", gender: "" }
+                      : await fetchPatientInfo(pid)
+                  if (info) {
+                    tempOpd.push({
+                      id: `${pid}_${aid}`,
+                      patientId: pid,
+                      name: info.name,
+                      phone: info.phone,
                       date: dateStr,
-                      time: appointmentData.time || "",
-                      appointmentType: appointmentData.appointmentType || "visithospital",
-                      createdAt: appointmentData.createdAt,
-                      enteredBy: appointmentData.enteredBy || "",
-                      message: appointmentData.message || "",
-                      modalities: appointmentData.modalities || [],
-                      opdType: appointmentData.opdType || "",
-                      payment: appointmentData.payment || {
+                      time: ap.time || "",
+                      appointmentType: ap.appointmentType || "",
+                      createdAt: ap.createdAt,
+                      enteredBy: ap.enteredBy || "",
+                      message: ap.message || "",
+                      modalities: ap.modalities || [],
+                      opdType: ap.opdType || "",
+                      payment: ap.payment || {
                         cashAmount: 0,
                         createdAt: "",
                         discount: 0,
@@ -348,9 +313,9 @@ const DashboardPage: React.FC = () => {
                         totalCharges: 0,
                         totalPaid: 0,
                       },
-                      referredBy: appointmentData.referredBy || "",
-                      study: appointmentData.study || "",
-                      visitType: appointmentData.visitType || "",
+                      referredBy: ap.referredBy || "",
+                      study: ap.study || "",
+                      visitType: ap.visitType || "",
                       type: "OPD",
                     })
                   }
@@ -358,72 +323,57 @@ const DashboardPage: React.FC = () => {
               }
             }
 
-            // Process IPD data
-            const billingDataByPatient: Record<string, Record<string, any>> = billingInfoSnap.exists()
-              ? billingInfoSnap.val()
-              : {}
+            // IPD
+            const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
             if (ipdInfoSnap.exists()) {
-              const patientIpdRecordsByDate = ipdInfoSnap.val()
-              for (const patientId in patientIpdRecordsByDate) {
-                const ipdRecordsForPatient = patientIpdRecordsByDate[patientId]
-                for (const ipdId in ipdRecordsForPatient) {
-                  const ipdData = ipdRecordsForPatient[ipdId]
-                  const patientInfo = await fetchPatientInfo(patientId)
-                  const billingData = billingDataByPatient[patientId]?.[ipdId] || {}
-
+              const ipdData = ipdInfoSnap.val()
+              for (const pid in ipdData) {
+                for (const ipdid in ipdData[pid]) {
+                  const rec = ipdData[pid][ipdid]
+                  const info = await fetchPatientInfo(pid)
+                  const bill = billingByPid[pid]?.[ipdid] || {}
                   const payments: IPDPayment[] = []
-                  let netDeposit = 0 // Renamed for clarity: this is the net amount after advances and refunds
-                  let ipdTotalRefunds = 0 // Track refunds for this specific IPD record
-
-                  if (billingData?.payments) {
-                    Object.values(billingData.payments).forEach((paymentRaw: any) => {
-                      const payment = paymentRaw as IPDPayment
-                      payments.push(payment)
-                      if (payment.type === "advance") {
-                        netDeposit += Number(payment.amount)
-                      } else if (payment.type === "refund") {
-                        netDeposit -= Number(payment.amount)
-                        ipdTotalRefunds += Number(payment.amount)
+                  let netDep = 0
+                  let totalRe = 0
+                  if (bill.payments) {
+                    Object.values(bill.payments).forEach((p: any) => {
+                      payments.push(p)
+                      if (p.type === "advance") netDep += +p.amount
+                      else {
+                        netDep -= +p.amount
+                        totalRe += +p.amount
                       }
                     })
                   }
-
-                  // MODIFIED: Fetch services from billingData and ensure amount is number
-                  const services: IPDService[] = (billingData.services || []).map((s: any) => ({
-                    amount: Number(s.amount) || 0, // Ensure amount is a number, default to 0
+                  const services: IPDService[] = (bill.services || []).map((s: any) => ({
+                    amount: +s.amount || 0,
                     serviceName: s.serviceName || "",
                     type: s.type || "",
-                    doctorName: s.doctorName || undefined,
-                    createdAt: s.createdAt || "",
+                    doctorName: s.doctorName,
+                    createdAt: s.createdAt,
                   }))
-
-                  const totalServiceAmount = services.reduce(
-                    (sum: number, service: IPDService) => sum + service.amount,
-                    0,
-                  )
-
-                  const remainingAmount = totalServiceAmount - netDeposit
-
-                  if (patientInfo) {
-                    tempIpdList.push({
-                      id: `${patientId}_${ipdId}`,
-                      patientId,
-                      uhid: patientInfo.uhid,
-                      name: patientInfo.name,
-                      phone: patientInfo.phone,
+                  const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
+                  const remaining = totalSvc - netDep
+                  if (info) {
+                    tempIpd.push({
+                      id: `${pid}_${ipdid}`,
+                      patientId: pid,
+                      uhid: info.uhid,
+                      name: info.name,
+                      phone: info.phone,
                       admissionDate: dateStr,
-                      admissionTime: ipdData.admissionTime,
-                      doctor: doctors[ipdData.doctor]?.name || "Unknown",
-                      doctorId: ipdData.doctor,
-                      roomType: ipdData.roomType,
-                      status: ipdData.status,
-                      services: services, // Use the mapped services
-                      totalAmount: totalServiceAmount,
-                      totalDeposit: netDeposit, // Use the calculated net deposit
-                      totalRefunds: ipdTotalRefunds, // Add the new totalRefunds field
+                      admissionTime: rec.admissionTime,
+                      doctor: doctors[rec.doctor]?.name || "Unknown",
+                      doctorId: rec.doctor,
+                      roomType: rec.roomType,
+                      status: rec.status,
+                      services,
+                      totalAmount: totalSvc,
+                      totalDeposit: netDep,
+                      totalRefunds: totalRe,
                       payments,
-                      remainingAmount: totalServiceAmount - netDeposit, // Remaining amount based on net deposit
-                      createdAt: ipdData.createdAt,
+                      remainingAmount: remaining,
+                      createdAt: rec.createdAt,
                       type: "IPD",
                     })
                   }
@@ -431,185 +381,190 @@ const DashboardPage: React.FC = () => {
               }
             }
 
-            // Process OT data - Adjusted structure for fetching
+            // OT
             if (otSnap.exists()) {
-              const otDataByPatientAndIpd = otSnap.val() // Structure: { patientId: { ipdId: { otRecord } } }
-              for (const patientId in otDataByPatientAndIpd) {
-                const ipdEntries = otDataByPatientAndIpd[patientId]
-                for (const ipdId in ipdEntries) {
-                  const otRecord = ipdEntries[ipdId]
-                  const patientInfo = await fetchPatientInfo(patientId)
-
-                  if (patientInfo) {
-                    tempOtList.push({
-                      id: `${patientId}_${ipdId}_${otRecord.createdAt}`, // Unique ID for OT record
-                      patientId,
-                      uhid: patientInfo.uhid,
-                      name: patientInfo.name,
-                      phone: patientInfo.phone,
-                      date: otRecord.date || dateStr, // Use otRecord.date if available, else dateStr
-                      time: otRecord.time || "",
-                      message: otRecord.message || "",
-                      createdAt: otRecord.createdAt,
-                      ipdId: ipdId,
+              const otData = otSnap.val()
+              for (const pid in otData) {
+                for (const ipdid in otData[pid]) {
+                  const od = otData[pid][ipdid]
+                  const info = await fetchPatientInfo(pid)
+                  if (info) {
+                    tempOt.push({
+                      id: `${pid}_${ipdid}_${od.createdAt}`,
+                      patientId: pid,
+                      uhid: info.uhid,
+                      name: info.name,
+                      phone: info.phone,
+                      date: od.date || dateStr,
+                      time: od.time || "",
+                      message: od.message || "",
+                      createdAt: od.createdAt,
+                      ipdId: ipdid,
                       type: "OT",
                     })
                   }
                 }
               }
             }
-          })(),
+          })()
         )
-
-        dateIterator.setDate(dateIterator.getDate() + 1) // Move to the next day
+        dt.setDate(dt.getDate() + 1)
       }
 
-      await Promise.all(allDailyFetches) // Wait for all daily fetches to complete
-      setOpdAppointments(tempOpdList)
-      setIpdAppointments(tempIpdList)
-      setOtAppointments(tempOtList)
+      await Promise.all(tasks)
+      setOpdAppointments(tempOpd)
+      setIpdAppointments(tempIpd)
+      setOtAppointments(tempOt)
       setIsLoading(false)
     }
 
-    fetchAppointmentsForRange()
-  }, [currentDateRange, doctors, fetchPatientInfo]) // Re-run when date range or doctors/patient cache changes
+    fetchAll()
+  }, [currentDateRange, doctors, fetchPatientInfo])
 
-  // Updated statistics calculation for new OPD structure
+  // Statistics
   const statistics = useMemo(() => {
-    const totalOpdAmount = opdAppointments.reduce((sum, app) => sum + (app.payment.totalPaid || 0), 0)
-    const totalIpdNetDeposit = ipdAppointments.reduce((sum, app) => sum + app.totalDeposit, 0)
-    const overallIpdRefunds = ipdAppointments.reduce((sum, app) => sum + app.totalRefunds, 0) // Sum of all refunds
-
-    const opdCash = opdAppointments.reduce((sum, app) => {
-      return sum + (app.payment.cashAmount || 0)
-    }, 0)
-
-    const opdOnline = opdAppointments.reduce((sum, app) => {
-      return sum + (app.payment.onlineAmount || 0)
-    }, 0)
-
-    const ipdCash = ipdAppointments.reduce((sum, app) => {
-      return (
+    const totalOpdAmt = opdAppointments.reduce((sum, a) => sum + (a.payment.totalPaid || 0), 0)
+    const totalIpdDep = ipdAppointments.reduce((sum, a) => sum + a.totalDeposit, 0)
+    const totalIpdRef = ipdAppointments.reduce((sum, a) => sum + a.totalRefunds, 0)
+    const opdCash = opdAppointments.reduce((sum, a) => sum + a.payment.cashAmount, 0)
+    const opdOnline = opdAppointments.reduce((sum, a) => sum + a.payment.onlineAmount, 0)
+    const ipdCash = ipdAppointments.reduce(
+      (sum, a) =>
         sum +
-        app.payments.filter((p) => p.paymentType === "cash" && p.type === "advance").reduce((s, p) => s + p.amount, 0)
-      )
-    }, 0)
-
-    const ipdOnline = ipdAppointments.reduce((sum, app) => {
-      return (
+        a.payments
+          .filter((p) => p.paymentType === "cash" && p.type === "advance")
+          .reduce((s, p) => s + p.amount, 0),
+      0
+    )
+    const ipdOnline = ipdAppointments.reduce(
+      (sum, a) =>
         sum +
-        app.payments.filter((p) => p.paymentType === "online" && p.type === "advance").reduce((s, p) => s + p.amount, 0)
-      )
-    }, 0)
-
+        a.payments
+          .filter((p) => p.paymentType === "online" && p.type === "advance")
+          .reduce((s, p) => s + p.amount, 0),
+      0
+    )
     return {
       totalOpdCount: opdAppointments.length,
-      totalOpdAmount,
+      totalOpdAmount: totalOpdAmt,
       totalIpdCount: ipdAppointments.length,
-      totalIpdAmount: totalIpdNetDeposit, // Use the net deposit here
-      overallIpdRefunds, // NEW: Add overall IPD refunds to statistics
+      totalIpdAmount: totalIpdDep,
+      overallIpdRefunds: totalIpdRef,
       totalOtCount: otAppointments.length,
       opdCash,
       opdOnline,
       ipdCash,
       ipdOnline,
-      totalRevenue: totalOpdAmount + totalIpdNetDeposit, // Total revenue is OPD + net IPD
+      totalRevenue: totalOpdAmt + totalIpdDep,
     }
   }, [opdAppointments, ipdAppointments, otAppointments])
 
-  // Filter appointments based on search
+  // Combined & filter by search + date range
   const filteredAppointments = useMemo(() => {
-    const allAppointments: CombinedAppointment[] = [
+    const all: CombinedAppointment[] = [
       ...opdAppointments,
-      ...ipdAppointments.map((app) => ({ ...app, date: app.admissionDate })), // IPD needs a 'date' for consistency in table display
+      ...ipdAppointments,
       ...otAppointments,
     ]
-
-    if (!filters.searchQuery) return allAppointments
-
-    const query = filters.searchQuery.toLowerCase()
-    return allAppointments.filter((app) => app.name.toLowerCase().includes(query) || app.phone.includes(query))
-  }, [opdAppointments, ipdAppointments, otAppointments, filters.searchQuery])
-
-  // Calculate doctor consultations
-  const doctorConsultations = useMemo(() => {
-    const consultationsMap = new Map<string, number>() // Map<DoctorName, Count>
-
-    opdAppointments.forEach((app) => {
-      app.modalities.forEach((modality) => {
-        if (modality.type === "consultation" && modality.doctor) {
-          const doctorName = modality.doctor
-          consultationsMap.set(doctorName, (consultationsMap.get(doctorName) || 0) + 1)
-        }
+    let list = all
+    if (filters.searchQuery) {
+      const q = filters.searchQuery.toLowerCase()
+      list = list.filter((a) => a.name.toLowerCase().includes(q) || a.phone.includes(q))
+    }
+    if (filters.filterType === "dateRange" && filters.startDate && filters.endDate) {
+      list = list.filter((a) => {
+        const dateStr =
+          a.type === "IPD"
+            ? (a as IPDAppointment).admissionDate
+            : (a as OPDAppointment | OTAppointment).date
+        return dateStr >= filters.startDate && dateStr <= filters.endDate
       })
-    })
+    }
+    return list
+  }, [
+    opdAppointments,
+    ipdAppointments,
+    otAppointments,
+    filters.searchQuery,
+    filters.filterType,
+    filters.startDate,
+    filters.endDate,
+  ])
 
-    // Convert map to array of objects and sort by count (descending)
-    return Array.from(consultationsMap.entries())
+  // Doctor consultations
+  const doctorConsultations = useMemo(() => {
+    const map = new Map<string, number>()
+    opdAppointments.forEach((a) =>
+      a.modalities
+        .filter((m) => m.type === "consultation" && m.doctor)
+        .forEach((m) => map.set(m.doctor!, (map.get(m.doctor!) || 0) + 1))
+    )
+    return Array.from(map.entries())
       .map(([doctorName, count]) => ({ doctorName, count }))
       .sort((a, b) => b.count - a.count)
   }, [opdAppointments])
 
-  // Chart data for doctor consultations
-  const doctorConsultationChartData = useMemo(() => {
-    const topDoctors = doctorConsultations.slice(0, 10) // Limit to top 10 doctors for readability
+  const doctorConsultChartData = useMemo(() => {
+    const top = doctorConsultations.slice(0, 10)
     return {
-      labels: topDoctors.map((d) => d.doctorName),
+      labels: top.map((d) => d.doctorName),
       datasets: [
         {
           label: "Consultations",
-          data: topDoctors.map((d) => d.count),
-          backgroundColor: "rgba(75, 192, 192, 0.6)",
-          borderColor: "rgba(75, 192, 192, 1)",
+          data: top.map((d) => d.count),
+          backgroundColor: "rgba(75,192,192,0.6)",
           borderWidth: 1,
         },
       ],
     }
   }, [doctorConsultations])
 
-  // Helper function to get modalities summary
-  const getModalitiesSummary = (modalities: IModality[]) => {
-    const consultations = modalities.filter((m) => m.type === "consultation").length
-    const casualty = modalities.filter((m) => m.type === "casualty").length
-    const xrays = modalities.filter((m) => m.type === "xray").length
-    const custom = modalities.filter((m) => m.type === "custom").length // Added custom
+  // Last 3 days chart
+  const chartData = useMemo(() => {
+    const today = format(new Date(), "yyyy-MM-dd")
+    const y = format(addDays(new Date(), -1), "yyyy-MM-dd")
+    const dby = format(addDays(new Date(), -2), "yyyy-MM-dd")
+    const opToday = opdAppointments.filter((a) => a.date === today).length
+    const opY = opdAppointments.filter((a) => a.date === y).length
+    const opDby = opdAppointments.filter((a) => a.date === dby).length
+    const ipToday = ipdAppointments.filter((a) => a.admissionDate === today).length
+    const ipY = ipdAppointments.filter((a) => a.admissionDate === y).length
+    const ipDby = ipdAppointments.filter((a) => a.admissionDate === dby).length
+    return {
+      labels: [dby, y, today],
+      datasets: [
+        {
+          label: "OPD Appointments",
+          data: [opDby, opY, opToday],
+          backgroundColor: "rgba(54,162,235,0.6)",
+        },
+        {
+          label: "IPD Admissions",
+          data: [ipDby, ipY, ipToday],
+          backgroundColor: "rgba(255,99,132,0.6)",
+        },
+      ],
+    }
+  }, [opdAppointments, ipdAppointments])
 
-    const parts = []
-    if (consultations > 0) parts.push(`${consultations} Consultation${consultations > 1 ? "s" : ""}`)
-    if (casualty > 0) parts.push(`${casualty} Casualty`)
-    if (xrays > 0) parts.push(`${xrays} X-ray${xrays > 1 ? "s" : ""}`)
-    if (custom > 0) parts.push(`${custom} Custom Service${custom > 1 ? "s" : ""}`) // Added custom
-
-    return parts.join(", ") || "No services"
-  }
-
-  // Filter handlers
-  const handleFilterChange = (newFilters: Partial<FilterState>) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }))
-  }
-
+  // Handlers
   const handleDateRangeChange = (start: string, end: string) => {
     if (start && end) {
-      const daysDiff = differenceInDays(new Date(end), new Date(start))
-      if (daysDiff > 30) {
+      const diff = differenceInDays(new Date(end), new Date(start))
+      if (diff > 30) {
         toast.error("Date range cannot exceed 30 days")
-        const maxEndDate = addDays(new Date(start), 30)
-        handleFilterChange({
-          startDate: start,
-          endDate: format(maxEndDate, "yyyy-MM-dd"),
-          filterType: "dateRange",
-        })
+        const maxEnd = format(addDays(new Date(start), 30), "yyyy-MM-dd")
+        setFilters((p) => ({ ...p, startDate: start, endDate: maxEnd, filterType: "dateRange" }))
       } else {
-        handleFilterChange({
-          startDate: start,
-          endDate: end,
-          filterType: "dateRange",
-        })
+        setFilters((p) => ({ ...p, startDate: start, endDate: end, filterType: "dateRange" }))
       }
+    } else {
+      setFilters((p) => ({ ...p, startDate: start, endDate: end }))
     }
   }
 
-  const resetFilters = () => {
+  const handleFilterChange = (upd: Partial<FilterState>) => setFilters((p) => ({ ...p, ...upd }))
+  const resetFilters = () =>
     setFilters({
       searchQuery: "",
       filterType: "week",
@@ -617,44 +572,33 @@ const DashboardPage: React.FC = () => {
       startDate: "",
       endDate: "",
     })
-  }
 
-  // Modal handlers
-  const openModal = async (appointment: CombinedAppointment) => {
+  // Modal
+  const openModal = async (app: CombinedAppointment) => {
     setModalLoading(true)
     setIsModalOpen(true)
-
-    if (appointment.type === "IPD") {
+    if (app.type === "IPD") {
       try {
-        const detailRef = ref(
-          db,
-          `patients/ipddetail/userdetailipd/${appointment.admissionDate}/${appointment.patientId}/${appointment.id.split("_")[1]}`,
+        const [pid, ipdid] = app.id.split("_")
+        const snap = await get(
+          ref(db, `patients/ipddetail/userdetailipd/${(app as IPDAppointment).admissionDate}/${pid}/${ipdid}`)
         )
-        const detailSnapshot = await get(detailRef)
-        const detailData = detailSnapshot.val()
-
-        setSelectedAppointment({
-          ...appointment,
-          details: detailData,
-        })
-      } catch (error) {
-        console.error("Error fetching IPD details:", error)
-        setSelectedAppointment(appointment)
+        setSelectedAppointment({ ...app, details: snap.exists() ? snap.val() : null })
+      } catch {
+        setSelectedAppointment(app)
       }
     } else {
-      setSelectedAppointment(appointment)
+      setSelectedAppointment(app)
     }
-
     setModalLoading(false)
   }
-
   const closeModal = () => {
-    setSelectedAppointment(null)
     setIsModalOpen(false)
+    setSelectedAppointment(null)
   }
 
-  const getBadgeColor = (type: string) => {
-    switch (type) {
+  const getBadgeColor = (t: string) => {
+    switch (t) {
       case "OPD":
         return "bg-sky-100 text-sky-800"
       case "IPD":
@@ -673,52 +617,41 @@ const DashboardPage: React.FC = () => {
       case "month":
         return `${format(new Date(filters.selectedMonth + "-01"), "MMMM yyyy")} Data`
       case "dateRange":
-        return `${format(new Date(filters.startDate), "MMM dd")} - ${format(new Date(filters.endDate), "MMM dd, yyyy")}`
+        if (!filters.startDate || !filters.endDate) return "Select date range"
+        return `${format(new Date(filters.startDate), "MMM dd")} - ${format(
+          new Date(filters.endDate),
+          "MMM dd, yyyy"
+        )}`
       default:
-        return `Week: ${format(new Date(currentDateRange.start), "MMM dd")} - ${format(
-          new Date(currentDateRange.end),
-          "MMM dd, yyyy",
+        const { start, end } = currentDateRange
+        return `Week: ${format(new Date(start), "MMM dd")} - ${format(
+          new Date(end),
+          "MMM dd, yyyy"
         )}`
     }
   }
 
-  const chartData = useMemo(() => {
-    const today = format(new Date(), "yyyy-MM-dd")
-    const yesterday = format(addDays(new Date(), -1), "yyyy-MM-dd")
-    const dayBeforeYesterday = format(addDays(new Date(), -2), "yyyy-MM-dd")
-
-    const todayOpd = opdAppointments.filter((app) => app.date === today).length
-    const yesterdayOpd = opdAppointments.filter((app) => app.date === yesterday).length
-    const dayBeforeYesterdayOpd = opdAppointments.filter((app) => app.date === dayBeforeYesterday).length
-
-    const todayIpd = ipdAppointments.filter((app) => app.admissionDate === today).length
-    const yesterdayIpd = ipdAppointments.filter((app) => app.admissionDate === yesterday).length
-    const dayBeforeYesterdayIpd = ipdAppointments.filter((app) => app.admissionDate === dayBeforeYesterday).length
-
-    return {
-      labels: [dayBeforeYesterday, yesterday, today],
-      datasets: [
-        {
-          label: "OPD Appointments",
-          data: [dayBeforeYesterdayOpd, yesterdayOpd, todayOpd],
-          backgroundColor: "rgba(54, 162, 235, 0.6)",
-        },
-        {
-          label: "IPD Admissions",
-          data: [dayBeforeYesterdayIpd, yesterdayIpd, todayIpd],
-          backgroundColor: "rgba(255, 99, 132, 0.6)",
-        },
-      ],
+  const getModalitiesSummary = (mods: IModality[]) => {
+    const counts = {
+      consultation: mods.filter((m) => m.type === "consultation").length,
+      casualty: mods.filter((m) => m.type === "casualty").length,
+      xray: mods.filter((m) => m.type === "xray").length,
+      custom: mods.filter((m) => m.type === "custom").length,
     }
-  }, [opdAppointments, ipdAppointments])
+    const parts: string[] = []
+    if (counts.consultation) parts.push(`${counts.consultation} Consultation${counts.consultation>1?"s":""}`)
+    if (counts.casualty)    parts.push(`${counts.casualty} Casualty`)
+    if (counts.xray)        parts.push(`${counts.xray} X-ray${counts.xray>1?"s":""}`)
+    if (counts.custom)      parts.push(`${counts.custom} Custom Service${counts.custom>1?"s":""}`)
+    return parts.join(", ") || "No services"
+  }
 
   return (
     <>
       <ToastContainer />
-
       <main className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
         <div className="max-w-[1600px] mx-auto">
-          {/* Header */}
+          {/* Header & Search */}
           <div className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
             <div className="px-6 py-4 flex flex-col md:flex-row justify-between items-center">
               <div className="flex items-center mb-4 md:mb-0">
@@ -729,8 +662,6 @@ const DashboardPage: React.FC = () => {
                   G Medford NX
                 </h1>
               </div>
-
-              {/* Search Bar */}
               <div className="relative w-full md:w-1/3">
                 <Search className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
                 <input
@@ -738,27 +669,24 @@ const DashboardPage: React.FC = () => {
                   placeholder="Search by name or phone"
                   value={filters.searchQuery}
                   onChange={(e) => handleFilterChange({ searchQuery: e.target.value })}
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition duration-200 shadow-sm"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition shadow-sm"
                 />
               </div>
             </div>
           </div>
 
-          {/* Main Content */}
           <div className="p-6">
             {/* Advanced Filters */}
             <div className="bg-white rounded-xl shadow-sm mb-6 p-6 border border-gray-100">
               <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4">
                 <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4 lg:mb-0">
-                  <Filter className="mr-2 h-5 w-5 text-sky-500" />
-                  Advanced Filters
+                  <Filter className="mr-2 h-5 w-5 text-sky-500" /> Advanced Filters
                 </h2>
                 <button
                   onClick={resetFilters}
-                  className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-sky-500 transition flex items-center shadow-sm"
+                  className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 flex items-center"
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Reset All
+                  <RefreshCw className="mr-2 h-4 w-4" /> Reset All
                 </button>
               </div>
 
@@ -767,26 +695,27 @@ const DashboardPage: React.FC = () => {
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700">Quick Filters</label>
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => handleFilterChange({ filterType: "week" })}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
-                        filters.filterType === "week"
-                          ? "bg-sky-600 text-white shadow-md"
-                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                    >
-                      This Week
-                    </button>
-                    <button
-                      onClick={() => handleFilterChange({ filterType: "today" })}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition ${
-                        filters.filterType === "today"
-                          ? "bg-sky-600 text-white shadow-md"
-                          : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                      }`}
-                    >
-                      Today
-                    </button>
+                    {["week", "today", "month"].map((mode) => {
+                      const label = mode === "week" ? "This Week" : mode === "today" ? "Today" : "This Month"
+                      return (
+                        <button
+                          key={mode}
+                          onClick={() =>
+                            handleFilterChange({
+                              filterType: mode as any,
+                              ...(mode === "month" ? { selectedMonth: format(new Date(), "yyyy-MM") } : {}),
+                            })
+                          }
+                          className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                            filters.filterType === mode
+                              ? "bg-sky-600 text-white shadow-md"
+                              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
@@ -800,7 +729,7 @@ const DashboardPage: React.FC = () => {
                     id="month"
                     value={filters.selectedMonth}
                     onChange={(e) => handleFilterChange({ selectedMonth: e.target.value, filterType: "month" })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition shadow-sm"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
@@ -814,7 +743,7 @@ const DashboardPage: React.FC = () => {
                     id="startDate"
                     value={filters.startDate}
                     onChange={(e) => handleDateRangeChange(e.target.value, filters.endDate)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition shadow-sm"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
@@ -827,12 +756,11 @@ const DashboardPage: React.FC = () => {
                     id="endDate"
                     value={filters.endDate}
                     onChange={(e) => handleDateRangeChange(filters.startDate, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition shadow-sm"
+                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
               </div>
 
-              {/* Current Filter Display */}
               <div className="mt-4 p-3 bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg border border-sky-200">
                 <div className="flex items-center">
                   <CalendarDays className="mr-2 h-5 w-5 text-sky-600" />
@@ -843,7 +771,7 @@ const DashboardPage: React.FC = () => {
 
             {/* Dashboard Statistics */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-              {/* OPD Statistics */}
+              {/* OPD */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-gradient-to-r from-sky-100 to-blue-100 rounded-full">
@@ -856,13 +784,11 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">Revenue</span>
-                  <span className="text-lg font-semibold text-sky-600">
-                    {formatCurrency(statistics.totalOpdAmount)}
-                  </span>
+                  <span className="text-lg font-semibold text-sky-600">{formatCurrency(statistics.totalOpdAmount)}</span>
                 </div>
               </div>
 
-              {/* IPD Statistics */}
+              {/* IPD */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-gradient-to-r from-orange-100 to-red-100 rounded-full">
@@ -875,21 +801,17 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">Net Deposit</span>
-                  <span className="text-lg font-semibold text-orange-600">
-                    {formatCurrency(statistics.totalIpdAmount)}
-                  </span>
+                  <span className="text-lg font-semibold text-orange-600">{formatCurrency(statistics.totalIpdAmount)}</span>
                 </div>
-                {statistics.overallIpdRefunds > 0 && ( // NEW: Display total refunds if greater than 0
+                {statistics.overallIpdRefunds > 0 && (
                   <div className="flex items-center justify-between mt-2">
                     <span className="text-sm text-gray-600">Total Refunds</span>
-                    <span className="text-lg font-semibold text-blue-600">
-                      {formatCurrency(statistics.overallIpdRefunds)}
-                    </span>
+                    <span className="text-lg font-semibold text-blue-600">{formatCurrency(statistics.overallIpdRefunds)}</span>
                   </div>
                 )}
               </div>
 
-              {/* OT Statistics */}
+              {/* OT */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between mb-4">
                   <div className="p-3 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full">
@@ -919,20 +841,17 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-600">Amount</span>
-                  <span className="text-lg font-semibold text-emerald-600">
-                    {formatCurrency(statistics.totalRevenue)}
-                  </span>
+                  <span className="text-lg font-semibold text-emerald-600">{formatCurrency(statistics.totalRevenue)}</span>
                 </div>
               </div>
             </div>
 
-            {/* Payment Breakdown and Charts */}
+            {/* Payment Breakdown & Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
               {/* Payment Breakdown */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <CreditCard className="mr-2 h-5 w-5 text-gray-600" />
-                  Payment Breakdown
+                  <CreditCard className="mr-2 h-5 w-5 text-gray-600" /> Payment Breakdown
                 </h2>
                 <div className="space-y-6">
                   <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-4">
@@ -974,49 +893,36 @@ const DashboardPage: React.FC = () => {
                   <div className="bg-gradient-to-r from-emerald-50 to-green-50 rounded-lg p-4">
                     <div className="flex justify-between items-center">
                       <span className="text-emerald-800 font-semibold">💰 Grand Total</span>
-                      <span className="font-bold text-xl text-emerald-600">
-                        {formatCurrency(statistics.totalRevenue)}
-                      </span>
+                      <span className="font-bold text-xl text-emerald-600">{formatCurrency(statistics.totalRevenue)}</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Weekly Appointments Chart */}
+              {/* Appointments Overview Chart */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <Activity className="mr-2 h-5 w-5 text-gray-600" />
-                  Appointments Overview
+                  <Activity className="mr-2 h-5 w-5 text-gray-600" /> Appointments Overview
                 </h2>
                 <Bar
                   data={chartData}
                   options={{
                     responsive: true,
-                    plugins: {
-                      legend: {
-                        position: "top",
-                      },
-                    },
+                    plugins: { legend: { position: "top" } },
                     scales: {
-                      y: {
-                        beginAtZero: true,
-                        ticks: {
-                          stepSize: 1,
-                        },
-                      },
+                      y: { beginAtZero: true, ticks: { stepSize: 1 } },
                     },
                   }}
                 />
               </div>
             </div>
 
-            {/* Doctor Consultations List and Chart */}
+            {/* Doctor Consultations List & Chart */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* Doctor Consultations List */}
+              {/* List */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" />
-                  Doctor Consultations
+                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Doctor Consultations
                 </h2>
                 {doctorConsultations.length > 0 ? (
                   <div className="overflow-x-auto">
@@ -1050,30 +956,18 @@ const DashboardPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Doctor Consultations Chart */}
+              {/* Chart */}
               <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" />
-                  Top Doctors by Consultations
+                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Top Doctors by Consultations
                 </h2>
-                {doctorConsultationChartData.labels.length > 0 ? (
+                {doctorConsultChartData.labels.length > 0 ? (
                   <Bar
-                    data={doctorConsultationChartData}
+                    data={doctorConsultChartData}
                     options={{
                       responsive: true,
-                      plugins: {
-                        legend: {
-                          position: "top",
-                        },
-                      },
-                      scales: {
-                        y: {
-                          beginAtZero: true,
-                          ticks: {
-                            stepSize: 1,
-                          },
-                        },
-                      },
+                      plugins: { legend: { position: "top" } },
+                      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
                     }}
                   />
                 ) : (
@@ -1088,8 +982,7 @@ const DashboardPage: React.FC = () => {
             <div className="bg-white shadow-sm rounded-xl overflow-hidden border border-gray-100">
               <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 flex items-center">
-                  <FileText className="mr-2 h-5 w-5 text-gray-600" />
-                  Appointments List
+                  <FileText className="mr-2 h-5 w-5 text-gray-600" /> Appointments List
                 </h2>
               </div>
 
@@ -1125,82 +1018,77 @@ const DashboardPage: React.FC = () => {
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
                       {filteredAppointments.length > 0 ? (
-                        filteredAppointments.map((appointment) => (
-                          <tr key={appointment.id} className="hover:bg-gray-50 transition-colors">
+                        filteredAppointments.map((app) => (
+                          <tr key={app.id} className="hover:bg-gray-50 transition-colors">
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center">
                                 <div className="p-2 bg-gray-100 rounded-full mr-3">
                                   <User className="h-4 w-4 text-gray-600" />
                                 </div>
                                 <div>
-                                  <div className="text-sm font-medium text-gray-900">{appointment.name}</div>
-                                  {(appointment.type === "IPD" || appointment.type === "OT") && ( // Check for OT type as well
-                                    <div className="text-xs text-gray-500">UHID: {appointment.uhid}</div>
+                                  <div className="text-sm font-medium text-gray-900">{app.name}</div>
+                                  {(app.type === "IPD" || app.type === "OT") && (
+                                    <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
                                   )}
                                 </div>
                               </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm text-gray-500">{appointment.phone}</div>
+                              <div className="text-sm text-gray-500">{app.phone}</div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="text-sm text-gray-900">
-                                {appointment.type === "OPD" || appointment.type === "OT"
-                                  ? appointment.date && format(new Date(appointment.date), "dd MMM, yyyy")
-                                  : appointment.admissionDate &&
-     format(new Date(appointment.admissionDate as string), "dd MMM, yyyy")}
-                              </div>
-                              {(appointment.type === "OPD" || appointment.type === "OT") &&
-                                appointment.time && ( // OPD and OT can have time
-                                  <div className="text-xs text-gray-500 flex items-center">
-                                    <Clock className="h-3 w-3 mr-1" />
-                                    {appointment.time}
-                                  </div>
+                                {format(
+                                  new Date(
+                                    app.type === "OPD" || app.type === "OT"
+                                      ? app.date
+                                      : (app as IPDAppointment).admissionDate
+                                  ),
+                                  "dd MMM, yyyy"
                                 )}
-                              {appointment.type === "IPD" && ( // IPD has admissionTime
-                                <div className="text-xs text-gray-500 flex items-center">
-                                  <Clock className="h-3 w-3 mr-1" />
-                                  {(appointment as IPDAppointment).admissionTime}
-                                </div>
-                              )}
+                              </div>
+                              <div className="text-xs text-gray-500 flex items-center">
+                                <Clock className="h-3 w-3 mr-1" />
+                                {app.type === "OPD" || app.type === "OT"
+                                  ? app.time
+                                  : (app as IPDAppointment).admissionTime}
+                              </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span
-                                className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(
-                                  appointment.type,
-                                )}`}
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
                               >
-                                {appointment.type}
+                                {app.type}
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              {appointment.type === "OPD" && (
+                              {app.type === "OPD" && (
                                 <div>
                                   <div className="text-sm text-gray-600 mb-1">
-                                    {getModalitiesSummary((appointment as OPDAppointment).modalities)}
+                                    {getModalitiesSummary((app as OPDAppointment).modalities)}
                                   </div>
                                   <div className="text-sm font-medium text-gray-900">
-                                    {formatCurrency((appointment as OPDAppointment).payment.totalPaid)}
+                                    {formatCurrency((app as OPDAppointment).payment.totalPaid)}
                                   </div>
                                 </div>
                               )}
-                              {appointment.type === "IPD" && (
+                              {app.type === "IPD" && (
                                 <div>
                                   <div className="text-sm font-medium text-gray-900">
-                                    {formatCurrency((appointment as IPDAppointment).totalDeposit)}
+                                    {formatCurrency((app as IPDAppointment).totalDeposit)}
                                   </div>
-                                  {((appointment as IPDAppointment).remainingAmount ?? 0) > 0 && (
-                                      <div className="text-xs text-red-500">
-                                      Pending: {formatCurrency((appointment as IPDAppointment).remainingAmount ?? 0)}
-                                      </div>
-                                    )}
+                                  {((app as IPDAppointment).remainingAmount ?? 0) > 0 && (
+                                    <div className="text-xs text-red-500">
+                                      Pending: {formatCurrency((app as IPDAppointment).remainingAmount!)}
+                                    </div>
+                                  )}
                                 </div>
                               )}
-                              {appointment.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
+                              {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                               <button
-                                onClick={() => openModal(appointment)}
+                                onClick={() => openModal(app)}
                                 className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
                               >
                                 View Details
@@ -1227,15 +1115,15 @@ const DashboardPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Enhanced Appointment Details Modal */}
+        {/* Appointment Details Modal */}
         <Dialog open={isModalOpen} onClose={closeModal} className="fixed z-50 inset-0 overflow-y-auto">
           {isModalOpen && selectedAppointment && (
             <div className="flex items-center justify-center min-h-screen px-4">
-              <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" aria-hidden="true"></div>
-              <Dialog.Panel className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 transform transition-all max-h-screen overflow-y-auto">
+              <div className="fixed inset-0 bg-black bg-opacity-50" aria-hidden="true" />
+              <Dialog.Panel className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-screen overflow-y-auto">
                 <button
                   onClick={closeModal}
-                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 focus:outline-none p-2 rounded-full hover:bg-gray-100 transition-colors"
+                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100"
                 >
                   <X className="h-5 w-5" />
                 </button>
@@ -1247,14 +1135,14 @@ const DashboardPage: React.FC = () => {
                   </div>
                 ) : (
                   <>
-                    <Dialog.Title className="text-2xl font-bold mb-6 text-gray-800 flex items-center">
+                    <Dialog.Title className="text-2xl font-bold mb-6 flex items-center">
                       <div
                         className={`p-3 rounded-full mr-4 ${
                           selectedAppointment.type === "OPD"
                             ? "bg-gradient-to-r from-sky-100 to-blue-100"
                             : selectedAppointment.type === "IPD"
-                              ? "bg-gradient-to-r from-orange-100 to-red-100"
-                              : "bg-gradient-to-r from-purple-100 to-pink-100"
+                            ? "bg-gradient-to-r from-orange-100 to-red-100"
+                            : "bg-gradient-to-r from-purple-100 to-pink-100"
                         }`}
                       >
                         {selectedAppointment.type === "OPD" && <Activity className="text-sky-600 h-6 w-6" />}
@@ -1264,11 +1152,10 @@ const DashboardPage: React.FC = () => {
                       {selectedAppointment.type} Appointment Details
                     </Dialog.Title>
 
-                    {/* Patient Information */}
+                    {/* Patient Info */}
                     <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg p-6 mb-6">
                       <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                        <User className="mr-2 h-5 w-5 text-gray-600" />
-                        Patient Information
+                        <User className="mr-2 h-5 w-5 text-gray-600" /> Patient Information
                       </h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-3">
@@ -1283,14 +1170,15 @@ const DashboardPage: React.FC = () => {
                           <div>
                             <p className="text-sm text-gray-500">Date</p>
                             <p className="font-medium">
-  {selectedAppointment.type === "IPD"
-    ? selectedAppointment.admissionDate
-      ? format(new Date(selectedAppointment.admissionDate), "dd MMM, yyyy")
-      : "-"
-    : selectedAppointment.date
-      ? format(new Date(selectedAppointment.date), "dd MMM, yyyy")
-      : "-"}
-</p>
+                              {format(
+                                new Date(
+                                  selectedAppointment.type === "IPD"
+                                    ? (selectedAppointment as IPDAppointment).admissionDate
+                                    : selectedAppointment.date
+                                ),
+                                "dd MMM, yyyy"
+                              )}
+                            </p>
                           </div>
                         </div>
                         <div className="space-y-3">
@@ -1299,177 +1187,183 @@ const DashboardPage: React.FC = () => {
                             <p className="font-medium">{selectedAppointment.patientId}</p>
                           </div>
                           {(selectedAppointment.type === "IPD" || selectedAppointment.type === "OT") && (
-                            <>
-                              <div>
-                                <p className="text-sm text-gray-500">UHID</p>
-                                <p className="font-medium">{selectedAppointment.uhid}</p>
-                              </div>
-                            </>
+                            <div>
+                              <p className="text-sm text-gray-500">UHID</p>
+                              <p className="font-medium">{selectedAppointment.uhid}</p>
+                            </div>
                           )}
                           {selectedAppointment.type === "IPD" && (
                             <div>
                               <p className="text-sm text-gray-500">Room Type</p>
-                              <p className="font-medium">{selectedAppointment.roomType}</p>
+                              <p className="font-medium">{(selectedAppointment as IPDAppointment).roomType}</p>
                             </div>
                           )}
                           {selectedAppointment.type === "OT" && (
                             <div>
                               <p className="text-sm text-gray-500">IPD ID</p>
-                              <p className="font-medium">{selectedAppointment.ipdId}</p>
+                              <p className="font-medium">{(selectedAppointment as OTAppointment).ipdId}</p>
                             </div>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    {/* Updated OPD Specific Details */}
+                    {/* OPD Details */}
                     {selectedAppointment.type === "OPD" && (
-                      <>
-                        <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-6 mb-6">
+                      <div className="space-y-6">
+                        <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-6">
                           <h3 className="text-lg font-semibold text-sky-800 mb-4">OPD Details</h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-3">
                               <div>
                                 <p className="text-sm text-gray-500">Time</p>
-                                <p className="font-medium">{selectedAppointment.time || "-"}</p>
+                                <p className="font-medium">{(selectedAppointment as OPDAppointment).time}</p>
                               </div>
                               <div>
                                 <p className="text-sm text-gray-500">Appointment Type</p>
-                                <p className="font-medium capitalize">{selectedAppointment.appointmentType}</p>
+                                <p className="font-medium capitalize">
+                                  {(selectedAppointment as OPDAppointment).appointmentType}
+                                </p>
                               </div>
                               <div>
                                 <p className="text-sm text-gray-500">Visit Type</p>
-                                <p className="font-medium capitalize">{selectedAppointment.visitType || "-"}</p>
+                                <p className="font-medium capitalize">
+                                  {(selectedAppointment as OPDAppointment).visitType}
+                                </p>
                               </div>
                             </div>
                             <div className="space-y-3">
                               <div>
                                 <p className="text-sm text-gray-500">Payment Method</p>
-                                <p className="font-medium capitalize">{selectedAppointment.payment.paymentMethod}</p>
+                                <p className="font-medium capitalize">
+                                  {(selectedAppointment as OPDAppointment).payment.paymentMethod}
+                                </p>
                               </div>
                               <div>
                                 <p className="text-sm text-gray-500">Total Amount</p>
                                 <p className="font-bold text-xl text-sky-600">
-                                  {formatCurrency(selectedAppointment.payment.totalPaid)}
+                                  {formatCurrency((selectedAppointment as OPDAppointment).payment.totalPaid)}
                                 </p>
                               </div>
-                              {selectedAppointment.payment.discount > 0 && (
+                              {(selectedAppointment as OPDAppointment).payment.discount > 0 && (
                                 <div>
                                   <p className="text-sm text-gray-500">Discount</p>
-                                  <p className="font-medium text-green-600">₹{selectedAppointment.payment.discount}</p>
+                                  <p className="font-medium text-green-600">
+                                    ₹{(selectedAppointment as OPDAppointment).payment.discount}
+                                  </p>
                                 </div>
                               )}
                             </div>
                           </div>
-                          {selectedAppointment.message && (
+                          {(selectedAppointment as OPDAppointment).message && (
                             <div className="mt-4 p-3 bg-white rounded-lg border border-sky-200">
                               <p className="text-sm text-gray-500">Notes</p>
-                              <p className="font-medium">{selectedAppointment.message}</p>
+                              <p className="font-medium">{(selectedAppointment as OPDAppointment).message}</p>
                             </div>
                           )}
                         </div>
 
-                        {/* Services & Modalities */}
-                        {selectedAppointment.modalities && selectedAppointment.modalities.length > 0 && (
-                          <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 mb-6">
+                        {(selectedAppointment as OPDAppointment).modalities.length > 0 && (
+                          <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6">
                             <h3 className="text-lg font-semibold text-purple-800 mb-4 flex items-center">
-                              <FileText className="mr-2 h-5 w-5" />
-                              Services & Modalities
+                              <FileText className="mr-2 h-5 w-5" /> Services & Modalities
                             </h3>
                             <div className="space-y-3">
-                              {selectedAppointment.modalities.map((modality: IModality, index: number) => (
-                                <div key={index} className="border border-purple-200 rounded p-3 bg-white">
-                                  <div className="flex justify-between items-start mb-2">
-                                    <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium capitalize">
-                                      {modality.type}
-                                    </span>
-                                    <span className="font-semibold text-purple-700">₹{modality.charges}</span>
+                              {(selectedAppointment as OPDAppointment).modalities.map(
+                                (m: IModality, i: number) => (
+                                  <div key={i} className="border border-purple-200 rounded p-3 bg-white">
+                                    <div className="flex justify-between items-start mb-2">
+                                      <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs font-medium capitalize">
+                                        {m.type}
+                                      </span>
+                                      <span className="font-semibold text-purple-700">₹{m.charges}</span>
+                                    </div>
+                                    {m.doctor && (
+                                      <div className="text-xs text-gray-600">
+                                        <strong>Doctor:</strong> {m.doctor}
+                                      </div>
+                                    )}
+                                    {m.specialist && (
+                                      <div className="text-xs text-gray-600">
+                                        <strong>Specialist:</strong> {m.specialist}
+                                      </div>
+                                    )}
+                                    {m.service && (
+                                      <div className="text-xs text-gray-600">
+                                        <strong>Service:</strong> {m.service}
+                                      </div>
+                                    )}
+                                    {m.visitType && (
+                                      <div className="text-xs text-gray-600">
+                                        <strong>Visit Type:</strong> {m.visitType}
+                                      </div>
+                                    )}
                                   </div>
-                                  {modality.doctor && (
-                                    <div className="text-xs text-gray-600">
-                                      <strong>Doctor:</strong> {modality.doctor}
-                                    </div>
-                                  )}
-                                  {modality.specialist && (
-                                    <div className="text-xs text-gray-600">
-                                      <strong>Specialist:</strong> {modality.specialist}
-                                    </div>
-                                  )}
-                                  {modality.service && (
-                                    <div className="text-xs text-gray-600">
-                                      <strong>Service:</strong> {modality.service}
-                                    </div>
-                                  )}
-                                  {modality.visitType && (
-                                    <div className="text-xs text-gray-600">
-                                      <strong>Visit Type:</strong> {modality.visitType}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                                )
+                              )}
                             </div>
                             <div className="mt-4 p-4 bg-white rounded-lg border border-purple-200">
                               <div className="flex justify-between items-center text-lg font-semibold">
                                 <span className="text-purple-700">Total Charges:</span>
-                                <span className="text-purple-600">₹{selectedAppointment.payment.totalCharges}</span>
+                                <span className="text-purple-600">
+                                  ₹{(selectedAppointment as OPDAppointment).payment.totalCharges}
+                                </span>
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Payment Details */}
                         <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6">
                           <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center">
-                            <CreditCard className="mr-2 h-5 w-5" />
-                            Payment Details
+                            <CreditCard className="mr-2 h-5 w-5" /> Payment Details
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-2">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Cash Amount:</span>
                                 <span className="font-semibold text-green-700">
-                                  ₹{selectedAppointment.payment.cashAmount}
+                                  ₹{(selectedAppointment as OPDAppointment).payment.cashAmount}
                                 </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Online Amount:</span>
                                 <span className="font-semibold text-blue-700">
-                                  ₹{selectedAppointment.payment.onlineAmount}
+                                  ₹{(selectedAppointment as OPDAppointment).payment.onlineAmount}
                                 </span>
                               </div>
                             </div>
                             <div className="space-y-2">
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Total Charges:</span>
-                                <span className="font-semibold">₹{selectedAppointment.payment.totalCharges}</span>
+                                <span className="font-semibold">
+                                  ₹{(selectedAppointment as OPDAppointment).payment.totalCharges}
+                                </span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-gray-600">Discount:</span>
                                 <span className="font-semibold text-red-600">
-                                  ₹{selectedAppointment.payment.discount}
+                                  ₹{(selectedAppointment as OPDAppointment).payment.discount}
                                 </span>
                               </div>
                               <div className="flex justify-between border-t pt-2">
                                 <span className="text-green-700 font-bold">Total Paid:</span>
                                 <span className="font-bold text-green-600">
-                                  ₹{selectedAppointment.payment.totalPaid}
+                                  ₹{(selectedAppointment as OPDAppointment).payment.totalPaid}
                                 </span>
                               </div>
                             </div>
                           </div>
                         </div>
-                      </>
+                      </div>
                     )}
 
-                    {/* IPD Specific Details */}
+                    {/* IPD Details */}
                     {selectedAppointment.type === "IPD" && (
-                      <>
-                        {/* Services */}
-                        {selectedAppointment.services && selectedAppointment.services.length > 0 && (
-                          <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg p-6 mb-6">
+                      <div className="space-y-6">
+                        {(selectedAppointment as IPDAppointment).services.length > 0 && (
+                          <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg p-6">
                             <h3 className="text-lg font-semibold text-orange-800 mb-4 flex items-center">
-                              <FileText className="mr-2 h-5 w-5" />
-                              Services & Charges
+                              <FileText className="mr-2 h-5 w-5" /> Services & Charges
                             </h3>
                             <div className="overflow-x-auto">
                               <table className="min-w-full divide-y divide-orange-200">
@@ -1490,13 +1384,13 @@ const DashboardPage: React.FC = () => {
                                   </tr>
                                 </thead>
                                 <tbody className="bg-white divide-y divide-orange-100">
-                                  {(selectedAppointment.services ?? []).map((service: IPDService, index: number) => (
-                                    <tr key={index} className="hover:bg-orange-50">
-                                      <td className="px-4 py-2 text-sm text-gray-900">{service.serviceName}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-600 capitalize">{service.type}</td>
-                                      <td className="px-4 py-2 text-sm text-gray-600">{service.doctorName || "-"}</td>
+                                  {(selectedAppointment as IPDAppointment).services.map((s, i) => (
+                                    <tr key={i} className="hover:bg-orange-50">
+                                      <td className="px-4 py-2 text-sm text-gray-900">{s.serviceName}</td>
+                                      <td className="px-4 py-2 text-sm text-gray-600 capitalize">{s.type}</td>
+                                      <td className="px-4 py-2 text-sm text-gray-600">{s.doctorName || "-"}</td>
                                       <td className="px-4 py-2 text-sm font-medium text-orange-600">
-                                        {formatCurrency(service.amount)}
+                                        {formatCurrency(s.amount)}
                                       </td>
                                     </tr>
                                   ))}
@@ -1507,37 +1401,35 @@ const DashboardPage: React.FC = () => {
                               <div className="flex justify-between items-center text-lg font-semibold">
                                 <span className="text-orange-700">Total Service Amount:</span>
                                 <span className="text-orange-600">
-                                  {formatCurrency(selectedAppointment.totalAmount)}
+                                  {formatCurrency((selectedAppointment as IPDAppointment).totalAmount)}
                                 </span>
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Payment Details */}
-                        {selectedAppointment.payments && selectedAppointment.payments.length > 0 && (
-                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6 mb-6">
+                        {(selectedAppointment as IPDAppointment).payments.length > 0 && (
+                          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6">
                             <h3 className="text-lg font-semibold text-green-800 mb-4 flex items-center">
-                              <CreditCard className="mr-2 h-5 w-5" />
-                              Payment History
+                              <CreditCard className="mr-2 h-5 w-5" /> Payment History
                             </h3>
                             <div className="space-y-3">
-                              {selectedAppointment.payments.map((payment: IPDPayment, index: number) => (
+                              {(selectedAppointment as IPDAppointment).payments.map((p, i) => (
                                 <div
-                                  key={index}
+                                  key={i}
                                   className="flex justify-between items-center p-3 bg-white rounded-lg border border-green-200"
                                 >
                                   <div>
                                     <span className="font-medium text-green-700">
-                                      {payment.paymentType.toUpperCase()} - {payment.type.toUpperCase()}
+                                      {p.paymentType.toUpperCase()} - {p.type.toUpperCase()}
                                     </span>
-                                    {payment.date && (
+                                    {p.date && (
                                       <p className="text-sm text-gray-500">
-                                        {format(new Date(payment.date), "dd MMM, yyyy")}
+                                        {format(new Date(p.date), "dd MMM, yyyy")}
                                       </p>
                                     )}
                                   </div>
-                                  <span className="font-bold text-green-600">{formatCurrency(payment.amount)}</span>
+                                  <span className="font-bold text-green-600">{formatCurrency(p.amount)}</span>
                                 </div>
                               ))}
                             </div>
@@ -1546,48 +1438,44 @@ const DashboardPage: React.FC = () => {
                                 <div className="flex justify-between items-center">
                                   <span className="text-green-700">Total Paid:</span>
                                   <span className="font-bold text-green-600">
-                                    {formatCurrency(selectedAppointment.totalDeposit)}
+                                    {formatCurrency((selectedAppointment as IPDAppointment).totalDeposit)}
                                   </span>
                                 </div>
-                                {selectedAppointment.remainingAmount !== undefined &&
-                                  selectedAppointment.remainingAmount > 0 && (
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-red-700">Remaining:</span>
-
-                                      <span className="font-bold text-red-600">
-                                      {formatCurrency(selectedAppointment.remainingAmount ?? 0)}
-                                      </span>
-                                    </div>
-                                  )}
+                                {(selectedAppointment as IPDAppointment).remainingAmount! > 0 && (
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-red-700">Remaining:</span>
+                                    <span className="font-bold text-red-600">
+                                      {formatCurrency((selectedAppointment as IPDAppointment).remainingAmount!)}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* NEW: Financial Summary */}
                         <div className="bg-gradient-to-r from-blue-50 to-sky-50 rounded-lg p-6">
                           <h3 className="text-lg font-semibold text-blue-800 mb-4 flex items-center">
-                            <DollarSign className="mr-2 h-5 w-5" />
-                            Financial Summary
+                            <DollarSign className="mr-2 h-5 w-5" /> Financial Summary
                           </h3>
                           <div className="space-y-3">
                             <div className="flex justify-between items-center">
                               <span className="text-gray-600">Total Services:</span>
                               <span className="font-semibold text-blue-700">
-                                {formatCurrency(selectedAppointment.totalAmount)}
+                                {formatCurrency((selectedAppointment as IPDAppointment).totalAmount)}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-gray-600">Total Net Payments:</span>
                               <span className="font-semibold text-green-700">
-                                {formatCurrency(selectedAppointment.totalDeposit)}
+                                {formatCurrency((selectedAppointment as IPDAppointment).totalDeposit)}
                               </span>
                             </div>
-                            {selectedAppointment.totalRefunds > 0 && (
+                            {(selectedAppointment as IPDAppointment).totalRefunds > 0 && (
                               <div className="flex justify-between items-center">
                                 <span className="text-gray-600">Total Refunds Issued:</span>
                                 <span className="font-semibold text-red-600">
-                                  {formatCurrency(selectedAppointment.totalRefunds)}
+                                  {formatCurrency((selectedAppointment as IPDAppointment).totalRefunds)}
                                 </span>
                               </div>
                             )}
@@ -1595,38 +1483,49 @@ const DashboardPage: React.FC = () => {
                               <span className="text-blue-800 font-bold text-lg">Net Balance:</span>
                               <span
                                 className={`font-bold text-xl ${
-                                  selectedAppointment.totalAmount - selectedAppointment.totalDeposit > 0
+                                  (selectedAppointment as IPDAppointment).totalAmount -
+                                    (selectedAppointment as IPDAppointment).totalDeposit >
+                                  0
                                     ? "text-red-600"
-                                    : selectedAppointment.totalAmount - selectedAppointment.totalDeposit < 0
-                                      ? "text-green-600"
-                                      : "text-gray-800"
+                                    : (selectedAppointment as IPDAppointment).totalAmount -
+                                        (selectedAppointment as IPDAppointment).totalDeposit <
+                                      0
+                                    ? "text-green-600"
+                                    : "text-gray-800"
                                 }`}
                               >
-                                {formatCurrency(selectedAppointment.totalAmount - selectedAppointment.totalDeposit)}
-                                {selectedAppointment.totalAmount - selectedAppointment.totalDeposit > 0
+                                {formatCurrency(
+                                  (selectedAppointment as IPDAppointment).totalAmount -
+                                    (selectedAppointment as IPDAppointment).totalDeposit
+                                )}
+                                {((selectedAppointment as IPDAppointment).totalAmount -
+                                  (selectedAppointment as IPDAppointment).totalDeposit) >
+                                0
                                   ? " (Due)"
-                                  : selectedAppointment.totalAmount - selectedAppointment.totalDeposit < 0
-                                    ? " (Refundable)"
-                                    : ""}
+                                  : (selectedAppointment as IPDAppointment).totalAmount -
+                                      (selectedAppointment as IPDAppointment).totalDeposit <
+                                    0
+                                  ? " (Refundable)"
+                                  : ""}
                               </span>
                             </div>
                           </div>
                         </div>
-                      </>
+                      </div>
                     )}
 
-                    {/* OT Specific Details */}
+                    {/* OT Details */}
                     {selectedAppointment.type === "OT" && (
                       <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6">
                         <h3 className="text-lg font-semibold text-purple-800 mb-4">OT Details</h3>
                         <div className="space-y-3">
                           <div>
                             <p className="text-sm text-gray-500">Time</p>
-                            <p className="font-medium">{selectedAppointment.time || "-"}</p>
+                            <p className="font-medium">{(selectedAppointment as OTAppointment).time}</p>
                           </div>
                           <div>
                             <p className="text-sm text-gray-500">Procedure Notes</p>
-                            <p className="font-medium">{selectedAppointment.message || "-"}</p>
+                            <p className="font-medium">{(selectedAppointment as OTAppointment).message}</p>
                           </div>
                         </div>
                       </div>
@@ -1642,5 +1541,4 @@ const DashboardPage: React.FC = () => {
   )
 }
 
-// export default DashboardPageWithProtection
 export default DashboardPage
