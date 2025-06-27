@@ -467,15 +467,21 @@ const DashboardPage: React.FC = () => {
     const ipdCash = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments.filter((p) => p.paymentType === "cash" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+        a.payments
+          .filter((p) => p.paymentType === "cash" && p.type === "advance")
+          .reduce((s, p) => s + Number(p.amount), 0),
       0,
     )
+    
     const ipdOnline = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments.filter((p) => p.paymentType === "online" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+        a.payments
+          .filter((p) => p.paymentType === "online" && p.type === "advance")
+          .reduce((s, p) => s + Number(p.amount), 0), // <--- use Number()
       0,
     )
+    
     return {
       totalOpdCount: opdAppointments.length,
       totalOpdAmount: totalOpdAmt,
