@@ -15,23 +15,22 @@ import {
   PillIcon as Pills,
   User,
   Users,
-  MapPin,  
+  MapPin,
   Stethoscope,
   Clipboard,
   ArrowLeft,
   TrendingUp,
   Building2,
   FileCheck,
+  DollarSign,
+  ListChecks,
+  HeartPulse,
+  Syringe,
+  NotebookPen,
+  ScrollText,
 } from "lucide-react"
 
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardFooter,
-} from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -54,7 +53,7 @@ interface IModality {
   charges: number
   doctor?: string
   specialist?: string
-  type: "consultation" | "casualty" | "xray"
+  type: "consultation" | "casualty" | "xray" | "custom"
   visitType?: string
   service?: string
 }
@@ -67,6 +66,7 @@ interface IPayment {
   paymentMethod: string
   totalCharges: number
   totalPaid: number
+  updatedAt?: string
 }
 
 interface IOPDRecord {
@@ -88,6 +88,62 @@ interface IOPDRecord {
   visitType: string
 }
 
+interface IPaymentDetail {
+  amount: number | string
+  createdAt: string
+  date: string
+  paymentType: string
+  type: string
+  id?: string
+}
+
+interface IServiceDetail {
+  amount: number
+  createdAt: string
+  doctorName?: string
+  serviceName: string
+  type: string
+}
+
+interface IChargeSheetEntry {
+  description: string
+  doneBy: string
+  enteredBy: string
+  timestamp: string
+}
+
+interface IDoctorVisitEntry {
+  dateTime: string
+  doctorName: string
+  enteredBy: string
+}
+
+interface IInvestigationEntry {
+  dateTime: string
+  type: string
+  value: string
+}
+
+interface IProgressNoteEntry {
+  enteredBy: string
+  note: string
+  timestamp: string
+}
+
+interface IVitalObservationEntry {
+  bloodPressure?: string
+  dateTime: string
+  enteredBy: string
+  intakeIV?: string
+  intakeOral?: string
+  outputAspiration?: string
+  outputStool?: string
+  outputUrine?: string
+  pulse?: string
+  respiratoryRate?: string
+  temperature?: string
+}
+
 interface IIPDRecord {
   id: string
   admissionDate?: string
@@ -96,18 +152,31 @@ interface IIPDRecord {
   admissionType?: string
   bed?: string
   createdAt?: string
-  doctor?: string
+  doctor?: string // Doctor ID
   name?: string
   referDoctor?: string
   relativeAddress?: string
   relativeName?: string
   relativePhone?: string
   roomType?: string
-  services?: any[]
+  services?: IServiceDetail[] // Services from userinfoipd (initial)
   status?: string
   uhid?: string
   dischargeDate?: string
   discount?: number
+  // New fields from userbillinginfoipd
+  advanceDeposit?: number | string
+  totalDeposit?: number
+  paymentMode?: string
+  payments?: IPaymentDetail[]
+  billingServices?: IServiceDetail[] // Services from userbillinginfoipd
+  // New fields from userdetailipd
+  dischargesummery?: { lastUpdated: string }
+  chargeSheets?: IChargeSheetEntry[]
+  doctorvisit?: IDoctorVisitEntry[]
+  investigationsheet?: { testName: string; entries: IInvestigationEntry[] }[]
+  progressNotes?: IProgressNoteEntry[]
+  vitalobservation?: IVitalObservationEntry[]
 }
 
 interface IOTRecord {
@@ -184,62 +253,147 @@ export default function PatientDetailsPage() {
       }
 
       // Fetch OPD records
-      const opdRef = ref(db, `patients/opddetail/${id}`)
+      const opdRef = ref(db, `patients/opddetail`) // Fetch all opd records
       const opdSnap = await get(opdRef)
       const opdData: IOPDRecord[] = []
       if (opdSnap.exists()) {
-        Object.entries(opdSnap.val()).forEach(([key, val]: [string, any]) => {
-          opdData.push({
-            id: key,
-            patientId: id,
-            name: val.name || "",
-            phone: val.phone || "",
-            appointmentType: val.appointmentType || "",
-            createdAt: val.createdAt || "",
-            date: val.date || "",
-            enteredBy: val.enteredBy || "",
-            message: val.message || "",
-            modalities: val.modalities || [],
-            opdType: val.opdType || "",
-            payment: val.payment || {
-              cashAmount: 0,
-              createdAt: "",
-              discount: 0,
-              onlineAmount: 0,
-              paymentMethod: "cash",
-              totalCharges: 0,
-              totalPaid: 0,
-            },
-            referredBy: val.referredBy || "",
-            study: val.study || "",
-            time: val.time || "",
-            visitType: val.visitType || "",
-          })
-        })
+        const allOpdByDate = opdSnap.val()
+        for (const dateKey in allOpdByDate) {
+          const uhidRecords = allOpdByDate[dateKey]
+          if (uhidRecords[id]) {
+            // Filter by current patient's UHID
+            for (const recordId in uhidRecords[id]) {
+              const val = uhidRecords[id][recordId]
+              opdData.push({
+                id: recordId,
+                patientId: id,
+                name: val.name || "",
+                phone: val.phone || "",
+                appointmentType: val.appointmentType || "",
+                createdAt: val.createdAt || "",
+                date: val.date || "",
+                enteredBy: val.enteredBy || "",
+                message: val.message || "",
+                modalities: val.modalities || [],
+                opdType: val.opdType || "",
+                payment: val.payment || {
+                  cashAmount: 0,
+                  createdAt: "",
+                  discount: 0,
+                  onlineAmount: 0,
+                  paymentMethod: "cash",
+                  totalCharges: 0,
+                  totalPaid: 0,
+                },
+                referredBy: val.referredBy || "",
+                study: val.study || "",
+                time: val.time || "",
+                visitType: val.visitType || "",
+              })
+            }
+          }
+        }
       }
       opdData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       setOpdRecords(opdData)
 
       // Fetch IPD records
-      const ipdRef = ref(db, `patients/ipddetail/userinfoipd/${id}`)
-      const ipdSnap = await get(ipdRef)
-      const ipdData: IIPDRecord[] = []
-      if (ipdSnap.exists()) {
-        Object.entries(ipdSnap.val()).forEach(([key, val]: [string, any]) => {
-          ipdData.push({ id: key, ...val })
-        })
+      const ipdUserInfoRef = ref(db, `patients/ipddetail/userinfoipd`)
+      const ipdUserInfoSnap = await get(ipdUserInfoRef)
+      const allIpdUserInfo: Record<string, Record<string, Record<string, any>>> = ipdUserInfoSnap.exists()
+        ? ipdUserInfoSnap.val()
+        : {}
+
+      const ipdBillingInfoRef = ref(db, `patients/ipddetail/userbillinginfoipd`)
+      const ipdBillingInfoSnap = await get(ipdBillingInfoRef)
+      const allIpdBillingInfo: Record<string, Record<string, Record<string, any>>> = ipdBillingInfoSnap.exists()
+        ? ipdBillingInfoSnap.val()
+        : {}
+
+      const ipdDetailInfoRef = ref(db, `patients/ipddetail/userdetailipd`)
+      const ipdDetailInfoSnap = await get(ipdDetailInfoRef)
+      const allIpdDetailInfo: Record<string, Record<string, Record<string, any>>> = ipdDetailInfoSnap.exists()
+        ? ipdDetailInfoSnap.val()
+        : {}
+
+      const patientIpdRecords: IIPDRecord[] = []
+      const ipdIdMap: Record<string, IIPDRecord> = {} // To consolidate by ipdId
+
+      // Process userinfoipd first as it contains core admission details
+      for (const dateKey in allIpdUserInfo) {
+        const uhidRecords = allIpdUserInfo[dateKey]
+        if (uhidRecords[id]) {
+          // Check if current patient's UHID exists for this date
+          for (const ipdId in uhidRecords[id]) {
+            const record = uhidRecords[id][ipdId]
+            ipdIdMap[ipdId] = { id: ipdId, ...record }
+          }
+        }
       }
-      ipdData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
-      setIpdRecords(ipdData)
+
+      // Now merge billing and detailed info
+      for (const dateKey in allIpdBillingInfo) {
+        const uhidRecords = allIpdBillingInfo[dateKey]
+        if (uhidRecords[id]) {
+          for (const ipdId in uhidRecords[id]) {
+            const billingRecord = uhidRecords[id][ipdId]
+            if (ipdIdMap[ipdId]) {
+              ipdIdMap[ipdId] = {
+                ...ipdIdMap[ipdId],
+                totalDeposit: billingRecord.totalDeposit,
+                paymentMode: billingRecord.paymentMode,
+                payments: Object.values(billingRecord.payments || {}),
+                billingServices: billingRecord.services || [], // Renamed to avoid conflict with initial services
+                discount: billingRecord.discount,
+              }
+            }
+          }
+        }
+      }
+
+      for (const dateKey in allIpdDetailInfo) {
+        const uhidRecords = allIpdDetailInfo[dateKey]
+        if (uhidRecords[id]) {
+          for (const ipdId in uhidRecords[id]) {
+            const detailRecord = uhidRecords[id][ipdId]
+            if (ipdIdMap[ipdId]) {
+              ipdIdMap[ipdId] = {
+                ...ipdIdMap[ipdId],
+                dischargesummery: detailRecord.dischargesummery,
+                chargeSheets: Object.values(detailRecord.chargeSheets || {}),
+                doctorvisit: Object.values(detailRecord.doctorvisit || {}),
+                investigationsheet: Object.values(detailRecord.investigationsheet || {}),
+                progressNotes: Object.values(detailRecord.progressNotes || {}),
+                vitalobservation: Object.values(detailRecord.vitalobservation || {}),
+              }
+            }
+          }
+        }
+      }
+
+      // Convert map to array and sort
+      for (const ipdId in ipdIdMap) {
+        patientIpdRecords.push(ipdIdMap[ipdId])
+      }
+      patientIpdRecords.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      setIpdRecords(patientIpdRecords)
 
       // Fetch OT records
-      const otRef = ref(db, `patients/ot/otdetail/${id}`)
+      const otRef = ref(db, `patients/ot/otdetail`) // Fetch all ot records
       const otSnap = await get(otRef)
       const otData: IOTRecord[] = []
       if (otSnap.exists()) {
-        Object.entries(otSnap.val()).forEach(([key, val]: [string, any]) => {
-          otData.push({ id: key, ...val })
-        })
+        const allOtByDate = otSnap.val()
+        for (const dateKey in allOtByDate) {
+          const uhidRecords = allOtByDate[dateKey]
+          if (uhidRecords[id]) {
+            // Filter by current patient's UHID
+            for (const recordId in uhidRecords[id]) {
+              const val = uhidRecords[id][recordId]
+              otData.push({ id: recordId, ...val })
+            }
+          }
+        }
       }
       otData.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
       setOtRecords(otData)
@@ -247,18 +401,21 @@ export default function PatientDetailsPage() {
       // Compute stats
       const totalAmount =
         opdData.reduce((sum, r) => sum + (r.payment?.totalPaid || 0), 0) +
-        ipdData.reduce((sum, r) => {
-          const services: any[] = r.services || []
-          return sum + services.reduce((s, svc) => s + (svc.amount || 0), 0)
+        patientIpdRecords.reduce((sum, r) => {
+          const services: any[] = r.billingServices || [] // Use billingServices for total amount
+          const payments: any[] = r.payments || []
+          const totalServicesAmount = services.reduce((s, svc) => s + (svc.amount || 0), 0)
+          const totalPaymentsAmount = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+          return sum + totalServicesAmount + totalPaymentsAmount // Sum up services and payments for IPD
         }, 0)
       setStats({
         totalOPD: opdData.length,
-        totalIPD: ipdData.length,
+        totalIPD: patientIpdRecords.length,
         totalOT: otData.length,
         totalAmount,
       })
     } catch (e) {
-      console.error(e)
+      console.error("Error fetching patient data:", e)
     } finally {
       setLoading(false)
     }
@@ -276,7 +433,7 @@ export default function PatientDetailsPage() {
     return isValid(dt) ? format(dt, "MMM dd, yyyy 'at' hh:mm a") : "Invalid Date"
   }
 
-  const getInitials = (name: string = "") =>
+  const getInitials = (name = "") =>
     name
       .split(" ")
       .map((p) => p[0])
@@ -327,12 +484,7 @@ export default function PatientDetailsPage() {
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.back()}
-            className="flex items-center gap-2"
-          >
+          <Button variant="outline" size="sm" onClick={() => router.back()} className="flex items-center gap-2">
             <ArrowLeft className="h-4 w-4" /> Back
           </Button>
           <div>
@@ -362,7 +514,9 @@ export default function PatientDetailsPage() {
                       patientInfo.gender === "male" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"
                     }`}
                   >
-                    {patientInfo.gender ? `${patientInfo.gender[0].toUpperCase()}${patientInfo.gender.slice(1)}, ${patientInfo.age} yrs` : "Gender not specified"}
+                    {patientInfo.gender
+                      ? `${patientInfo.gender[0].toUpperCase()}${patientInfo.gender.slice(1)}, ${patientInfo.age} yrs`
+                      : "Gender not specified"}
                   </Badge>
                 </div>
               </div>
@@ -473,7 +627,7 @@ export default function PatientDetailsPage() {
                     {opdRecords.slice(0, 3).map((r) => (
                       <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                         <div>
-                          <p className="font-medium">{r.appointmentType}</p>
+                          <p className="font-medium">{r.appointmentType || r.opdType || "OPD Visit"}</p>
                           <p className="text-sm text-slate-600">{formatDate(r.date)}</p>
                         </div>
                         <Badge variant="outline">₹{r.payment.totalPaid}</Badge>
@@ -527,7 +681,7 @@ export default function PatientDetailsPage() {
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start">
                         <CardTitle className="text-lg font-semibold text-slate-900">
-                          {record.appointmentType || "OPD Visit"}
+                          {record.appointmentType || record.opdType || "OPD Visit"}
                         </CardTitle>
                         <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
                           ₹{record.payment.totalPaid}
@@ -633,14 +787,14 @@ export default function PatientDetailsPage() {
                     <CardHeader className="pb-3">
                       <div className="flex justify-between items-start">
                         <CardTitle className="text-lg font-semibold text-slate-900">
-                          {roomTypeMap[record.roomType || ""] || record.roomType}
+                          {roomTypeMap[record.roomType || ""] || record.roomType || "IPD Admission"}
                         </CardTitle>
                         <Badge
                           variant={
                             record.roomType === "icu" || record.roomType === "nicu" ? "destructive" : "secondary"
                           }
                         >
-                          {record.roomType?.toUpperCase()}
+                          {record.status?.toUpperCase() || "N/A"}
                         </Badge>
                       </div>
                       <CardDescription className="flex items-center gap-2">
@@ -649,46 +803,212 @@ export default function PatientDetailsPage() {
                       </CardDescription>
                     </CardHeader>
 
-                    <CardContent className="space-y-3 text-sm">
-                      <div className="flex items-center gap-2">
-                        <User className="h-4 w-4 text-slate-500" />
-                        <span>
-                          <strong>Doctor:</strong> {doctors[record.doctor || ""]?.name || "Not assigned"}
-                        </span>
-                      </div>
-                      {record.referDoctor && (
+                    <CardContent className="space-y-4 text-sm">
+                      <div className="grid gap-2">
                         <div className="flex items-center gap-2">
-                          <Stethoscope className="h-4 w-4 text-slate-500" />
+                          <User className="h-4 w-4 text-slate-500" />
                           <span>
-                            <strong>Referred by:</strong> {record.referDoctor}
+                            <strong>Doctor:</strong> {doctors[record.doctor || ""]?.name || "Not assigned"}
                           </span>
                         </div>
+                        {record.referDoctor && (
+                          <div className="flex items-center gap-2">
+                            <Stethoscope className="h-4 w-4 text-slate-500" />
+                            <span>
+                              <strong>Referred by:</strong> {record.referDoctor}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-slate-500" />
+                          <span>
+                            <strong>Relative:</strong> {record.relativeName || "N/A"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-slate-500" />
+                          <span>
+                            <strong>Contact:</strong> {record.relativePhone || "N/A"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-slate-500" />
+                          <span>
+                            <strong>Time:</strong> {record.admissionTime || "N/A"}
+                          </span>
+                        </div>
+                        {record.dischargeDate && (
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-slate-500" />
+                            <span>
+                              <strong>Discharged:</strong> {formatDate(record.dischargeDate)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {(record.payments && record.payments.length > 0) ||
+                      (record.billingServices && record.billingServices.length > 0) ? (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <DollarSign className="h-4 w-4 text-purple-600" /> Billing & Payments
+                            </p>
+                            {record.totalDeposit !== undefined && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <strong>Total Deposit:</strong> ₹{record.totalDeposit?.toLocaleString() || 0}
+                              </div>
+                            )}
+                            {record.discount !== undefined && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <strong>Discount:</strong> ₹{record.discount?.toLocaleString() || 0}
+                              </div>
+                            )}
+                            {record.paymentMode && (
+                              <div className="flex items-center gap-2 text-xs">
+                                <strong>Payment Mode:</strong> {record.paymentMode}
+                              </div>
+                            )}
+                            {record.payments && record.payments.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="font-medium text-xs">Payments:</p>
+                                <ul className="list-disc list-inside text-xs space-y-0.5">
+                                  {record.payments.map((p, i) => (
+                                    <li key={i}>
+                                      {p.type} ({p.paymentType}): ₹{Number(p.amount).toLocaleString()} on{" "}
+                                      {formatDate(p.date)}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            {record.billingServices && record.billingServices.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="font-medium text-xs">Services:</p>
+                                <ul className="list-disc list-inside text-xs space-y-0.5">
+                                  {record.billingServices.map((s, i) => (
+                                    <li key={i}>
+                                      {s.serviceName} ({s.type}): ₹{s.amount.toLocaleString()}{" "}
+                                      {s.doctorName && `by ${s.doctorName}`}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : null}
+
+                      {record.chargeSheets && record.chargeSheets.length > 0 && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <ListChecks className="h-4 w-4 text-blue-600" /> Charge Sheets
+                            </p>
+                            <ul className="list-disc list-inside text-xs space-y-1">
+                              {record.chargeSheets.map((cs, i) => (
+                                <li key={i}>
+                                  {cs.description} (Done by: {cs.doneBy}) on {formatDateTime(cs.timestamp)}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
                       )}
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-slate-500" />
-                        <span>
-                          <strong>Relative:</strong> {record.relativeName}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-slate-500" />
-                        <span>
-                          <strong>Contact:</strong> {record.relativePhone}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-slate-500" />
-                        <span>
-                          <strong>Time:</strong> {record.admissionTime}
-                        </span>
-                      </div>
-                      {record.dischargeDate && (
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4 text-slate-500" />
-                          <span>
-                            <strong>Discharged:</strong> {formatDate(record.dischargeDate)}
-                          </span>
-                        </div>
+
+                      {record.doctorvisit && record.doctorvisit.length > 0 && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <Stethoscope className="h-4 w-4 text-green-600" /> Doctor Visits
+                            </p>
+                            <ul className="list-disc list-inside text-xs space-y-1">
+                              {record.doctorvisit.map((dv, i) => (
+                                <li key={i}>
+                                  {dv.doctorName} on {formatDateTime(dv.dateTime)}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      )}
+
+                      {record.investigationsheet && record.investigationsheet.length > 0 && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <Syringe className="h-4 w-4 text-red-600" /> Investigations
+                            </p>
+                            <ul className="list-disc list-inside text-xs space-y-1">
+                              {record.investigationsheet.map((inv, i) => (
+                                <li key={i}>
+                                  <strong>{inv.testName}:</strong>{" "}
+                                  {inv.entries.map((e, j) => (
+                                    <span key={j}>
+                                      {e.value} ({e.type}) on {formatDateTime(e.dateTime)}
+                                      {j < inv.entries.length - 1 ? "; " : ""}
+                                    </span>
+                                  ))}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      )}
+
+                      {record.progressNotes && record.progressNotes.length > 0 && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <NotebookPen className="h-4 w-4 text-orange-600" /> Progress Notes
+                            </p>
+                            <ul className="list-disc list-inside text-xs space-y-1">
+                              {record.progressNotes.map((pn, i) => (
+                                <li key={i}>
+                                  {pn.note} (Entered by: {pn.enteredBy}) on {formatDateTime(pn.timestamp)}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      )}
+
+                      {record.vitalobservation && record.vitalobservation.length > 0 && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <HeartPulse className="h-4 w-4 text-pink-600" /> Vital Observations
+                            </p>
+                            <ul className="list-disc list-inside text-xs space-y-1">
+                              {record.vitalobservation.map((vo, i) => (
+                                <li key={i}>
+                                  BP: {vo.bloodPressure || "N/A"}, Pulse: {vo.pulse || "N/A"}, Temp:{" "}
+                                  {vo.temperature || "N/A"} on {formatDateTime(vo.dateTime)}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </>
+                      )}
+
+                      {record.dischargesummery && (
+                        <>
+                          <Separator />
+                          <div className="grid gap-2">
+                            <p className="text-sm font-semibold flex items-center gap-2">
+                              <ScrollText className="h-4 w-4 text-teal-600" /> Discharge Summary
+                            </p>
+                            <p className="text-xs">
+                              Last Updated: {formatDateTime(record.dischargesummery.lastUpdated)}
+                            </p>
+                          </div>
+                        </>
                       )}
                     </CardContent>
 
@@ -696,22 +1016,22 @@ export default function PatientDetailsPage() {
 
                     <CardFooter className="flex flex-wrap gap-2 py-3">
                       <Link href={`/manage/${id}/${record.id}`}>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-transparent">
                           <Clipboard className="h-3.5 w-3.5" /> Manage
                         </Button>
                       </Link>
                       <Link href={`/drugchart/${id}/${record.id}`}>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-transparent">
                           <Pills className="h-3.5 w-3.5" /> Drugs
                         </Button>
                       </Link>
                       <Link href={`/billing/${id}/${record.id}`}>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-transparent">
                           <CreditCard className="h-3.5 w-3.5" /> Billing
                         </Button>
                       </Link>
                       <Link href={`/discharge-summary/${id}/${record.id}`}>
-                        <Button variant="outline" size="sm" className="flex items-center gap-1">
+                        <Button variant="outline" size="sm" className="flex items-center gap-1 bg-transparent">
                           <FileCheck className="h-3.5 w-3.5" /> Discharge
                         </Button>
                       </Link>
@@ -787,7 +1107,7 @@ export default function PatientDetailsPage() {
                     <Separator />
 
                     <CardFooter className="flex justify-end py-3">
-                      <Button variant="outline" size="sm" className="flex items-center gap-1">
+                      <Button variant="outline" size="sm" className="flex items-center gap-1 bg-transparent">
                         View Details
                       </Button>
                     </CardFooter>

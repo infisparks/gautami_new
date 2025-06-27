@@ -73,6 +73,7 @@ interface PaymentForm {
   paymentAmount: number
   paymentType: string
   type: string
+  sendWhatsappNotification: boolean // NEW: Added for WhatsApp checkbox
 }
 
 interface DiscountForm {
@@ -138,6 +139,7 @@ const paymentSchema = yup
       .required("Amount is required"),
     paymentType: yup.string().required("Payment Type is required"),
     type: yup.string().required("Type is required"),
+    sendWhatsappNotification: yup.boolean().required(), // NEW: Added validation for checkbox
   })
   .required()
 
@@ -227,7 +229,7 @@ export default function BillingPage() {
     reset: resetPayment,
   } = useForm<PaymentForm>({
     resolver: yupResolver(paymentSchema),
-    defaultValues: { paymentAmount: 0, paymentType: "cash", type: "advance" },
+    defaultValues: { paymentAmount: 0, paymentType: "cash", type: "advance", sendWhatsappNotification: false }, // UPDATED: Added default for new field
   })
 
   // Discount Form
@@ -689,14 +691,16 @@ export default function BillingPage() {
       )
       await update(recordRef, { totalDeposit: updatedDeposit })
 
-      // Optional: send payment notification
-      await sendPaymentNotification(
-        selectedRecord.mobileNumber,
-        selectedRecord.name,
-        newPayment.amount,
-        updatedDeposit,
-        newPayment.type,
-      )
+      // Optional: send payment notification based on checkbox
+      if (formData.sendWhatsappNotification) {
+        await sendPaymentNotification(
+          selectedRecord.mobileNumber,
+          selectedRecord.name,
+          newPayment.amount,
+          updatedDeposit,
+          newPayment.type,
+        )
+      }
 
       toast.success("Payment recorded successfully!")
       // To ensure the UI updates correctly, we need to fetch the new payment ID
@@ -704,7 +708,7 @@ export default function BillingPage() {
       const updatedPayments = [newPayment, ...selectedRecord.payments] // newPayment already has the ID
       const updatedRecord = { ...selectedRecord, payments: updatedPayments, amount: updatedDeposit }
       setSelectedRecord(updatedRecord)
-      resetPayment({ paymentAmount: 0, paymentType: "cash", type: "advance" })
+      resetPayment({ paymentAmount: 0, paymentType: "cash", type: "advance", sendWhatsappNotification: false }) // UPDATED: Reset checkbox
     } catch (error) {
       console.error("Error recording payment:", error)
       toast.error("Failed to record payment. Please try again.")
@@ -1739,6 +1743,28 @@ export default function BillingPage() {
                                   <p className="text-red-500 text-xs mt-1">{errorsPayment.type.message}</p>
                                 )}
                               </div>
+                              {/* NEW: WhatsApp Notification Checkbox */}
+                              <div>
+                                <div className="flex items-center mt-4">
+                                  <input
+                                    type="checkbox"
+                                    id="sendWhatsappNotification"
+                                    {...registerPayment("sendWhatsappNotification")}
+                                    className="h-4 w-4 text-teal-600 focus:ring-teal-500 border-gray-300 rounded"
+                                  />
+                                  <label
+                                    htmlFor="sendWhatsappNotification"
+                                    className="ml-2 block text-sm text-gray-900"
+                                  >
+                                    Send message on WhatsApp
+                                  </label>
+                                </div>
+                                {errorsPayment.sendWhatsappNotification && (
+                                  <p className="text-red-500 text-xs mt-1">
+                                    {errorsPayment.sendWhatsappNotification.message}
+                                  </p>
+                                )}
+                              </div>
                               <button
                                 type="submit"
                                 disabled={loading}
@@ -1982,10 +2008,8 @@ export default function BillingPage() {
           </AnimatePresence>
         ) : (
           <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="w-16 h-16 border-4 border-t-teal-500 border-gray-200 rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-gray-500">Loading patient record...</p>
-            </div>
+            <div className="w-16 h-16 border-4 border-t-teal-500 border-gray-200 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-500">Loading patient record...</p>
           </div>
         )}
       </main>
