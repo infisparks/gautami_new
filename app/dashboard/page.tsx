@@ -1,18 +1,12 @@
 "use client"
 
-import React, { useEffect, useState, useMemo, useCallback } from "react"
+import type React from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { db } from "@/lib/firebase"
 import { ref, get } from "firebase/database"
 import { format, differenceInDays, addDays } from "date-fns"
 import { Bar } from "react-chartjs-2"
-import {
-  Chart as ChartJS,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-} from "chart.js"
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from "chart.js"
 import { ToastContainer, toast } from "react-toastify"
 import "react-toastify/dist/ReactToastify.css"
 import { Dialog } from "@headlessui/react"
@@ -202,6 +196,13 @@ const DashboardPage: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false)
   const [modalLoading, setModalLoading] = useState<boolean>(false)
 
+  // New states for patient search and appointments modal
+  const [searchedPatients, setSearchedPatients] = useState<PatientInfo[]>([])
+  const [selectedPatientForAppointments, setSelectedPatientForAppointments] = useState<PatientInfo | null>(null)
+  const [patientAppointmentsModalOpen, setPatientAppointmentsModalOpen] = useState<boolean>(false)
+  const [patientAppointmentsLoading, setPatientAppointmentsLoading] = useState<boolean>(false)
+  const [patientAllAppointments, setPatientAllAppointments] = useState<CombinedAppointment[]>([])
+
   // Compute current date range
   const currentDateRange = useMemo(() => {
     switch (filters.filterType) {
@@ -245,22 +246,54 @@ const DashboardPage: React.FC = () => {
       } catch {}
       return null
     },
-    [patientCache]
+    [patientCache],
   )
 
-  // Fetch appointments when date range changes
+  // Fetch appointments or search patients when date range or search query changes
   useEffect(() => {
     const fetchAll = async () => {
+      setIsLoading(true)
+      setOpdAppointments([]) // Clear previous data
+      setIpdAppointments([])
+      setOtAppointments([])
+      setSearchedPatients([]) // Clear previous search results
+
+      if (filters.searchQuery) {
+        // Search mode: Query patientinfo
+        const q = filters.searchQuery.toLowerCase()
+        const patientInfoRef = ref(db, "patients/patientinfo")
+        const patientSnap = await get(patientInfoRef) // Fetch all patientinfo for client-side filtering
+
+        if (patientSnap.exists()) {
+          const allPatients: PatientInfo[] = []
+          patientSnap.forEach((childSnap) => {
+            const data = childSnap.val()
+            allPatients.push({
+              uhid: data.uhid,
+              name: data.name,
+              phone: data.phone,
+              age: data.age || 0,
+              address: data.address || "",
+              gender: data.gender || "",
+            })
+          })
+
+          const matchingPatients = allPatients.filter(
+            (p) => p.name.toLowerCase().includes(q) || p.phone.includes(q) || p.uhid.toLowerCase().includes(q),
+          )
+          setSearchedPatients(matchingPatients)
+        }
+        setIsLoading(false)
+        return // Exit, as we are in search mode
+      }
+
+      // Default mode: Fetch appointments by date range
       const { start, end } = currentDateRange
       if (!start || !end) {
-        setOpdAppointments([])
-        setIpdAppointments([])
-        setOtAppointments([])
         setIsLoading(false)
         return
       }
 
-      setIsLoading(true)
       const tempOpd: OPDAppointment[] = []
       const tempIpd: IPDAppointment[] = []
       const tempOt: OTAppointment[] = []
@@ -406,7 +439,7 @@ const DashboardPage: React.FC = () => {
                 }
               }
             }
-          })()
+          })(),
         )
         dt.setDate(dt.getDate() + 1)
       }
@@ -419,7 +452,7 @@ const DashboardPage: React.FC = () => {
     }
 
     fetchAll()
-  }, [currentDateRange, doctors, fetchPatientInfo])
+  }, [filters.searchQuery, currentDateRange, doctors, fetchPatientInfo])
 
   // Statistics
   const statistics = useMemo(() => {
@@ -431,18 +464,14 @@ const DashboardPage: React.FC = () => {
     const ipdCash = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments
-          .filter((p) => p.paymentType === "cash" && p.type === "advance")
-          .reduce((s, p) => s + p.amount, 0),
-      0
+        a.payments.filter((p) => p.paymentType === "cash" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+      0,
     )
     const ipdOnline = ipdAppointments.reduce(
       (sum, a) =>
         sum +
-        a.payments
-          .filter((p) => p.paymentType === "online" && p.type === "advance")
-          .reduce((s, p) => s + p.amount, 0),
-      0
+        a.payments.filter((p) => p.paymentType === "online" && p.type === "advance").reduce((s, p) => s + p.amount, 0),
+      0,
     )
     return {
       totalOpdCount: opdAppointments.length,
@@ -459,24 +488,17 @@ const DashboardPage: React.FC = () => {
     }
   }, [opdAppointments, ipdAppointments, otAppointments])
 
-  // Combined & filter by search + date range
+  // Combined & filter by date range (search is handled by fetching patientinfo directly)
   const filteredAppointments = useMemo(() => {
-    const all: CombinedAppointment[] = [
-      ...opdAppointments,
-      ...ipdAppointments,
-      ...otAppointments,
-    ]
-    let list = all
     if (filters.searchQuery) {
-      const q = filters.searchQuery.toLowerCase()
-      list = list.filter((a) => a.name.toLowerCase().includes(q) || a.phone.includes(q))
+      return [] // In search mode, this memo is not used for display
     }
+    const all: CombinedAppointment[] = [...opdAppointments, ...ipdAppointments, ...otAppointments]
+    let list = all
     if (filters.filterType === "dateRange" && filters.startDate && filters.endDate) {
       list = list.filter((a) => {
         const dateStr =
-          a.type === "IPD"
-            ? (a as IPDAppointment).admissionDate
-            : (a as OPDAppointment | OTAppointment).date
+          a.type === "IPD" ? (a as IPDAppointment).admissionDate : (a as OPDAppointment | OTAppointment).date
         return dateStr >= filters.startDate && dateStr <= filters.endDate
       })
     }
@@ -485,7 +507,7 @@ const DashboardPage: React.FC = () => {
     opdAppointments,
     ipdAppointments,
     otAppointments,
-    filters.searchQuery,
+    filters.searchQuery, // Dependency added
     filters.filterType,
     filters.startDate,
     filters.endDate,
@@ -497,7 +519,7 @@ const DashboardPage: React.FC = () => {
     opdAppointments.forEach((a) =>
       a.modalities
         .filter((m) => m.type === "consultation" && m.doctor)
-        .forEach((m) => map.set(m.doctor!, (map.get(m.doctor!) || 0) + 1))
+        .forEach((m) => map.set(m.doctor!, (map.get(m.doctor!) || 0) + 1)),
     )
     return Array.from(map.entries())
       .map(([doctorName, count]) => ({ doctorName, count }))
@@ -573,7 +595,7 @@ const DashboardPage: React.FC = () => {
       endDate: "",
     })
 
-  // Modal
+  // Modal for individual appointment details
   const openModal = async (app: CombinedAppointment) => {
     setModalLoading(true)
     setIsModalOpen(true)
@@ -581,7 +603,7 @@ const DashboardPage: React.FC = () => {
       try {
         const [pid, ipdid] = app.id.split("_")
         const snap = await get(
-          ref(db, `patients/ipddetail/userdetailipd/${(app as IPDAppointment).admissionDate}/${pid}/${ipdid}`)
+          ref(db, `patients/ipddetail/userdetailipd/${(app as IPDAppointment).admissionDate}/${pid}/${ipdid}`),
         )
         setSelectedAppointment({ ...app, details: snap.exists() ? snap.val() : null })
       } catch {
@@ -595,6 +617,183 @@ const DashboardPage: React.FC = () => {
   const closeModal = () => {
     setIsModalOpen(false)
     setSelectedAppointment(null)
+  }
+
+  // New: Fetch all appointments for a specific patient (for patient search modal)
+  const fetchAllAppointmentsForPatient = useCallback(
+    async (patientId: string) => {
+      setPatientAppointmentsLoading(true)
+      const allPatientApps: CombinedAppointment[] = []
+
+      // Fetch appointments for the last year as a compromise for "all"
+      const now = new Date()
+      const oneYearAgo = addDays(now, -365)
+      const dt = oneYearAgo
+      const endDt = now
+
+      const tasks: Promise<void>[] = []
+
+      while (dt <= endDt) {
+        const dateStr = format(dt, "yyyy-MM-dd")
+        tasks.push(
+          (async () => {
+            const [opSnap, ipdInfoSnap, billingSnap, otSnap] = await Promise.all([
+              get(ref(db, `patients/opddetail/${dateStr}`)),
+              get(ref(db, `patients/ipddetail/userinfoipd/${dateStr}`)),
+              get(ref(db, `patients/ipddetail/userbillinginfoipd/${dateStr}`)),
+              get(ref(db, `patients/ot/${dateStr}`)),
+            ])
+
+            // OPD
+            if (opSnap.exists()) {
+              const data = opSnap.val()
+              for (const pid in data) {
+                if (pid === patientId) {
+                  for (const aid in data[pid]) {
+                    const ap = data[pid][aid]
+                    allPatientApps.push({
+                      id: `${pid}_${aid}`,
+                      patientId: pid,
+                      name: selectedPatientForAppointments?.name || "",
+                      phone: selectedPatientForAppointments?.phone || "",
+                      date: dateStr,
+                      time: ap.time || "",
+                      appointmentType: ap.appointmentType || "",
+                      createdAt: ap.createdAt,
+                      enteredBy: ap.enteredBy || "",
+                      message: ap.message || "",
+                      modalities: ap.modalities || [],
+                      opdType: ap.opdType || "",
+                      payment: ap.payment || {
+                        cashAmount: 0,
+                        createdAt: "",
+                        discount: 0,
+                        onlineAmount: 0,
+                        paymentMethod: "cash",
+                        totalCharges: 0,
+                        totalPaid: 0,
+                      },
+                      referredBy: ap.referredBy || "",
+                      study: ap.study || "",
+                      visitType: ap.visitType || "",
+                      type: "OPD",
+                    })
+                  }
+                }
+              }
+            }
+
+            // IPD
+            const billingByPid: Record<string, any> = billingSnap.exists() ? billingSnap.val() : {}
+            if (ipdInfoSnap.exists()) {
+              const ipdData = ipdInfoSnap.val()
+              for (const pid in ipdData) {
+                if (pid === patientId) {
+                  for (const ipdid in ipdData[pid]) {
+                    const rec = ipdData[pid][ipdid]
+                    const bill = billingByPid[pid]?.[ipdid] || {}
+                    const payments: IPDPayment[] = []
+                    let netDep = 0
+                    let totalRe = 0
+                    if (bill.payments) {
+                      Object.values(bill.payments).forEach((p: any) => {
+                        payments.push(p)
+                        if (p.type === "advance") netDep += +p.amount
+                        else {
+                          netDep -= +p.amount
+                          totalRe += +p.amount
+                        }
+                      })
+                    }
+                    const services: IPDService[] = (bill.services || []).map((s: any) => ({
+                      amount: +s.amount || 0,
+                      serviceName: s.serviceName || "",
+                      type: s.type || "",
+                      doctorName: s.doctorName,
+                      createdAt: s.createdAt,
+                    }))
+                    const totalSvc = services.reduce((sum, s) => sum + s.amount, 0)
+                    const remaining = totalSvc - netDep
+                    allPatientApps.push({
+                      id: `${pid}_${ipdid}`,
+                      patientId: pid,
+                      uhid: selectedPatientForAppointments?.uhid || "",
+                      name: selectedPatientForAppointments?.name || "",
+                      phone: selectedPatientForAppointments?.phone || "",
+                      admissionDate: dateStr,
+                      admissionTime: rec.admissionTime,
+                      doctor: doctors[rec.doctor]?.name || "Unknown",
+                      doctorId: rec.doctor,
+                      roomType: rec.roomType,
+                      status: rec.status,
+                      services,
+                      totalAmount: totalSvc,
+                      totalDeposit: netDep,
+                      totalRefunds: totalRe,
+                      payments,
+                      remainingAmount: remaining,
+                      createdAt: rec.createdAt,
+                      type: "IPD",
+                    })
+                  }
+                }
+              }
+            }
+
+            // OT
+            if (otSnap.exists()) {
+              const otData = otSnap.val()
+              for (const pid in otData) {
+                if (pid === patientId) {
+                  for (const ipdid in otData[pid]) {
+                    const od = otData[pid][ipdid]
+                    allPatientApps.push({
+                      id: `${pid}_${ipdid}_${od.createdAt}`,
+                      patientId: pid,
+                      uhid: selectedPatientForAppointments?.uhid || "",
+                      name: selectedPatientForAppointments?.name || "",
+                      phone: selectedPatientForAppointments?.phone || "",
+                      date: od.date || dateStr,
+                      time: od.time || "",
+                      message: od.message || "",
+                      createdAt: od.createdAt,
+                      ipdId: ipdid,
+                      type: "OT",
+                    })
+                  }
+                }
+              }
+            }
+          })(),
+        )
+        dt.setDate(dt.getDate() + 1)
+      }
+
+      await Promise.all(tasks)
+      setPatientAllAppointments(
+        allPatientApps.sort((a, b) => {
+          const dateA = new Date(a.type === "IPD" ? (a as IPDAppointment).admissionDate : a.date)
+          const dateB = new Date(b.type === "IPD" ? (b as IPDAppointment).admissionDate : b.date)
+          return dateB.getTime() - dateA.getTime() // Sort by most recent first
+        }),
+      )
+      setPatientAppointmentsLoading(false)
+    },
+    [selectedPatientForAppointments, doctors],
+  )
+
+  // New: Open modal for patient's appointments
+  const openPatientAppointmentsModal = async (patient: PatientInfo) => {
+    setSelectedPatientForAppointments(patient)
+    setPatientAppointmentsModalOpen(true)
+    await fetchAllAppointmentsForPatient(patient.uhid)
+  }
+
+  // New: Close modal for patient's appointments
+  const closePatientAppointmentsModal = () => {
+    setPatientAppointmentsModalOpen(false)
+    setSelectedPatientForAppointments(null)
+    setPatientAllAppointments([])
   }
 
   const getBadgeColor = (t: string) => {
@@ -618,16 +817,10 @@ const DashboardPage: React.FC = () => {
         return `${format(new Date(filters.selectedMonth + "-01"), "MMMM yyyy")} Data`
       case "dateRange":
         if (!filters.startDate || !filters.endDate) return "Select date range"
-        return `${format(new Date(filters.startDate), "MMM dd")} - ${format(
-          new Date(filters.endDate),
-          "MMM dd, yyyy"
-        )}`
+        return `${format(new Date(filters.startDate), "MMM dd")} - ${format(new Date(filters.endDate), "MMM dd, yyyy")}`
       default:
         const { start, end } = currentDateRange
-        return `Week: ${format(new Date(start), "MMM dd")} - ${format(
-          new Date(end),
-          "MMM dd, yyyy"
-        )}`
+        return `Week: ${format(new Date(start), "MMM dd")} - ${format(new Date(end), "MMM dd, yyyy")}`
     }
   }
 
@@ -639,10 +832,10 @@ const DashboardPage: React.FC = () => {
       custom: mods.filter((m) => m.type === "custom").length,
     }
     const parts: string[] = []
-    if (counts.consultation) parts.push(`${counts.consultation} Consultation${counts.consultation>1?"s":""}`)
-    if (counts.casualty)    parts.push(`${counts.casualty} Casualty`)
-    if (counts.xray)        parts.push(`${counts.xray} X-ray${counts.xray>1?"s":""}`)
-    if (counts.custom)      parts.push(`${counts.custom} Custom Service${counts.custom>1?"s":""}`)
+    if (counts.consultation) parts.push(`${counts.consultation} Consultation${counts.consultation > 1 ? "s" : ""}`)
+    if (counts.casualty) parts.push(`${counts.casualty} Casualty`)
+    if (counts.xray) parts.push(`${counts.xray} X-ray${counts.xray > 1 ? "s" : ""}`)
+    if (counts.custom) parts.push(`${counts.custom} Custom Service${counts.custom > 1 ? "s" : ""}`)
     return parts.join(", ") || "No services"
   }
 
@@ -666,7 +859,7 @@ const DashboardPage: React.FC = () => {
                 <Search className="absolute top-3 left-3 text-gray-400 h-5 w-5" />
                 <input
                   type="text"
-                  placeholder="Search by name or phone"
+                  placeholder="Search by name, phone, or UHID"
                   value={filters.searchQuery}
                   onChange={(e) => handleFilterChange({ searchQuery: e.target.value })}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 transition shadow-sm"
@@ -676,437 +869,536 @@ const DashboardPage: React.FC = () => {
           </div>
 
           <div className="p-6">
-            {/* Advanced Filters */}
-            <div className="bg-white rounded-xl shadow-sm mb-6 p-6 border border-gray-100">
-              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4 lg:mb-0">
-                  <Filter className="mr-2 h-5 w-5 text-sky-500" /> Advanced Filters
-                </h2>
-                <button
-                  onClick={resetFilters}
-                  className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 flex items-center"
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" /> Reset All
-                </button>
-              </div>
+            {/* Advanced Filters (Hidden when searching) */}
+            {!filters.searchQuery && (
+              <div className="bg-white rounded-xl shadow-sm mb-6 p-6 border border-gray-100">
+                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4">
+                  <h2 className="text-lg font-semibold text-gray-800 flex items-center mb-4 lg:mb-0">
+                    <Filter className="mr-2 h-5 w-5 text-sky-500" /> Advanced Filters
+                  </h2>
+                  <button
+                    onClick={resetFilters}
+                    className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 flex items-center"
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Reset All
+                  </button>
+                </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Quick Filters */}
-                <div className="space-y-2">
-                  <label className="block text-sm font-medium text-gray-700">Quick Filters</label>
-                  <div className="flex flex-wrap gap-2">
-                    {["week", "today", "month"].map((mode) => {
-                      const label = mode === "week" ? "This Week" : mode === "today" ? "Today" : "This Month"
-                      return (
-                        <button
-                          key={mode}
-                          onClick={() =>
-                            handleFilterChange({
-                              filterType: mode as any,
-                              ...(mode === "month" ? { selectedMonth: format(new Date(), "yyyy-MM") } : {}),
-                            })
-                          }
-                          className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                            filters.filterType === mode
-                              ? "bg-sky-600 text-white shadow-md"
-                              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      )
-                    })}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Quick Filters */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700">Quick Filters</label>
+                    <div className="flex flex-wrap gap-2">
+                      {["week", "today", "month"].map((mode) => {
+                        const label = mode === "week" ? "This Week" : mode === "today" ? "Today" : "This Month"
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() =>
+                              handleFilterChange({
+                                filterType: mode as any,
+                                ...(mode === "month" ? { selectedMonth: format(new Date(), "yyyy-MM") } : {}),
+                              })
+                            }
+                            className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                              filters.filterType === mode
+                                ? "bg-sky-600 text-white shadow-md"
+                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Month Filter */}
+                  <div>
+                    <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-1">
+                      Filter by Month
+                    </label>
+                    <input
+                      type="month"
+                      id="month"
+                      value={filters.selectedMonth}
+                      onChange={(e) => handleFilterChange({ selectedMonth: e.target.value, filterType: "month" })}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  {/* Date Range Filter */}
+                  <div>
+                    <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      id="startDate"
+                      value={filters.startDate}
+                      onChange={(e) => handleDateRangeChange(e.target.value, filters.endDate)}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
+                      End Date (Max 30 days)
+                    </label>
+                    <input
+                      type="date"
+                      id="endDate"
+                      value={filters.endDate}
+                      onChange={(e) => handleDateRangeChange(filters.startDate, e.target.value)}
+                      className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
                   </div>
                 </div>
 
-                {/* Month Filter */}
-                <div>
-                  <label htmlFor="month" className="block text-sm font-medium text-gray-700 mb-1">
-                    Filter by Month
-                  </label>
-                  <input
-                    type="month"
-                    id="month"
-                    value={filters.selectedMonth}
-                    onChange={(e) => handleFilterChange({ selectedMonth: e.target.value, filterType: "month" })}
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-
-                {/* Date Range Filter */}
-                <div>
-                  <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    id="startDate"
-                    value={filters.startDate}
-                    onChange={(e) => handleDateRangeChange(e.target.value, filters.endDate)}
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-
-                <div>
-                  <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
-                    End Date (Max 30 days)
-                  </label>
-                  <input
-                    type="date"
-                    id="endDate"
-                    value={filters.endDate}
-                    onChange={(e) => handleDateRangeChange(filters.startDate, e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 p-3 bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg border border-sky-200">
-                <div className="flex items-center">
-                  <CalendarDays className="mr-2 h-5 w-5 text-sky-600" />
-                  <span className="text-sky-800 font-medium">{getFilterTitle()}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Dashboard Statistics */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-              {/* OPD */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-gradient-to-r from-sky-100 to-blue-100 rounded-full">
-                    <Activity className="text-sky-600 h-6 w-6" />
+                <div className="mt-4 p-3 bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg border border-sky-200">
+                  <div className="flex items-center">
+                    <CalendarDays className="mr-2 h-5 w-5 text-sky-600" />
+                    <span className="text-sky-800 font-medium">{getFilterTitle()}</span>
                   </div>
-                  <div className="text-right">
-                    <p className="text-gray-500 text-sm">OPD</p>
-                    <p className="text-2xl font-bold text-gray-900">{statistics.totalOpdCount}</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Revenue</span>
-                  <span className="text-lg font-semibold text-sky-600">{formatCurrency(statistics.totalOpdAmount)}</span>
                 </div>
               </div>
+            )}
 
-              {/* IPD */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-gradient-to-r from-orange-100 to-red-100 rounded-full">
-                    <Layers className="text-orange-600 h-6 w-6" />
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-500 text-sm">IPD</p>
-                    <p className="text-2xl font-bold text-gray-900">{statistics.totalIpdCount}</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Net Deposit</span>
-                  <span className="text-lg font-semibold text-orange-600">{formatCurrency(statistics.totalIpdAmount)}</span>
-                </div>
-                {statistics.overallIpdRefunds > 0 && (
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-sm text-gray-600">Total Refunds</span>
-                    <span className="text-lg font-semibold text-blue-600">{formatCurrency(statistics.overallIpdRefunds)}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* OT */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full">
-                    <Stethoscope className="text-purple-600 h-6 w-6" />
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-500 text-sm">OT</p>
-                    <p className="text-2xl font-bold text-gray-900">{statistics.totalOtCount}</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Procedures</span>
-                  <span className="text-lg font-semibold text-purple-600">{statistics.totalOtCount}</span>
-                </div>
-              </div>
-
-              {/* Total Revenue */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-gradient-to-r from-emerald-100 to-green-100 rounded-full">
-                    <DollarSign className="text-emerald-600 h-6 w-6" />
-                  </div>
-                  <div className="text-right">
-                    <p className="text-gray-500 text-sm">Total</p>
-                    <p className="text-2xl font-bold text-gray-900">Revenue</p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Amount</span>
-                  <span className="text-lg font-semibold text-emerald-600">{formatCurrency(statistics.totalRevenue)}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Payment Breakdown & Charts */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* Payment Breakdown */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <CreditCard className="mr-2 h-5 w-5 text-gray-600" /> Payment Breakdown
-                </h2>
-                <div className="space-y-6">
-                  <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-4">
-                    <h3 className="font-medium text-sky-800 mb-3">OPD Payments</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-600 text-sm">💵 Cash</span>
-                        <span className="font-semibold text-sky-600">{formatCurrency(statistics.opdCash)}</span>
+            {/* Dashboard Statistics (Hidden when searching) */}
+            {!filters.searchQuery && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                  {/* OPD */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-sky-100 to-blue-100 rounded-full">
+                        <Activity className="text-sky-600 h-6 w-6" />
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-600 text-sm">💳 Online</span>
-                        <span className="font-semibold text-sky-600">{formatCurrency(statistics.opdOnline)}</span>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">OPD</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalOpdCount}</p>
                       </div>
-                      <div className="flex justify-between items-center pt-2 border-t border-sky-200">
-                        <span className="text-sky-700 font-medium">Total OPD</span>
-                        <span className="font-bold text-sky-700">{formatCurrency(statistics.totalOpdAmount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Revenue</span>
+                      <span className="text-lg font-semibold text-sky-600">
+                        {formatCurrency(statistics.totalOpdAmount)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* IPD */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-orange-100 to-red-100 rounded-full">
+                        <Layers className="text-orange-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">IPD</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalIpdCount}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Net Deposit</span>
+                      <span className="text-lg font-semibold text-orange-600">
+                        {formatCurrency(statistics.totalIpdAmount)}
+                      </span>
+                    </div>
+                    {statistics.overallIpdRefunds > 0 && (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-sm text-gray-600">Total Refunds</span>
+                        <span className="text-lg font-semibold text-blue-600">
+                          {formatCurrency(statistics.overallIpdRefunds)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* OT */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full">
+                        <Stethoscope className="text-purple-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">OT</p>
+                        <p className="text-2xl font-bold text-gray-900">{statistics.totalOtCount}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Procedures</span>
+                      <span className="text-lg font-semibold text-purple-600">{statistics.totalOtCount}</span>
+                    </div>
+                  </div>
+
+                  {/* Total Revenue */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100 hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="p-3 bg-gradient-to-r from-emerald-100 to-green-100 rounded-full">
+                        <DollarSign className="text-emerald-600 h-6 w-6" />
+                      </div>
+                      <div className="text-right">
+                        <p className="text-gray-500 text-sm">Total</p>
+                        <p className="text-2xl font-bold text-gray-900">Revenue</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600">Amount</span>
+                      <span className="text-lg font-semibold text-emerald-600">
+                        {formatCurrency(statistics.totalRevenue)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Breakdown & Charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                  {/* Payment Breakdown */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                      <CreditCard className="mr-2 h-5 w-5 text-gray-600" /> Payment Breakdown
+                    </h2>
+                    <div className="space-y-6">
+                      <div className="bg-gradient-to-r from-sky-50 to-blue-50 rounded-lg p-4">
+                        <h3 className="font-medium text-sky-800 mb-3">OPD Payments</h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 text-sm">💵 Cash</span>
+                            <span className="font-semibold text-sky-600">
+                              {formatCurrency(statistics.opdCash)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 text-sm">💳 Online</span>
+                            <span className="font-semibold text-sky-600">
+                              {formatCurrency(statistics.opdOnline)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-sky-200">
+                            <span className="text-sky-700 font-medium">Total OPD</span>
+                            <span className="font-bold text-sky-700">
+                              {formatCurrency(statistics.totalOpdAmount)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg p-4">
+                        <h3 className="font-medium text-orange-800 mb-3">IPD Payments</h3>
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 text-sm">💵 Cash</span>
+                            <span className="font-semibold text-orange-600">
+                              {formatCurrency(statistics.ipdCash)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-600 text-sm">💳 Online</span>
+                            <span className="font-semibold text-orange-600">
+                              {formatCurrency(statistics.ipdOnline)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pt-2 border-t border-orange-200">
+                            <span className="text-orange-700 font-medium">Total IPD (Net Deposit)</span>
+                            <span className="font-bold text-orange-700">
+                              {formatCurrency(statistics.totalIpdAmount)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-r from-emerald-50 to-green-50 rounded-lg p-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-emerald-800 font-semibold">💰 Grand Total</span>
+                          <span className="font-bold text-xl text-emerald-600">
+                            {formatCurrency(statistics.totalRevenue)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="bg-gradient-to-r from-orange-50 to-red-50 rounded-lg p-4">
-                    <h3 className="font-medium text-orange-800 mb-3">IPD Payments</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-600 text-sm">💵 Cash</span>
-                        <span className="font-semibold text-orange-600">{formatCurrency(statistics.ipdCash)}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-gray-600 text-sm">💳 Online</span>
-                        <span className="font-semibold text-orange-600">{formatCurrency(statistics.ipdOnline)}</span>
-                      </div>
-                      <div className="flex justify-between items-center pt-2 border-t border-orange-200">
-                        <span className="text-orange-700 font-medium">Total IPD (Net Deposit)</span>
-                        <span className="font-bold text-orange-700">{formatCurrency(statistics.totalIpdAmount)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gradient-to-r from-emerald-50 to-green-50 rounded-lg p-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-emerald-800 font-semibold">💰 Grand Total</span>
-                      <span className="font-bold text-xl text-emerald-600">{formatCurrency(statistics.totalRevenue)}</span>
-                    </div>
+                  {/* Appointments Overview Chart */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                      <Activity className="mr-2 h-5 w-5 text-gray-600" /> Appointments Overview
+                    </h2>
+                    <Bar
+                      data={chartData}
+                      options={{
+                        responsive: true,
+                        plugins: { legend: { position: "top" } },
+                        scales: {
+                          y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                        },
+                      }}
+                    />
                   </div>
                 </div>
-              </div>
 
-              {/* Appointments Overview Chart */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <Activity className="mr-2 h-5 w-5 text-gray-600" /> Appointments Overview
-                </h2>
-                <Bar
-                  data={chartData}
-                  options={{
-                    responsive: true,
-                    plugins: { legend: { position: "top" } },
-                    scales: {
-                      y: { beginAtZero: true, ticks: { stepSize: 1 } },
-                    },
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Doctor Consultations List & Chart */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* List */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Doctor Consultations
-                </h2>
-                {doctorConsultations.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Doctor Name
-                          </th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Consultations
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {doctorConsultations.map((doc) => (
-                          <tr key={doc.doctorName} className="hover:bg-gray-50">
-                            <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                              {doc.doctorName}
-                            </td>
-                            <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{doc.count}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Doctor Consultations List & Chart */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                  {/* List */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                      <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Doctor Consultations
+                    </h2>
+                    {doctorConsultations.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Doctor Name
+                              </th>
+                              <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                Consultations
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {doctorConsultations.map((doc) => (
+                              <tr key={doc.doctorName} className="hover:bg-gray-50">
+                                <td className="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                  {doc.doctorName}
+                                </td>
+                                <td className="px-4 py-2 whitespace-nowrap text-sm text-gray-600">{doc.count}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        <p>No consultation data for the selected period.</p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="text-center text-gray-500 py-8">
-                    <p>No consultation data for the selected period.</p>
-                  </div>
-                )}
-              </div>
 
-              {/* Chart */}
-              <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
-                  <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Top Doctors by Consultations
-                </h2>
-                {doctorConsultChartData.labels.length > 0 ? (
-                  <Bar
-                    data={doctorConsultChartData}
-                    options={{
-                      responsive: true,
-                      plugins: { legend: { position: "top" } },
-                      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
-                    }}
-                  />
-                ) : (
-                  <div className="text-center text-gray-500 py-8">
-                    <p>No data to display chart for the selected period.</p>
+                  {/* Chart */}
+                  <div className="bg-white shadow-sm rounded-xl p-6 border border-gray-100">
+                    <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                      <UserCheck className="mr-2 h-5 w-5 text-gray-600" /> Top Doctors by Consultations
+                    </h2>
+                    {doctorConsultChartData.labels.length > 0 ? (
+                      <Bar
+                        data={doctorConsultChartData}
+                        options={{
+                          responsive: true,
+                          plugins: { legend: { position: "top" } },
+                          scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } },
+                        }}
+                      />
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        <p>No data to display chart for the selected period.</p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              </>
+            )}
 
-            {/* Appointments Table */}
+            {/* Appointments/Patients Table */}
             <div className="bg-white shadow-sm rounded-xl overflow-hidden border border-gray-100">
               <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-50 to-gray-100">
                 <h2 className="text-lg font-semibold text-gray-800 flex items-center">
-                  <FileText className="mr-2 h-5 w-5 text-gray-600" /> Appointments List
+                  <FileText className="mr-2 h-5 w-5 text-gray-600" />{" "}
+                  {filters.searchQuery ? "Patient Search Results" : "Appointments List"}
                 </h2>
               </div>
 
               {isLoading ? (
                 <div className="flex justify-center items-center p-12">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-sky-500"></div>
-                  <span className="ml-3 text-gray-600">Loading appointments...</span>
+                  <span className="ml-3 text-gray-600">Loading data...</span>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Patient
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Contact
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Date & Time
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Type
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Services/Amount
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Action
-                        </th>
+                        {filters.searchQuery ? (
+                          <>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              UHID
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Patient Name
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Phone
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Age / Gender
+                            </th>
+                            
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Action
+                            </th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Patient
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Contact
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Date & Time
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Type
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Services/Amount
+                            </th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Action
+                            </th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredAppointments.length > 0 ? (
-                        filteredAppointments.map((app) => (
-                          <tr key={app.id} className="hover:bg-gray-50 transition-colors">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="flex items-center">
-                                <div className="p-2 bg-gray-100 rounded-full mr-3">
-                                  <User className="h-4 w-4 text-gray-600" />
-                                </div>
-                                <div>
-                                  <div className="text-sm font-medium text-gray-900">{app.name}</div>
-                                  {(app.type === "IPD" || app.type === "OT") && (
-                                    <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm text-gray-500">{app.phone}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm text-gray-900">
-                                {format(
-                                  new Date(
-                                    app.type === "OPD" || app.type === "OT"
-                                      ? app.date
-                                      : (app as IPDAppointment).admissionDate
-                                  ),
-                                  "dd MMM, yyyy"
-                                )}
-                              </div>
-                              <div className="text-xs text-gray-500 flex items-center">
-                                <Clock className="h-3 w-3 mr-1" />
-                                {app.type === "OPD" || app.type === "OT"
-                                  ? app.time
-                                  : (app as IPDAppointment).admissionTime}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span
-                                className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
-                              >
-                                {app.type}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              {app.type === "OPD" && (
-                                <div>
-                                  <div className="text-sm text-gray-600 mb-1">
-                                    {getModalitiesSummary((app as OPDAppointment).modalities)}
+                      {filters.searchQuery ? (
+                        searchedPatients.length > 0 ? (
+                          searchedPatients.map((patient) => (
+                            <tr key={patient.uhid} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                {patient.uhid}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="p-2 bg-gray-100 rounded-full mr-3">
+                                    <User className="h-4 w-4 text-gray-600" />
                                   </div>
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {formatCurrency((app as OPDAppointment).payment.totalPaid)}
+                                  <div>
+                                    <div className="text-sm font-medium text-gray-900">{patient.name}</div>
                                   </div>
                                 </div>
-                              )}
-                              {app.type === "IPD" && (
-                                <div>
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {formatCurrency((app as IPDAppointment).totalDeposit)}
-                                  </div>
-                                  {((app as IPDAppointment).remainingAmount ?? 0) > 0 && (
-                                    <div className="text-xs text-red-500">
-                                      Pending: {formatCurrency((app as IPDAppointment).remainingAmount!)}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm">
-                              <button
-                                onClick={() => openModal(app)}
-                                className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
-                              >
-                                View Details
-                              </button>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-500">{patient.phone}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{patient.age || "N/A"}</div>
+                                <div className="text-xs text-gray-500">{patient.gender || "N/A"}</div>
+                              </td>
+                             
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <button
+                                  onClick={() => openPatientAppointmentsModal(patient)}
+                                  className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  View Appointments
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-12 text-center">
+                              <div className="flex flex-col items-center">
+                                <FileText className="h-12 w-12 text-gray-300 mb-4" />
+                                <p className="text-gray-500 text-lg">No patients found matching your search.</p>
+                                <p className="text-gray-400 text-sm">Try a different name or phone number.</p>
+                              </div>
                             </td>
                           </tr>
-                        ))
+                        )
                       ) : (
-                        <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center">
-                            <div className="flex flex-col items-center">
-                              <FileText className="h-12 w-12 text-gray-300 mb-4" />
-                              <p className="text-gray-500 text-lg">No appointments found</p>
-                              <p className="text-gray-400 text-sm">Try adjusting your filters</p>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
+                        filteredAppointments.length > 0 ? (
+                          filteredAppointments.map((app) => (
+                            <tr key={app.id} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="p-2 bg-gray-100 rounded-full mr-3">
+                                    <User className="h-4 w-4 text-gray-600" />
+                                  </div>
+                                  <div>
+                                    <div className="text-sm font-medium text-gray-900">{app.name}</div>
+                                    {(app.type === "IPD" || app.type === "OT") && (
+                                      <div className="text-xs text-gray-500">UHID: {app.uhid}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-500">{app.phone}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">
+                                  {format(
+                                    new Date(
+                                      app.type === "OPD" || app.type === "OT"
+                                        ? app.date
+                                        : (app as IPDAppointment).admissionDate
+                                    ),
+                                    "dd MMM, yyyy"
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500 flex items-center">
+                                  <Clock className="h-3 w-3 mr-1" />
+                                  {app.type === "OPD" || app.type === "OT"
+                                    ? app.time
+                                    : (app as IPDAppointment).admissionTime}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span
+                                  className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
+                                >
+                                  {app.type}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                {app.type === "OPD" && (
+                                  <div>
+                                    <div className="text-sm text-gray-600 mb-1">
+                                      {getModalitiesSummary((app as OPDAppointment).modalities)}
+                                    </div>
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {formatCurrency((app as OPDAppointment).payment.totalPaid)}
+                                    </div>
+                                  </div>
+                                )}
+                                {app.type === "IPD" && (
+                                  <div>
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {formatCurrency((app as IPDAppointment).totalDeposit)}
+                                    </div>
+                                    {((app as IPDAppointment).remainingAmount ?? 0) > 0 && (
+                                      <div className="text-xs text-red-500">
+                                        Pending: {formatCurrency((app as IPDAppointment).remainingAmount!)}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                {app.type === "OT" && <div className="text-sm text-gray-500">Procedure</div>}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <button
+                                  onClick={() => openModal(app)}
+                                  className="bg-sky-600 hover:bg-sky-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                                >
+                                  View Details
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-12 text-center">
+                              <div className="flex flex-col items-center">
+                                <FileText className="h-12 w-12 text-gray-300 mb-4" />
+                                <p className="text-gray-500 text-lg">No appointments found</p>
+                                <p className="text-gray-400 text-sm">Try adjusting your filters</p>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
                 </div>
@@ -1528,6 +1820,95 @@ const DashboardPage: React.FC = () => {
                             <p className="font-medium">{(selectedAppointment as OTAppointment).message}</p>
                           </div>
                         </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </Dialog.Panel>
+            </div>
+          )}
+        </Dialog>
+
+        {/* New: Patient Appointments Details Modal */}
+        <Dialog
+          open={patientAppointmentsModalOpen}
+          onClose={closePatientAppointmentsModal}
+          className="fixed z-50 inset-0 overflow-y-auto"
+        >
+          {patientAppointmentsModalOpen && selectedPatientForAppointments && (
+            <div className="flex items-center justify-center min-h-screen px-4">
+              <div className="fixed inset-0 bg-black bg-opacity-50" aria-hidden="true" />
+              <Dialog.Panel className="relative bg-white rounded-xl shadow-2xl w-full max-w-4xl p-6 max-h-screen overflow-y-auto">
+                <button
+                  onClick={closePatientAppointmentsModal}
+                  className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 p-2 rounded-full hover:bg-gray-100"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+
+                {patientAppointmentsLoading ? (
+                  <div className="flex justify-center items-center p-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-sky-500"></div>
+                    <span className="ml-3 text-gray-600">Loading patient's appointments...</span>
+                  </div>
+                ) : (
+                  <>
+                    <Dialog.Title className="text-2xl font-bold mb-6 flex items-center">
+                      <User className="p-3 rounded-full mr-4 bg-gradient-to-r from-sky-100 to-blue-100 text-sky-600 h-6 w-6" />
+                      Appointments for {selectedPatientForAppointments.name} (UHID:{" "}
+                      {selectedPatientForAppointments.uhid})
+                    </Dialog.Title>
+
+                    {patientAllAppointments.length > 0 ? (
+                      <div className="space-y-4">
+                        {patientAllAppointments.map((app) => (
+                          <div key={app.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <div className="flex justify-between items-center mb-2">
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${getBadgeColor(app.type)}`}
+                              >
+                                {app.type}
+                              </span>
+                              <span className="text-sm text-gray-600">
+                                {format(
+                                  new Date(app.type === "IPD" ? (app as IPDAppointment).admissionDate : app.date),
+                                  "dd MMM, yyyy"
+                                )}
+                                {" at "}
+                                {app.type === "OPD" || app.type === "OT"
+                                  ? app.time
+                                  : (app as IPDAppointment).admissionTime}
+                              </span>
+                            </div>
+                            <p className="text-lg font-semibold text-gray-900">
+                              {app.type === "OPD" &&
+                                `OPD Visit - ${getModalitiesSummary((app as OPDAppointment).modalities)}`}
+                              {app.type === "IPD" &&
+                                `IPD Admission - ${formatCurrency((app as IPDAppointment).totalAmount)}`}
+                              {app.type === "OT" && `OT Procedure - ${(app as OTAppointment).message}`}
+                            </p>
+                            {app.type === "OPD" && (
+                              <p className="text-sm text-gray-700">
+                                Total Paid: {formatCurrency((app as OPDAppointment).payment.totalPaid)}
+                              </p>
+                            )}
+                            {app.type === "IPD" && (
+                              <p className="text-sm text-gray-700">
+                                Net Deposit: {formatCurrency((app as IPDAppointment).totalDeposit)}
+                              </p>
+                            )}
+                            <button
+                              onClick={() => openModal(app)} // Re-use existing openModal for full details
+                              className="mt-3 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                            >
+                              View Full Details
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-center text-gray-500 py-8">
+                        <p>No appointments found for this patient in the last year.</p>
                       </div>
                     )}
                   </>
