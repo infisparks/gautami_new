@@ -70,7 +70,7 @@ ${data.referredBy ? `• Referred By: ${data.referredBy}` : ""}
 ${data.message ? `📝 *Notes:* ${data.message}` : ""}
 For any queries, please contact our reception.
 Thank you for choosing our healthcare services!
-* Medford Hospital *`
+* G-Medford-NX Hospital *`
   } else {
     const modalities = data.modalities || []
     const servicesText = modalities
