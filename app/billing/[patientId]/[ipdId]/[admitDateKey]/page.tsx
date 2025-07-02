@@ -640,7 +640,7 @@ export default function BillingPage() {
     }
 
     const payload = {
-      token: "99583991573",
+      token: "99583991572",
       number: `91${patientMobile}`,
       message: message,
     }
