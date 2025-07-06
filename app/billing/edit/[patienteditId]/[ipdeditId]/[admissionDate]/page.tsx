@@ -516,7 +516,7 @@ export default function EditIPDPage() {
   }) {
     const summaryRef = ref(db, `summary/ipd/${dateKey}`)
     await runTransaction(summaryRef, (summary) => {
-      let s = summary || { totalAdmissions: 0, totalDeposit: 0, cash: 0, online: 0 }
+      const s = summary || { totalAdmissions: 0, totalDeposit: 0, cash: 0, online: 0 }
       // Subtract old values
       if (oldDeposit && oldPaymentMode) {
         s.totalDeposit -= oldDeposit
@@ -612,8 +612,8 @@ export default function EditIPDPage() {
       const newDeposit = Number(data.deposit || 0)
       const prevPayMode = (originalBilling.paymentMode || "cash").toLowerCase()
       const newPayMode = (data.paymentMode?.value || "cash").toLowerCase()
-      let depositChanged = String(prevDeposit) !== String(newDeposit)
-      let payModeChanged = prevPayMode !== newPayMode
+      const depositChanged = String(prevDeposit) !== String(newDeposit)
+      const payModeChanged = prevPayMode !== newPayMode
   
       if (depositChanged || payModeChanged) {
         // Update totalDeposit and payment mode in billing node

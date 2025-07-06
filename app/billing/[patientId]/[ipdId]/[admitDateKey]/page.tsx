@@ -326,7 +326,7 @@ export default function BillingPage() {
     const summaryRef = ref(db, `summary/ipd/${dateKey}`)
     await import("firebase/database").then(({ runTransaction }) =>
       runTransaction(summaryRef, (summary) => {
-        let s = summary || { totalDeposit: 0, cash: 0, online: 0, card: 0 }
+       const s = summary || { totalDeposit: 0, cash: 0, online: 0, card: 0 }
         // Always default missing values to 0
         s.totalDeposit = Number(s.totalDeposit) || 0
         s.cash = Number(s.cash) || 0
