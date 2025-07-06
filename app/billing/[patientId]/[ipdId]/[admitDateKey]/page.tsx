@@ -314,54 +314,6 @@ export default function BillingPage() {
     return () => unsubscribe()
   }, [])
 
-
-
-  async function updateIpdSummary(
-    dateKey: string,
-    depositChange: number,
-    paymentType: "advance" | "refund",
-    paymentMethod: string,
-  ) {
-    if (!dateKey || !depositChange || !paymentType || !paymentMethod) return
-    const summaryRef = ref(db, `summary/ipd/${dateKey}`)
-    await import("firebase/database").then(({ runTransaction }) =>
-      runTransaction(summaryRef, (summary) => {
-       const s = summary || { totalDeposit: 0, cash: 0, online: 0, card: 0 }
-        // Always default missing values to 0
-        s.totalDeposit = Number(s.totalDeposit) || 0
-        s.cash = Number(s.cash) || 0
-        s.online = Number(s.online) || 0
-        s.card = Number(s.card) || 0
-  
-        if (paymentType === "advance") {
-          s.totalDeposit += depositChange
-          if (paymentMethod === "cash") s.cash += depositChange
-          else if (paymentMethod === "online") s.online += depositChange
-          else if (paymentMethod === "card") s.card += depositChange
-        } else if (paymentType === "refund") {
-          s.totalDeposit -= depositChange
-          if (paymentMethod === "cash") s.cash -= depositChange
-          else if (paymentMethod === "online") s.online -= depositChange
-          else if (paymentMethod === "card") s.card -= depositChange
-        }
-  
-        // Never allow NaN or negative numbers
-        if (isNaN(s.totalDeposit)) s.totalDeposit = 0
-        if (isNaN(s.cash)) s.cash = 0
-        if (isNaN(s.online)) s.online = 0
-        if (isNaN(s.card)) s.card = 0
-  
-        s.totalDeposit = Math.max(0, s.totalDeposit)
-        s.cash = Math.max(0, s.cash)
-        s.online = Math.max(0, s.online)
-        s.card = Math.max(0, s.card)
-  
-        return s
-      }),
-    )
-  }
-  
-  
   const getAdmitDateKey = (dateString?: string) => {
     if (!dateString) return ""
     try {
@@ -728,7 +680,7 @@ export default function BillingPage() {
         now.getMilliseconds(),
       )
       const isoDate = combined.toISOString()
-  
+
       const newRef = push(
         ref(
           db,
@@ -743,24 +695,16 @@ export default function BillingPage() {
         id: newRef.key!,
       }
       await update(newRef, newPayment)
-  
-      // IPD Summary Update
-      await updateIpdSummary(
-        key,
-        newPayment.amount,
-        newPayment.type,
-        newPayment.paymentType,
-      )
-  
+
       let updatedDeposit = selectedRecord.amount
       if (newPayment.type === "advance") updatedDeposit += newPayment.amount
       if (newPayment.type === "refund") updatedDeposit -= newPayment.amount
-  
+
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
         { totalDeposit: updatedDeposit },
       )
-  
+
       if (formData.sendWhatsappNotification) {
         await sendPaymentNotification(
           selectedRecord.mobileNumber,
@@ -770,7 +714,7 @@ export default function BillingPage() {
           newPayment.type,
         )
       }
-  
+
       toast.success("Payment recorded successfully!")
       setSelectedRecord({
         ...selectedRecord,
@@ -791,7 +735,6 @@ export default function BillingPage() {
       setLoading(false)
     }
   }
-  
 
   const handleDischarge = () => {
     if (!selectedRecord) return
@@ -920,27 +863,16 @@ export default function BillingPage() {
           `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}/payments/${paymentId}`,
         ),
       )
-  
-      // Reverse summary update!
-      const paymentToDelete = selectedRecord.payments.find((p) => p.id === paymentId)
-      if (paymentToDelete) {
-        await updateIpdSummary(
-          key,
-          paymentToDelete.amount,
-          paymentToDelete.type === "advance" ? "refund" : "advance", // Reverse the change
-          paymentToDelete.paymentType,
-        )
-      }
-  
+
       let updatedDeposit = selectedRecord.amount
       if (paymentType === "advance") updatedDeposit -= paymentAmount
       if (paymentType === "refund") updatedDeposit += paymentAmount
-  
+
       await update(
         ref(db, `patients/ipddetail/userbillinginfoipd/${key}/${selectedRecord.patientId}/${selectedRecord.ipdId}`),
         { totalDeposit: updatedDeposit },
       )
-  
+
       toast.success("Payment deleted successfully!")
       setSelectedRecord({
         ...selectedRecord,
@@ -954,7 +886,6 @@ export default function BillingPage() {
       setLoading(false)
     }
   }
-  
 
   const handleDeleteConsultantCharges = async (doctorName: string) => {
     if (!selectedRecord) return
@@ -1809,7 +1740,7 @@ export default function BillingPage() {
                                 <option value="">Select Payment Type</option>
                                 <option value="cash">Cash</option>
                                 <option value="online">Online</option>
-                                {/* <option value="card">Card</option> */}
+                                <option value="card">Card</option>
                               </select>
                               {errorsPayment.paymentType && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
