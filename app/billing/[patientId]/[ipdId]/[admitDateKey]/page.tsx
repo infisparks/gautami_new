@@ -1782,7 +1782,7 @@ export default function BillingPage() {
                                 <option value="">Select Payment Type</option>
                                 <option value="cash">Cash</option>
                                 <option value="online">Online</option>
-                                <option value="card">Card</option>
+                             
                               </select>
                               {errorsPayment.paymentType && (
                                 <p className="text-red-500 text-xs mt-1">{errorsPayment.paymentType.message}</p>
