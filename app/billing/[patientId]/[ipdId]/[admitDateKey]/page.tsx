@@ -108,6 +108,7 @@ export interface BillingRecord {
   admitDate?: string
   createdAt?: string
   doctor?: string
+  billNumber?: string
 }
 interface ParsedServiceItem {
   id: string
@@ -416,11 +417,12 @@ export default function BillingPage() {
             services: servicesArray,
             payments: paymentsArray,
             discount: billingData.discount ? Number(billingData.discount) : 0,
+            billNumber: billingData?.billNumber || infoData?.billNumber || '',
           })
           if (billingData.discount) resetDiscount({ discount: Number(billingData.discount) })
         } else {
           toast.info("No billing record found. Showing patient details only.")
-          setSelectedRecord(base)
+          setSelectedRecord({ ...base, billNumber: infoData?.billNumber || '' })
         }
         setLoading(false)
       }

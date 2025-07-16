@@ -68,6 +68,7 @@ export interface BillingRecord {
   payments: Payment[]
   discount?: number
   createdAt?: string // ISO string
+  billNumber?: string // <-- Add bill number to BillingRecord
 }
 
 const ITEMS_PER_PAGE = 20 // Still relevant for initial load of discharged or pagination if implemented
@@ -156,6 +157,7 @@ export default function OptimizedPatientsPage() {
         payments: paymentsArray,
         discount: ipdData.discount ? Number(ipdData.discount) : 0,
         createdAt: ipdData.createdAt || "",
+        billNumber: billingData?.billNumber || ipdData?.billNumber || "", // <-- Prefer billingData, fallback to ipdData
       }
     },
     [],
