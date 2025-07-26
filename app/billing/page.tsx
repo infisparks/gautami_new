@@ -101,6 +101,12 @@ export default function OptimizedPatientsPage() {
   const [cancelError, setCancelError] = useState("")
   const [recordToCancel, setRecordToCancel] = useState<BillingRecord | null>(null)
 
+  // Add state for search input, search results, and search loading
+  const [archiveSearchInput, setArchiveSearchInput] = useState("")
+  const [archiveSearchResults, setArchiveSearchResults] = useState<BillingRecord[]>([])
+  const [archiveSearchLoading, setArchiveSearchLoading] = useState(false)
+  const [archiveSearchError, setArchiveSearchError] = useState("")
+
   // Helper to format ISO date strings to yyyy-MM-dd
   function getFirebaseDateKey(date?: string | Date | null): string {
     if (!date) return ""
@@ -452,6 +458,50 @@ export default function OptimizedPatientsPage() {
     setSelectedWard("All")
   }
 
+  async function handleArchiveSearch() {
+    setArchiveSearchError("")
+    setArchiveSearchResults([])
+    const input = archiveSearchInput.trim()
+    if (!input) return
+    if (/^\d{10}$/.test(input) || input.length === 10 || input.length >= 3) {
+      setArchiveSearchLoading(true)
+      try {
+        // Fetch all dates under userinfoipd
+        const userinfoRootRef = ref(db, "patients/ipddetail/userinfoipd")
+        const snap = await get(userinfoRootRef)
+        if (!snap.exists()) {
+          setArchiveSearchResults([])
+          setArchiveSearchLoading(false)
+          return
+        }
+        const allData = snap.val()
+        const results: BillingRecord[] = []
+        Object.keys(allData).forEach(dateKey => {
+          const dateData = allData[dateKey]
+          Object.keys(dateData).forEach(patientId => {
+            Object.keys(dateData[patientId]).forEach(ipdId => {
+              const ipdData = dateData[patientId][ipdId]
+              // Match logic
+              if (
+                (input.length === 10 && (ipdData.uhid === input || ipdData.phone === input)) ||
+                (input.length >= 3 && ipdData.name && ipdData.name.toLowerCase().includes(input.toLowerCase()))
+              ) {
+                results.push(combineRecordData(patientId, ipdId, ipdData, {}))
+              }
+            })
+          })
+        })
+        setArchiveSearchResults(results)
+      } catch (err) {
+        setArchiveSearchError("Error searching records. Please try again.")
+      } finally {
+        setArchiveSearchLoading(false)
+      }
+    } else {
+      setArchiveSearchError("Enter a valid 10-digit mobile, 10-char UHID, or name (min 3 chars)")
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
       <ToastContainer />
@@ -552,13 +602,49 @@ export default function OptimizedPatientsPage() {
                 {renderPatientsTable(filteredRecords, handleRowClick, handleEditRecord, handleManagePatient, handleDrugChart, handleOTForm, handleCancelAppointment, isLoading)}
               </TabsContent>
               <TabsContent value="discharge" className="mt-0">
-                {(!selectedAdmissionDate && !searchTerm) ? (
-                  <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
-                    <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-slate-700 mb-1">No data loaded</h3>
-                    <p className="text-slate-500">Select an admission date or search by patient details to view archived records.</p>
-                  </div>
+                <div className="mb-4 flex items-center gap-2">
+                  <Input
+                    type="text"
+                    value={archiveSearchInput}
+                    onChange={e => setArchiveSearchInput(e.target.value)}
+                    placeholder="Enter 10-digit mobile, 10-char UHID, or patient name (min 3 chars)"
+                    className="w-64"
+                  />
+                  <Button
+                    onClick={handleArchiveSearch}
+                    disabled={archiveSearchLoading || !archiveSearchInput.trim()}
+                    variant="default"
+                  >
+                    {archiveSearchLoading ? (
+                      <div className="mr-2 h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      "Search"
+                    )}
+                  </Button>
+                </div>
+                {archiveSearchError && (
+                  <div className="text-red-500 mb-2">{archiveSearchError}</div>
+                )}
+                {archiveSearchResults.length > 0 ? (
+                  renderPatientsTable(archiveSearchResults, handleRowClick, handleEditRecord, handleManagePatient, handleDrugChart, handleOTForm, handleCancelAppointment, isLoading)
                 ) : (
+                  (!selectedAdmissionDate && !archiveSearchInput) ? (
+                    <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+                      <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                      <h3 className="text-lg font-medium text-slate-700 mb-1">No data loaded</h3>
+                      <p className="text-slate-500">Select an admission date or search by patient details to view archived records.</p>
+                    </div>
+                  ) : (
+                    archiveSearchInput && !archiveSearchLoading && (
+                      <div className="text-center py-12 bg-slate-50 rounded-lg border border-slate-200">
+                        <Users className="h-12 w-12 text-slate-300 mx-auto mb-4" />
+                        <h3 className="text-lg font-medium text-slate-700 mb-1">No patients found</h3>
+                        <p className="text-slate-500">No records match your search criteria.</p>
+                      </div>
+                    )
+                  )
+                )}
+                {selectedAdmissionDate && !archiveSearchInput && (
                   <>
                     <div className="mb-3 flex items-center gap-3">
                       <span className="text-xs text-slate-500">
